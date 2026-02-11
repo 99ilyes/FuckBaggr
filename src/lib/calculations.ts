@@ -4,13 +4,17 @@ export interface AssetPosition {
   ticker: string;
   name: string;
   quantity: number;
-  pru: number; // Prix de Revient Unitaire
+  pru: number;
   currentPrice: number;
   totalInvested: number;
   currentValue: number;
   gainLoss: number;
   gainLossPercent: number;
   sector: string;
+}
+
+export interface CashBalances {
+  [currency: string]: number;
 }
 
 export function calculatePositions(
@@ -20,7 +24,6 @@ export function calculatePositions(
   const cacheMap = new Map(assetsCache.map((a) => [a.ticker, a]));
   const positions = new Map<string, { quantity: number; totalCost: number }>();
 
-  // Process buy/sell transactions
   for (const tx of transactions) {
     if (!tx.ticker || !tx.quantity || !tx.unit_price) continue;
     if (tx.type !== "buy" && tx.type !== "sell") continue;
@@ -68,26 +71,48 @@ export function calculatePositions(
   return result.sort((a, b) => b.currentValue - a.currentValue);
 }
 
-export function calculateCashBalance(transactions: Transaction[]): number {
-  let cash = 0;
+export function calculateCashBalances(transactions: Transaction[]): CashBalances {
+  const balances: CashBalances = {};
+
   for (const tx of transactions) {
+    const currency = (tx as any).currency || "EUR";
+
     if (tx.type === "deposit") {
-      cash += (tx.quantity || 0) * (tx.unit_price || 1);
+      balances[currency] = (balances[currency] || 0) + (tx.quantity || 0) * (tx.unit_price || 1);
     } else if (tx.type === "withdrawal") {
-      cash -= (tx.quantity || 0) * (tx.unit_price || 1);
+      balances[currency] = (balances[currency] || 0) - (tx.quantity || 0) * (tx.unit_price || 1);
     } else if (tx.type === "buy" && tx.quantity && tx.unit_price) {
-      cash -= tx.quantity * tx.unit_price + tx.fees;
+      balances[currency] = (balances[currency] || 0) - (tx.quantity * tx.unit_price + tx.fees);
     } else if (tx.type === "sell" && tx.quantity && tx.unit_price) {
-      cash += tx.quantity * tx.unit_price - tx.fees;
+      balances[currency] = (balances[currency] || 0) + (tx.quantity * tx.unit_price - tx.fees);
+    } else if (tx.type === "conversion" && tx.quantity && tx.unit_price) {
+      // ticker = source currency, currency = target currency
+      // quantity = amount in target currency, unit_price = exchange rate
+      // So source amount = quantity * unit_price
+      const sourceCurrency = tx.ticker || "EUR";
+      balances[sourceCurrency] = (balances[sourceCurrency] || 0) - (tx.quantity * tx.unit_price + tx.fees);
+      balances[currency] = (balances[currency] || 0) + tx.quantity;
     }
   }
-  return cash;
+
+  // Remove zero balances
+  for (const key of Object.keys(balances)) {
+    if (Math.abs(balances[key]) < 0.001) delete balances[key];
+  }
+
+  return balances;
 }
 
-export function formatCurrency(value: number): string {
+/** Legacy single-currency cash balance (sum of all) */
+export function calculateCashBalance(transactions: Transaction[]): number {
+  const balances = calculateCashBalances(transactions);
+  return Object.values(balances).reduce((s, v) => s + v, 0);
+}
+
+export function formatCurrency(value: number, currency = "EUR"): string {
   return new Intl.NumberFormat("fr-FR", {
     style: "currency",
-    currency: "EUR",
+    currency,
     minimumFractionDigits: 2,
   }).format(value);
 }

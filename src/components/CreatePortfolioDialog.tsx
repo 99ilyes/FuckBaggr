@@ -11,6 +11,7 @@ import { toast } from "@/hooks/use-toast";
 
 const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
 const TYPES = ["PEA", "CTO", "Crypto", "Assurance Vie", "Autre"];
+const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD"];
 
 interface Props {
   open: boolean;
@@ -20,13 +21,14 @@ interface Props {
 export function CreatePortfolioDialog({ open, onOpenChange }: Props) {
   const [name, setName] = useState("");
   const [type, setType] = useState("CTO");
+  const [currency, setCurrency] = useState("EUR");
   const [color, setColor] = useState(COLORS[0]);
   const createPortfolio = useCreatePortfolio();
 
   const handleSubmit = () => {
     if (!name.trim()) return;
     createPortfolio.mutate(
-      { name: name.trim(), type, color },
+      { name: name.trim(), type, color, currency },
       {
         onSuccess: () => {
           toast({ title: "Portefeuille créé" });
@@ -49,16 +51,29 @@ export function CreatePortfolioDialog({ open, onOpenChange }: Props) {
             <Label>Nom</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Mon PEA" />
           </div>
-          <div>
-            <Label>Type</Label>
-            <Select value={type} onValueChange={setType}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>{t}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Type</Label>
+              <Select value={type} onValueChange={setType}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Devise</Label>
+              <Select value={currency} onValueChange={setCurrency}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CURRENCIES.map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div>
             <Label>Couleur</Label>

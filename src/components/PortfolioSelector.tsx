@@ -42,6 +42,7 @@ export function PortfolioSelector({
             style={{ backgroundColor: p.color }}
           />
           {p.name}
+          <span className="text-xs opacity-60">{(p as any).currency || "EUR"}</span>
         </button>
       ))}
       <Button size="sm" variant="ghost" onClick={onCreateClick} className="text-muted-foreground">

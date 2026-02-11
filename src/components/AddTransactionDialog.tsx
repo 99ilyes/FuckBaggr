@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
@@ -14,7 +14,10 @@ const TX_TYPES = [
   { value: "sell", label: "Vente" },
   { value: "deposit", label: "Dépôt" },
   { value: "withdrawal", label: "Retrait" },
+  { value: "conversion", label: "Conversion" },
 ];
+
+const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD"];
 
 interface Props {
   open: boolean;
@@ -31,30 +34,45 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
   const [unitPrice, setUnitPrice] = useState("");
   const [fees, setFees] = useState("0");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [currency, setCurrency] = useState("EUR");
+  const [targetCurrency, setTargetCurrency] = useState("USD");
   const createTransaction = useCreateTransaction();
 
   const isCashTransaction = type === "deposit" || type === "withdrawal";
+  const isConversion = type === "conversion";
+  const isTradeTransaction = type === "buy" || type === "sell";
+
+  // Set currency from selected portfolio
+  useEffect(() => {
+    if (portfolioId) {
+      const portfolio = portfolios.find((p) => p.id === portfolioId);
+      if (portfolio) {
+        setCurrency((portfolio as any).currency || "EUR");
+      }
+    }
+  }, [portfolioId, portfolios]);
 
   const handleSubmit = () => {
     if (!portfolioId) return;
-    createTransaction.mutate(
-      {
-        portfolio_id: portfolioId,
-        type,
-        ticker: isCashTransaction ? null : ticker.toUpperCase() || null,
-        quantity: quantity ? parseFloat(quantity) : null,
-        unit_price: unitPrice ? parseFloat(unitPrice) : null,
-        fees: parseFloat(fees) || 0,
-        date: new Date(date).toISOString(),
+
+    const txData: any = {
+      portfolio_id: portfolioId,
+      type,
+      ticker: isConversion ? currency : isTradeTransaction ? ticker.toUpperCase() || null : null,
+      quantity: quantity ? parseFloat(quantity) : null,
+      unit_price: unitPrice ? parseFloat(unitPrice) : null,
+      fees: parseFloat(fees) || 0,
+      date: new Date(date).toISOString(),
+      currency: isConversion ? targetCurrency : currency,
+    };
+
+    createTransaction.mutate(txData, {
+      onSuccess: () => {
+        toast({ title: "Transaction ajoutée" });
+        resetForm();
+        onOpenChange(false);
       },
-      {
-        onSuccess: () => {
-          toast({ title: "Transaction ajoutée" });
-          resetForm();
-          onOpenChange(false);
-        },
-      }
-    );
+    });
   };
 
   const resetForm = () => {
@@ -80,7 +98,9 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
               <SelectTrigger><SelectValue placeholder="Sélectionner" /></SelectTrigger>
               <SelectContent>
                 {portfolios.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name} ({(p as any).currency || "EUR"})
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -96,27 +116,70 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
               </SelectContent>
             </Select>
           </div>
-          {!isCashTransaction && (
+
+          {isTradeTransaction && (
             <div>
               <Label>Ticker</Label>
               <Input value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="AAPL" />
             </div>
           )}
+
+          {isConversion && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>De</Label>
+                <Select value={currency} onValueChange={setCurrency}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CURRENCIES.map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Vers</Label>
+                <Select value={targetCurrency} onValueChange={setTargetCurrency}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CURRENCIES.filter((c) => c !== currency).map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          {isCashTransaction && (
+            <div>
+              <Label>Devise</Label>
+              <Select value={currency} onValueChange={setCurrency}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CURRENCIES.map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>{isCashTransaction ? "Montant" : "Quantité"}</Label>
+              <Label>{isConversion ? "Montant reçu" : isCashTransaction ? "Montant" : "Quantité"}</Label>
               <Input type="number" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
             </div>
-            {!isCashTransaction && (
+            {(isTradeTransaction || isConversion) && (
               <div>
-                <Label>Prix unitaire (€)</Label>
+                <Label>{isConversion ? "Taux de change" : "Prix unitaire"}</Label>
                 <Input type="number" step="any" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
               </div>
             )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Frais (€)</Label>
+              <Label>Frais</Label>
               <Input type="number" step="any" value={fees} onChange={(e) => setFees(e.target.value)} />
             </div>
             <div>

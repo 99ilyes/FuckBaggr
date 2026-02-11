@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Wallet, BarChart3, Coins } from "lucide-react";
-import { formatCurrency, formatPercent } from "@/lib/calculations";
+import { formatCurrency, formatPercent, CashBalances } from "@/lib/calculations";
 
 interface KPICardsProps {
   totalValue: number;
@@ -8,6 +8,7 @@ interface KPICardsProps {
   totalGainLoss: number;
   totalGainLossPercent: number;
   assetCount: number;
+  cashBalances: CashBalances;
   cashBalance: number;
 }
 
@@ -17,9 +18,11 @@ export function KPICards({
   totalGainLoss,
   totalGainLossPercent,
   assetCount,
+  cashBalances,
   cashBalance,
 }: KPICardsProps) {
   const isPositive = totalGainLoss >= 0;
+  const currencies = Object.entries(cashBalances);
 
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:gap-4">
@@ -72,8 +75,22 @@ export function KPICards({
             <Coins className="h-4 w-4" />
             <span className="text-xs font-medium uppercase tracking-wider">Cash</span>
           </div>
-          <p className="text-xl font-semibold tracking-tight">{formatCurrency(cashBalance)}</p>
-          <p className="text-xs text-muted-foreground mt-1">Disponible</p>
+          {currencies.length <= 1 ? (
+            <>
+              <p className="text-xl font-semibold tracking-tight">
+                {formatCurrency(cashBalance, currencies[0]?.[0] || "EUR")}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Disponible</p>
+            </>
+          ) : (
+            <div className="space-y-0.5">
+              {currencies.map(([cur, amount]) => (
+                <p key={cur} className="text-sm font-semibold tracking-tight">
+                  {formatCurrency(amount, cur)}
+                </p>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

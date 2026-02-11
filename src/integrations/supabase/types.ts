@@ -49,6 +49,7 @@ export type Database = {
           cash_balance: number
           color: string
           created_at: string
+          currency: string
           description: string | null
           id: string
           name: string
@@ -59,6 +60,7 @@ export type Database = {
           cash_balance?: number
           color?: string
           created_at?: string
+          currency?: string
           description?: string | null
           id?: string
           name: string
@@ -69,6 +71,7 @@ export type Database = {
           cash_balance?: number
           color?: string
           created_at?: string
+          currency?: string
           description?: string | null
           id?: string
           name?: string
@@ -80,6 +83,7 @@ export type Database = {
       transactions: {
         Row: {
           created_at: string
+          currency: string | null
           date: string
           fees: number
           id: string
@@ -92,6 +96,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          currency?: string | null
           date?: string
           fees?: number
           id?: string
@@ -104,6 +109,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          currency?: string | null
           date?: string
           fees?: number
           id?: string
