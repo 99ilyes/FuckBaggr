@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCreateTransaction, Portfolio } from "@/hooks/usePortfolios";
 import { toast } from "@/hooks/use-toast";
+import { TickerSearch } from "@/components/TickerSearch";
+import { supabase } from "@/integrations/supabase/client";
 
 const TX_TYPES = [
   { value: "buy", label: "Achat" },
@@ -120,7 +122,21 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
           {isTradeTransaction && (
             <div>
               <Label>Ticker</Label>
-              <Input value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="AAPL" />
+              <TickerSearch
+                value={ticker}
+                onChange={setTicker}
+                onSelect={(result) => {
+                  setTicker(result.symbol);
+                  supabase.functions.invoke("fetch-prices", {
+                    body: { tickers: [result.symbol] },
+                  }).then(({ data }) => {
+                    const info = data?.results?.[result.symbol];
+                    if (info?.currency) {
+                      setCurrency(info.currency);
+                    }
+                  });
+                }}
+              />
             </div>
           )}
 
