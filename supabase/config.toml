@@ -2,3 +2,6 @@ project_id = "hjgayfnnwgonluthwtuu"
 
 [functions.fetch-prices]
 verify_jwt = false
+
+[functions.search-tickers]
+verify_jwt = false
