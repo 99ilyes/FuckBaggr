@@ -44,7 +44,9 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
   const isConversion = type === "conversion";
   const isTradeTransaction = type === "buy" || type === "sell";
 
-  // Set currency from selected portfolio
+  const [sourceAmount, setSourceAmount] = useState("");
+  const [exchangeRate, setExchangeRate] = useState("");
+
   useEffect(() => {
     if (portfolioId) {
       const portfolio = portfolios.find((p) => p.id === portfolioId);
@@ -57,12 +59,32 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
   const handleSubmit = () => {
     if (!portfolioId) return;
 
+    let finalUnitPrice = unitPrice ? parseFloat(unitPrice) : null;
+    let finalQuantity = quantity ? parseFloat(quantity) : null;
+
+    if (isConversion) {
+      const src = parseFloat(sourceAmount);
+      const rate = parseFloat(exchangeRate);
+      if (src && rate) {
+        // Source = 1000 EUR. Rate = 1.10 (EUR->USD).
+        // Target (Quantity) = 1000 * 1.10 = 1100 USD.
+        finalQuantity = src * rate;
+
+        // DB Schema: Source = Quantity * UnitPrice + Fees
+        // We want Source to be strictly equal to what user input (plus fees? usually fees are separate or included? 
+        // In this app, logic is: balances[source] -= (quantity * unit_price + fees)
+        // So quantity * unit_price must equal Source Amount.
+        // 1100 * UnitPrice = 1000 => UnitPrice = 1000 / 1100 = 1/Rate.
+        finalUnitPrice = src / finalQuantity;
+      }
+    }
+
     const txData: any = {
       portfolio_id: portfolioId,
       type,
       ticker: isConversion ? currency : isTradeTransaction ? ticker.toUpperCase() || null : null,
-      quantity: quantity ? parseFloat(quantity) : null,
-      unit_price: unitPrice ? parseFloat(unitPrice) : null,
+      quantity: finalQuantity,
+      unit_price: finalUnitPrice,
       fees: parseFloat(fees) || 0,
       date: new Date(date).toISOString(),
       currency: isConversion ? targetCurrency : currency,
@@ -84,6 +106,8 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
     setUnitPrice("");
     setFees("0");
     setDate(new Date().toISOString().split("T")[0]);
+    setSourceAmount("");
+    setExchangeRate("");
   };
 
   return (
@@ -143,7 +167,7 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
           {isConversion && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>De</Label>
+                <Label>De (Source)</Label>
                 <Select value={currency} onValueChange={setCurrency}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -154,7 +178,7 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
                 </Select>
               </div>
               <div>
-                <Label>Vers</Label>
+                <Label>Vers (Cible)</Label>
                 <Select value={targetCurrency} onValueChange={setTargetCurrency}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -182,17 +206,34 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
           )}
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>{isConversion ? "Montant reçu" : isCashTransaction ? "Montant" : "Quantité"}</Label>
-              <Input type="number" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-            </div>
-            {(isTradeTransaction || isConversion) && (
+            {!isConversion && (
               <div>
-                <Label>{isConversion ? "Taux de change" : "Prix unitaire"}</Label>
+                <Label>{isCashTransaction ? "Montant" : "Quantité"}</Label>
+                <Input type="number" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+              </div>
+            )}
+
+            {isTradeTransaction && (
+              <div>
+                <Label>Prix unitaire</Label>
                 <Input type="number" step="any" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
               </div>
             )}
+
+            {isConversion && (
+              <>
+                <div>
+                  <Label>Montant Changé (Source)</Label>
+                  <Input type="number" step="any" value={sourceAmount} onChange={(e) => setSourceAmount(e.target.value)} />
+                </div>
+                <div>
+                  <Label>Taux de change</Label>
+                  <Input type="number" step="any" placeholder={`1 ${currency} = ? ${targetCurrency}`} value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+                </div>
+              </>
+            )}
           </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Frais</Label>
@@ -203,6 +244,12 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
               <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
           </div>
+
+          {isConversion && sourceAmount && exchangeRate && (
+            <div className="text-sm text-muted-foreground bg-muted p-2 rounded-md">
+              Résultat estimé : <strong>{(parseFloat(sourceAmount) * parseFloat(exchangeRate)).toFixed(2)} {targetCurrency}</strong>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Annuler</Button>

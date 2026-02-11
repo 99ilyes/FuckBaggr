@@ -5,3 +5,5 @@ verify_jwt = false
 
 [functions.search-tickers]
 verify_jwt = false
+[functions.fetch-history]
+verify_jwt = false

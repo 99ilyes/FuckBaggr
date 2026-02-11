@@ -2,11 +2,13 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Trash2 } from "lucide-react";
+import { Trash2, Pencil } from "lucide-react";
 import { Transaction, useDeleteTransaction, Portfolio } from "@/hooks/usePortfolios";
 import { formatCurrency } from "@/lib/calculations";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
+import { useState } from "react";
+import { EditTransactionDialog } from "./EditTransactionDialog";
 
 const TYPE_LABELS: Record<string, string> = {
   buy: "Achat",
@@ -23,6 +25,7 @@ interface Props {
 
 export function TransactionsTable({ transactions, portfolios }: Props) {
   const deleteTransaction = useDeleteTransaction();
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const portfolioMap = new Map(portfolios.map((p) => [p.id, p]));
 
   if (transactions.length === 0) {
@@ -58,19 +61,18 @@ export function TransactionsTable({ transactions, portfolios }: Props) {
                 {format(new Date(tx.date), "dd MMM yyyy", { locale: fr })}
               </TableCell>
               <TableCell>
-                <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                  tx.type === "buy" ? "bg-primary/20 text-primary" :
+                <span className={`text-xs font-medium px-2 py-0.5 rounded ${tx.type === "buy" ? "bg-primary/20 text-primary" :
                   tx.type === "sell" ? "bg-loss/20 text-loss" :
-                  tx.type === "deposit" ? "bg-gain/20 text-gain" :
-                  tx.type === "conversion" ? "bg-accent text-accent-foreground" :
-                  "bg-muted text-muted-foreground"
-                }`}>
+                    tx.type === "deposit" ? "bg-gain/20 text-gain" :
+                      tx.type === "conversion" ? "bg-accent text-accent-foreground" :
+                        "bg-muted text-muted-foreground"
+                  }`}>
                   {TYPE_LABELS[tx.type] || tx.type}
                 </span>
               </TableCell>
               <TableCell className="font-mono text-sm">
-                {tx.type === "conversion" 
-                  ? `${tx.ticker || "?"} → ${(tx as any).currency || "?"}` 
+                {tx.type === "conversion"
+                  ? `${tx.ticker || "?"} → ${(tx as any).currency || "?"}`
                   : tx.ticker || "—"}
               </TableCell>
               <TableCell className="text-sm">
@@ -83,11 +85,19 @@ export function TransactionsTable({ transactions, portfolios }: Props) {
               </TableCell>
               <TableCell className="text-right font-mono text-sm">{tx.quantity?.toFixed(2) || "—"}</TableCell>
               <TableCell className="text-right font-mono text-sm">
-                {tx.unit_price ? formatCurrency(tx.unit_price) : "—"}
+                {tx.unit_price ? formatCurrency(tx.unit_price, tx.currency || "EUR") : "—"}
               </TableCell>
-              <TableCell className="text-right font-mono text-sm">{formatCurrency(tx.fees)}</TableCell>
-              <TableCell className="text-right font-mono text-sm">{formatCurrency(total, (tx as any).currency || "EUR")}</TableCell>
+              <TableCell className="text-right font-mono text-sm">{formatCurrency(tx.fees, tx.currency || "EUR")}</TableCell>
+              <TableCell className="text-right font-mono text-sm">{formatCurrency(total, tx.currency || "EUR")}</TableCell>
               <TableCell>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-primary"
+                  onClick={() => setEditingTransaction(tx)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -101,6 +111,13 @@ export function TransactionsTable({ transactions, portfolios }: Props) {
           );
         })}
       </TableBody>
+      {editingTransaction && (
+        <EditTransactionDialog
+          open={!!editingTransaction}
+          onOpenChange={(open) => !open && setEditingTransaction(null)}
+          transaction={editingTransaction}
+        />
+      )}
     </Table>
   );
 }

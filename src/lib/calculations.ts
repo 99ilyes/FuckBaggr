@@ -8,9 +8,12 @@ export interface AssetPosition {
   currentPrice: number;
   totalInvested: number;
   currentValue: number;
+  currentValueBase: number;
   gainLoss: number;
+  gainLossBase: number;
   gainLossPercent: number;
   sector: string;
+  currency: string;
 }
 
 export interface CashBalances {
@@ -19,16 +22,29 @@ export interface CashBalances {
 
 export function calculatePositions(
   transactions: Transaction[],
-  assetsCache: AssetCache[]
+  assetsCache: AssetCache[],
+  baseCurrency = "EUR"
 ): AssetPosition[] {
   const cacheMap = new Map(assetsCache.map((a) => [a.ticker, a]));
-  const positions = new Map<string, { quantity: number; totalCost: number }>();
+  const positions = new Map<string, { quantity: number; totalCost: number; currency: string }>();
 
-  for (const tx of transactions) {
+  const sortedTransactions = [...transactions].sort((a, b) => {
+    const dateDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
+    if (dateDiff !== 0) return dateDiff;
+    // Tie-breaker: Process buys/deposits before sells/withdrawals to ensure sufficient quantity
+    const typePriority = { deposit: 0, buy: 1, conversion: 2, sell: 3, withdrawal: 4 };
+    return (typePriority[a.type as keyof typeof typePriority] || 99) - (typePriority[b.type as keyof typeof typePriority] || 99);
+  });
+
+  for (const tx of sortedTransactions) {
     if (!tx.ticker || !tx.quantity || !tx.unit_price) continue;
     if (tx.type !== "buy" && tx.type !== "sell") continue;
 
-    const pos = positions.get(tx.ticker) || { quantity: 0, totalCost: 0 };
+    const pos = positions.get(tx.ticker) || {
+      quantity: 0,
+      totalCost: 0,
+      currency: (tx as any).currency || "EUR",
+    };
 
     if (tx.type === "buy") {
       pos.totalCost += tx.quantity * tx.unit_price + tx.fees;
@@ -54,6 +70,11 @@ export function calculatePositions(
     const gainLoss = currentValue - pos.totalCost;
     const gainLossPercent = pos.totalCost > 0 ? (gainLoss / pos.totalCost) * 100 : 0;
 
+    // Calculate gain/loss and current value in base currency
+    const rate = getExchangeRate(pos.currency, baseCurrency, assetsCache);
+    const gainLossBase = gainLoss * rate;
+    const currentValueBase = currentValue * rate;
+
     result.push({
       ticker,
       name: cached?.name || ticker,
@@ -62,9 +83,12 @@ export function calculatePositions(
       currentPrice,
       totalInvested: pos.totalCost,
       currentValue,
+      currentValueBase,
       gainLoss,
+      gainLossBase,
       gainLossPercent,
       sector: cached?.sector || "Autre",
+      currency: cached?.currency || pos.currency || "EUR",
     });
   }
 
@@ -101,6 +125,50 @@ export function calculateCashBalances(transactions: Transaction[]): CashBalances
   }
 
   return balances;
+}
+
+// Helper to get exchange rate from cache
+export function getExchangeRate(from: string, to: string, cache: AssetCache[]): number {
+  if (from === to) return 1;
+  // Try direct pair
+  const direct = cache.find(a => a.ticker === `${from}${to}=X`);
+  if (direct?.last_price) return direct.last_price;
+
+  // Try inverted pair
+  const inverted = cache.find(a => a.ticker === `${to}${from}=X`);
+  if (inverted?.last_price) return 1 / inverted.last_price;
+
+  return 1; // Fallback assumes 1:1 if rate missing (should ideally warn)
+}
+
+export function calculatePortfolioStats(
+  positions: AssetPosition[],
+  cashBalances: CashBalances,
+  assetsCache: AssetCache[],
+  transactions: Transaction[],
+  baseCurrency = "EUR"
+) {
+  let totalInvested = 0;
+
+  for (const tx of transactions) {
+    if (tx.type === "deposit") {
+      const amount = (tx.quantity || 0) * (tx.unit_price || 1);
+      const currency = (tx as any).currency || "EUR";
+      const rate = getExchangeRate(currency, baseCurrency, assetsCache);
+      totalInvested += amount * rate;
+    } else if (tx.type === "withdrawal") {
+      const amount = (tx.quantity || 0) * (tx.unit_price || 1);
+      const currency = (tx as any).currency || "EUR";
+      const rate = getExchangeRate(currency, baseCurrency, assetsCache);
+      totalInvested -= amount * rate;
+    }
+  }
+
+  return {
+    totalValue: positions.reduce((s, p) => s + p.currentValue * getExchangeRate(p.currency, baseCurrency, assetsCache), 0) +
+      Object.entries(cashBalances).reduce((s, [c, a]) => s + a * getExchangeRate(c, baseCurrency, assetsCache), 0),
+    totalInvested,
+  };
 }
 
 /** Legacy single-currency cash balance (sum of all) */

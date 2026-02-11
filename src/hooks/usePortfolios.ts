@@ -100,6 +100,21 @@ export function useDeleteTransaction() {
   });
 }
 
+export function useUpdateTransaction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...updates }: { id: string } & Partial<TablesInsert<"transactions">>) => {
+      const { data, error } = await supabase.from("transactions").update(updates).eq("id", id).select().single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["portfolios"] });
+    },
+  });
+}
+
 export function useAssetsCache() {
   return useQuery({
     queryKey: ["assets_cache"],
@@ -108,5 +123,46 @@ export function useAssetsCache() {
       if (error) throw error;
       return data as AssetCache[];
     },
+  });
+}
+export function useCreateBatchTransactions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (transactions: TablesInsert<"transactions">[]) => {
+      const { data, error } = await supabase.from("transactions").insert(transactions).select();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["portfolios"] });
+    },
+  });
+}
+
+export interface HistoricalPrice {
+  time: number;
+  price: number;
+}
+
+export interface AssetHistory {
+  symbol: string;
+  currency: string;
+  history: HistoricalPrice[];
+}
+
+export function useHistoricalPrices(tickers: string[], range = "5y", interval = "1d") {
+  return useQuery({
+    queryKey: ["historical_prices", tickers.sort().join(","), range, interval],
+    queryFn: async () => {
+      if (tickers.length === 0) return {};
+      const { data, error } = await supabase.functions.invoke("fetch-history", {
+        body: { tickers, range, interval },
+      });
+      if (error) throw error;
+      return data.results as Record<string, AssetHistory>;
+    },
+    enabled: tickers.length > 0,
+    staleTime: 1000 * 60 * 60 * 24, // 24 hours
   });
 }

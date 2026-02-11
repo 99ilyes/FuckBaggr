@@ -1,10 +1,11 @@
 import { useState, useMemo } from "react";
 import { usePortfolios, useTransactions, useAssetsCache } from "@/hooks/usePortfolios";
-import { calculatePositions, calculateCashBalance, calculateCashBalances } from "@/lib/calculations";
+import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats } from "@/lib/calculations";
 import { KPICards } from "@/components/KPICards";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
 import { CreatePortfolioDialog } from "@/components/CreatePortfolioDialog";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
+import { ImportTransactionsDialog } from "@/components/ImportTransactionsDialog";
 import { PositionsTable } from "@/components/PositionsTable";
 import { TransactionsTable } from "@/components/TransactionsTable";
 import { AllocationChart } from "@/components/AllocationChart";
@@ -12,7 +13,7 @@ import { PerformanceChart } from "@/components/PerformanceChart";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw, Upload } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 
@@ -20,6 +21,7 @@ export default function Index() {
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
   const [createPortfolioOpen, setCreatePortfolioOpen] = useState(false);
   const [addTransactionOpen, setAddTransactionOpen] = useState(false);
+  const [importTransactionsOpen, setImportTransactionsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   const { data: portfolios = [] } = usePortfolios();
@@ -34,9 +36,13 @@ export default function Index() {
     [allTransactions, selectedPortfolioId]
   );
 
+  // Use EUR as base currency for now, ideally selected from portfolio setting
+  const selectedPortfolio = portfolios.find(p => p.id === selectedPortfolioId);
+  const baseCurrency = (selectedPortfolio as any)?.currency || "EUR";
+
   const positions = useMemo(
-    () => calculatePositions(filteredTransactions, assetsCache),
-    [filteredTransactions, assetsCache]
+    () => calculatePositions(filteredTransactions, assetsCache, baseCurrency),
+    [filteredTransactions, assetsCache, baseCurrency]
   );
 
   const cashBalances = useMemo(
@@ -44,20 +50,29 @@ export default function Index() {
     [filteredTransactions]
   );
 
-  const cashBalance = useMemo(
-    () => Object.values(cashBalances).reduce((s, v) => s + v, 0),
-    [cashBalances]
+  const { totalValue, totalInvested } = useMemo(
+    () => calculatePortfolioStats(positions, cashBalances, assetsCache, filteredTransactions, baseCurrency),
+    [positions, cashBalances, assetsCache, filteredTransactions, baseCurrency]
   );
 
-  const totalValue = positions.reduce((s, p) => s + p.currentValue, 0) + cashBalance;
-  const totalInvested = positions.reduce((s, p) => s + p.totalInvested, 0);
-  const totalGainLoss = positions.reduce((s, p) => s + p.gainLoss, 0);
+  const cashBalance = useMemo(
+    () => calculateCashBalance(filteredTransactions), // Keep for internal legacy if needed, but not used for display
+    [filteredTransactions]
+  );
+
+  const totalGainLoss = totalValue - totalInvested;
   const totalGainLossPercent = totalInvested > 0 ? (totalGainLoss / totalInvested) * 100 : 0;
 
   const handleRefreshPrices = async () => {
     setRefreshing(true);
     try {
       const tickers = [...new Set(allTransactions.filter((t) => t.ticker).map((t) => t.ticker!))];
+      // Add FX pairs for used currencies
+      const currencies = new Set(positions.map(p => p.currency));
+      Object.keys(cashBalances).forEach(c => currencies.add(c));
+      currencies.delete(baseCurrency);
+      currencies.forEach(c => tickers.push(`${c}${baseCurrency}=X`));
+
       if (tickers.length === 0) {
         toast({ title: "Aucun ticker à rafraîchir" });
         setRefreshing(false);
@@ -75,19 +90,24 @@ export default function Index() {
     setRefreshing(false);
   };
 
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border/50 px-4 py-3 md:px-6">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <h1 className="text-lg font-semibold tracking-tight">Portfolio Tracker</h1>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={handleRefreshPrices} disabled={refreshing}>
+            <Button variant="outline" size="sm" onClick={handleRefreshPrices} disabled={refreshing}>
               <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline ml-1">Rafraîchir</span>
+              <span className="hidden sm:inline ml-1">Actualiser Prix</span>
             </Button>
             <Button size="sm" onClick={() => setAddTransactionOpen(true)}>
               <Plus className="h-4 w-4" />
               <span className="hidden sm:inline ml-1">Transaction</span>
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setImportTransactionsOpen(true)}>
+              <Upload className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1">Importer</span>
             </Button>
           </div>
         </div>
@@ -115,7 +135,6 @@ export default function Index() {
           <PerformanceChart transactions={filteredTransactions} assetsCache={assetsCache} />
           <div className="grid gap-4">
             <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
-            <AllocationChart positions={positions} title="Par secteur" groupBy="sector" />
           </div>
         </div>
 
@@ -130,7 +149,7 @@ export default function Index() {
                 <CardTitle className="text-sm font-medium text-muted-foreground">Positions ouvertes</CardTitle>
               </CardHeader>
               <CardContent>
-                <PositionsTable positions={positions} />
+                <PositionsTable positions={positions} baseCurrency={baseCurrency} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -157,6 +176,11 @@ export default function Index() {
         onOpenChange={setAddTransactionOpen}
         portfolios={portfolios}
         defaultPortfolioId={selectedPortfolioId || undefined}
+      />
+      <ImportTransactionsDialog
+        open={importTransactionsOpen}
+        onOpenChange={setImportTransactionsOpen}
+        portfolios={portfolios}
       />
     </div>
   );
