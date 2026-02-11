@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { usePortfolios, useTransactions, useAssetsCache } from "@/hooks/usePortfolios";
-import { calculatePositions, calculateCashBalance } from "@/lib/calculations";
+import { calculatePositions, calculateCashBalance, calculateCashBalances } from "@/lib/calculations";
 import { KPICards } from "@/components/KPICards";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
 import { CreatePortfolioDialog } from "@/components/CreatePortfolioDialog";
@@ -39,9 +39,14 @@ export default function Index() {
     [filteredTransactions, assetsCache]
   );
 
-  const cashBalance = useMemo(
-    () => calculateCashBalance(filteredTransactions),
+  const cashBalances = useMemo(
+    () => calculateCashBalances(filteredTransactions),
     [filteredTransactions]
+  );
+
+  const cashBalance = useMemo(
+    () => Object.values(cashBalances).reduce((s, v) => s + v, 0),
+    [cashBalances]
   );
 
   const totalValue = positions.reduce((s, p) => s + p.currentValue, 0) + cashBalance;
@@ -102,6 +107,7 @@ export default function Index() {
           totalGainLoss={totalGainLoss}
           totalGainLossPercent={totalGainLossPercent}
           assetCount={positions.length}
+          cashBalances={cashBalances}
           cashBalance={cashBalance}
         />
 

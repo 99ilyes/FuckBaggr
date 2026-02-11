@@ -62,12 +62,17 @@ export function TransactionsTable({ transactions, portfolios }: Props) {
                   tx.type === "buy" ? "bg-primary/20 text-primary" :
                   tx.type === "sell" ? "bg-loss/20 text-loss" :
                   tx.type === "deposit" ? "bg-gain/20 text-gain" :
+                  tx.type === "conversion" ? "bg-accent text-accent-foreground" :
                   "bg-muted text-muted-foreground"
                 }`}>
                   {TYPE_LABELS[tx.type] || tx.type}
                 </span>
               </TableCell>
-              <TableCell className="font-mono text-sm">{tx.ticker || "—"}</TableCell>
+              <TableCell className="font-mono text-sm">
+                {tx.type === "conversion" 
+                  ? `${tx.ticker || "?"} → ${(tx as any).currency || "?"}` 
+                  : tx.ticker || "—"}
+              </TableCell>
               <TableCell className="text-sm">
                 <div className="flex items-center gap-1.5">
                   {portfolio && (
@@ -81,7 +86,7 @@ export function TransactionsTable({ transactions, portfolios }: Props) {
                 {tx.unit_price ? formatCurrency(tx.unit_price) : "—"}
               </TableCell>
               <TableCell className="text-right font-mono text-sm">{formatCurrency(tx.fees)}</TableCell>
-              <TableCell className="text-right font-mono text-sm">{formatCurrency(total)}</TableCell>
+              <TableCell className="text-right font-mono text-sm">{formatCurrency(total, (tx as any).currency || "EUR")}</TableCell>
               <TableCell>
                 <Button
                   variant="ghost"
