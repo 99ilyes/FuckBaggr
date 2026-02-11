@@ -22,7 +22,7 @@ export function KPICards({
   cashBalance,
 }: KPICardsProps) {
   const isPositive = totalGainLoss >= 0;
-  const currencies = Object.entries(cashBalances);
+  const currencies = Object.entries(cashBalances || {});
 
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:gap-4">
