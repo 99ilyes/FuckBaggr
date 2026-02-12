@@ -58,9 +58,9 @@ export function KPICards({
       const fxTickerInv = `${baseCurrency}${cur}=X`;
       const cached = assetsCache.find(a => a.ticker === fxTicker);
       const cachedInv = assetsCache.find(a => a.ticker === fxTickerInv);
-      const prevRate = previousCloseMap[fxTicker] ?? (cached as any)?.previous_close ?? 
-                       (previousCloseMap[fxTickerInv] ? 1 / previousCloseMap[fxTickerInv] : null) ??
-                       ((cachedInv as any)?.previous_close ? 1 / (cachedInv as any).previous_close : currentRate);
+      const prevRate = previousCloseMap[fxTicker] ?? (cached as any)?.previous_close ??
+        (previousCloseMap[fxTickerInv] ? 1 / previousCloseMap[fxTickerInv] : null) ??
+        ((cachedInv as any)?.previous_close ? 1 / (cachedInv as any).previous_close : currentRate);
       change += amount * (currentRate - prevRate);
     }
 
@@ -91,16 +91,16 @@ export function KPICards({
         <CardContent className="p-4">
           <div className="flex items-center gap-2 text-muted-foreground mb-1">
             {isPositive ? (
-              <TrendingUp className="h-4 w-4 text-gain" />
+              <TrendingUp className="h-4 w-4 text-emerald-500" />
             ) : (
-              <TrendingDown className="h-4 w-4 text-loss" />
+              <TrendingDown className="h-4 w-4 text-rose-500" />
             )}
             <span className="text-xs font-medium uppercase tracking-wider">Performance</span>
           </div>
-          <p className={`text-xl font-semibold tracking-tight ${isPositive ? "text-gain" : "text-loss"}`}>
+          <p className={`text-xl font-semibold tracking-tight ${isPositive ? "text-emerald-500" : "text-rose-500"}`}>
             {formatPercent(totalGainLossPercent)}
           </p>
-          <p className={`text-xs mt-1 ${isPositive ? "text-gain/70" : "text-loss/70"}`}>
+          <p className={`text-xs mt-1 ${isPositive ? "text-emerald-500/70" : "text-rose-500/70"}`}>
             {formatCurrency(totalGainLoss, baseCurrency)}
           </p>
         </CardContent>
@@ -112,10 +112,10 @@ export function KPICards({
             <CalendarClock className="h-4 w-4" />
             <span className="text-xs font-medium uppercase tracking-wider">Perf du jour</span>
           </div>
-          <p className={`text-xl font-semibold tracking-tight ${isDayPositive ? "text-gain" : "text-loss"}`}>
+          <p className={`text-xl font-semibold tracking-tight ${isDayPositive ? "text-emerald-500" : "text-rose-500"}`}>
             {formatPercent(dailyPerf.changePct)}
           </p>
-          <p className={`text-xs mt-1 ${isDayPositive ? "text-gain/70" : "text-loss/70"}`}>
+          <p className={`text-xs mt-1 ${isDayPositive ? "text-emerald-500/70" : "text-rose-500/70"}`}>
             {formatCurrency(dailyPerf.change, baseCurrency)}
           </p>
         </CardContent>
