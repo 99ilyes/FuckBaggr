@@ -83,54 +83,29 @@ export default function Index() {
   const totalGainLoss = totalValue - totalInvested;
   const totalGainLossPercent = totalInvested > 0 ? (totalGainLoss / totalInvested) * 100 : 0;
 
-  // Fetch market data (prev close + current price) using CORS proxy
+  // Fetch market data (prev close + current price) via edge function
   const fetchMarketData = useCallback(async (tickers: string[]) => {
     if (tickers.length === 0) return;
-
-    const fetchTicker = async (ticker: string) => {
-      try {
-        const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`;
-        const response = await fetch(proxyUrl);
-        if (!response.ok) return null;
-        const data = await response.json();
-        const result = data.chart?.result?.[0];
-        if (!result) return null;
-
-        const curr = result.meta?.regularMarketPrice;
-        let prev = result.meta?.chartPreviousClose;
-
-        if (!prev) {
-          const quotes = result.indicators?.quote?.[0];
-          if (quotes?.close && quotes.close.length >= 2) {
-            const validCloses = quotes.close.filter((c: number | null) => c !== null);
-            if (validCloses.length >= 2) {
-              prev = validCloses[validCloses.length - 2];
-            }
-          }
-        }
-        return { prev, curr };
-      } catch (e) {
-        console.warn(`Failed to fetch market data for ${ticker}`, e);
-        return null;
+    try {
+      const { data, error } = await supabase.functions.invoke("fetch-prices", {
+        body: { tickers },
+      });
+      if (error) {
+        console.warn("fetch-prices error:", error);
+        return;
       }
-    };
-
-    const results = await Promise.all(tickers.map(async (t) => {
-      const data = await fetchTicker(t);
-      return { ticker: t, data };
-    }));
-
-    const prevMap: Record<string, number> = {};
-    const liveMap: Record<string, number> = {};
-
-    results.forEach(({ ticker, data }) => {
-      if (data?.prev) prevMap[ticker] = data.prev;
-      if (data?.curr) liveMap[ticker] = data.curr;
-    });
-
-    setPreviousCloseMap(prev => ({ ...prev, ...prevMap }));
-    setLivePriceMap(prev => ({ ...prev, ...liveMap }));
+      const results = data?.results || {};
+      const prevMap: Record<string, number> = {};
+      const liveMap: Record<string, number> = {};
+      for (const [ticker, info] of Object.entries(results as Record<string, any>)) {
+        if (info?.previousClose) prevMap[ticker] = info.previousClose;
+        if (info?.price) liveMap[ticker] = info.price;
+      }
+      setPreviousCloseMap(prev => ({ ...prev, ...prevMap }));
+      setLivePriceMap(prev => ({ ...prev, ...liveMap }));
+    } catch (e) {
+      console.warn("Failed to fetch market data", e);
+    }
   }, []);
 
   // Fetch on load
