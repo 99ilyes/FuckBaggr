@@ -1,0 +1,1 @@
+ALTER TABLE public.assets_cache ADD COLUMN IF NOT EXISTS previous_close numeric DEFAULT NULL;
