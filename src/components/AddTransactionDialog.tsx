@@ -19,7 +19,7 @@ const TX_TYPES = [
   { value: "conversion", label: "Conversion" },
 ];
 
-const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD"];
+const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD", "DKK"];
 
 interface Props {
   open: boolean;

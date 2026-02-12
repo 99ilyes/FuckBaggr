@@ -52,8 +52,13 @@ export function calculatePositions(
     } else if (tx.type === "sell") {
       if (pos.quantity > 0) {
         const pru = pos.totalCost / pos.quantity;
-        pos.totalCost -= tx.quantity * pru;
         pos.quantity -= tx.quantity;
+        pos.totalCost -= tx.quantity * pru;
+        // If quantity drops to 0 or negative, reset the cost basis
+        if (pos.quantity <= 0) {
+          pos.quantity = 0;
+          pos.totalCost = 0;
+        }
       }
     }
 
@@ -92,7 +97,7 @@ export function calculatePositions(
     });
   }
 
-  return result.sort((a, b) => b.currentValue - a.currentValue);
+  return result.sort((a, b) => b.currentValueBase - a.currentValueBase);
 }
 
 export function calculateCashBalances(transactions: Transaction[]): CashBalances {

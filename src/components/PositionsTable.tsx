@@ -11,7 +11,7 @@ interface Props {
   baseCurrency?: string;
 }
 
-type SortKey = keyof AssetPosition | "value" | "gainLoss" | "gainLossPercent";
+type SortKey = "ticker" | "quantity" | "pru" | "currentPrice" | "currentValueBase" | "gainLossBase" | "gainLossPercent";
 
 interface SortConfig {
   key: SortKey;
@@ -19,7 +19,7 @@ interface SortConfig {
 }
 
 export function PositionsTable({ positions, baseCurrency = "EUR" }: Props) {
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: "currentValue", direction: "desc" });
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: "currentValueBase", direction: "desc" });
 
   if (positions.length === 0) {
     return (
@@ -75,46 +75,53 @@ export function PositionsTable({ positions, baseCurrency = "EUR" }: Props) {
           <SortHeader label="Qté" keyName="quantity" className="text-right" />
           <SortHeader label="PRU" keyName="pru" className="text-right" />
           <SortHeader label="Prix actuel" keyName="currentPrice" className="text-right" />
-          <SortHeader label="Valeur" keyName="currentValue" className="text-right" />
-          <SortHeader label="+/- Value" keyName="gainLoss" className="text-right" />
+          <SortHeader label="Valeur" keyName="currentValueBase" className="text-right" />
+          <SortHeader label="+/- Value" keyName="gainLossBase" className="text-right" />
           <SortHeader label="%" keyName="gainLossPercent" className="text-right" />
         </TableRow>
       </TableHeader>
       <TableBody>
-        {sortedPositions.map((pos) => (
-          <TableRow key={pos.ticker}>
-            <TableCell>
-              <div>
-                <span className="font-medium">{pos.ticker}</span>
-                <span className="text-xs text-muted-foreground ml-2">{pos.name !== pos.ticker ? pos.name : ""}</span>
-              </div>
-            </TableCell>
-            <TableCell className="text-right font-mono text-sm">{pos.quantity.toFixed(2)}</TableCell>
-            <TableCell className="text-right font-mono text-sm">{formatCurrency(pos.pru, pos.currency)}</TableCell>
-            <TableCell className="text-right font-mono text-sm">{formatCurrency(pos.currentPrice, pos.currency)}</TableCell>
-            <TableCell className="text-right font-mono text-sm">
-              <div>{formatCurrency(pos.currentValue, pos.currency)}</div>
-              {pos.currency !== baseCurrency && (
-                <div className="text-xs text-muted-foreground">
-                  {formatCurrency(pos.currentValueBase, baseCurrency)}
+        {sortedPositions.map((pos) => {
+          const showNative = pos.currency !== baseCurrency;
+          return (
+            <TableRow key={pos.ticker}>
+              <TableCell>
+                <div>
+                  <span className="font-medium">{pos.ticker}</span>
+                  <span className="text-xs text-muted-foreground ml-2">{pos.name !== pos.ticker ? pos.name : ""}</span>
                 </div>
-              )}
-            </TableCell>
-            <TableCell className="text-right font-mono text-sm">
-              <div className={pos.gainLoss >= 0 ? "text-gain" : "text-loss"}>
-                {formatCurrency(pos.gainLoss, pos.currency)}
-              </div>
-              {pos.currency !== baseCurrency && (
-                <div className={`text-xs ${pos.gainLossBase >= 0 ? "text-gain/70" : "text-loss/70"}`}>
+              </TableCell>
+              <TableCell className="text-right font-mono text-sm">{pos.quantity.toFixed(2)}</TableCell>
+              <TableCell className="text-right font-mono text-sm">
+                {formatCurrency(pos.pru, pos.currency)}
+              </TableCell>
+              <TableCell className="text-right font-mono text-sm">
+                {formatCurrency(pos.currentPrice, pos.currency)}
+              </TableCell>
+              <TableCell className="text-right font-mono text-sm">
+                <div>{formatCurrency(pos.currentValueBase, baseCurrency)}</div>
+                {showNative && (
+                  <div className="text-xs text-muted-foreground">
+                    {formatCurrency(pos.currentValue, pos.currency)}
+                  </div>
+                )}
+              </TableCell>
+              <TableCell className="text-right font-mono text-sm">
+                <div className={pos.gainLossBase >= 0 ? "text-gain" : "text-loss"}>
                   {formatCurrency(pos.gainLossBase, baseCurrency)}
                 </div>
-              )}
-            </TableCell>
-            <TableCell className={`text-right font-mono text-sm ${pos.gainLossPercent >= 0 ? "text-gain" : "text-loss"}`}>
-              {formatPercent(pos.gainLossPercent)}
-            </TableCell>
-          </TableRow>
-        ))}
+                {showNative && (
+                  <div className={`text-xs ${pos.gainLoss >= 0 ? "text-gain/70" : "text-loss/70"}`}>
+                    {formatCurrency(pos.gainLoss, pos.currency)}
+                  </div>
+                )}
+              </TableCell>
+              <TableCell className={`text-right font-mono text-sm ${pos.gainLossPercent >= 0 ? "text-gain" : "text-loss"}`}>
+                {formatPercent(pos.gainLossPercent)}
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );

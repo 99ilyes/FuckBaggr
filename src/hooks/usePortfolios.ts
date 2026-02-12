@@ -151,18 +151,58 @@ export interface AssetHistory {
   history: HistoricalPrice[];
 }
 
-export function useHistoricalPrices(tickers: string[], range = "5y", interval = "1d") {
+export function useHistoricalPrices(tickers: string[], range = "5y", interval = "1wk") {
   return useQuery({
     queryKey: ["historical_prices", tickers.sort().join(","), range, interval],
-    queryFn: async () => {
+    queryFn: async (): Promise<Record<string, AssetHistory>> => {
       if (tickers.length === 0) return {};
-      const { data, error } = await supabase.functions.invoke("fetch-history", {
-        body: { tickers, range, interval },
-      });
-      if (error) throw error;
-      return data.results as Record<string, AssetHistory>;
+
+      const results: Record<string, AssetHistory> = {};
+
+      // Fetch each ticker from Yahoo Finance directly via CORS proxy
+      await Promise.all(
+        tickers.map(async (ticker) => {
+          try {
+            const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${interval}&range=${range}`;
+            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`;
+
+            const response = await fetch(proxyUrl);
+            if (!response.ok) {
+              console.warn(`Failed to fetch history for ${ticker}: ${response.status}`);
+              return;
+            }
+
+            const data = await response.json();
+            const chartResult = data.chart?.result?.[0];
+            if (!chartResult) return;
+
+            const meta = chartResult.meta;
+            const timestamps: number[] = chartResult.timestamp || [];
+            const closes: (number | null)[] = chartResult.indicators?.quote?.[0]?.close || [];
+
+            const history: HistoricalPrice[] = [];
+            for (let i = 0; i < timestamps.length; i++) {
+              if (closes[i] != null) {
+                history.push({ time: timestamps[i], price: closes[i]! });
+              }
+            }
+
+            results[ticker] = {
+              symbol: meta.symbol,
+              currency: meta.currency || "USD",
+              history,
+            };
+          } catch (err) {
+            console.warn(`Error fetching history for ${ticker}:`, err);
+          }
+        })
+      );
+
+      return results;
     },
     enabled: tickers.length > 0,
     staleTime: 1000 * 60 * 60 * 24, // 24 hours
+    retry: 2,
   });
 }
+
