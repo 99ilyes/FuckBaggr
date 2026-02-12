@@ -43,7 +43,7 @@ const TICKER_DOMAINS: Record<string, string> = {
     LITE: "lumentum.com",
 };
 
-function getLogoDomain(ticker: string): string | null {
+export function getLogoDomain(ticker: string): string | null {
     if (TICKER_DOMAINS[ticker]) return TICKER_DOMAINS[ticker];
     const base = ticker.split(".")[0];
     if (TICKER_DOMAINS[base]) return TICKER_DOMAINS[base];

@@ -193,3 +193,41 @@ export function formatCurrency(value: number, currency = "EUR"): string {
 export function formatPercent(value: number): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
+
+export function calculateDailyPerformance(
+  positions: AssetPosition[],
+  cashBalances: CashBalances,
+  assetsCache: AssetCache[],
+  totalValue: number,
+  baseCurrency = "EUR",
+  previousCloseMap: Record<string, number> = {}
+) {
+  let change = 0;
+
+  for (const pos of positions) {
+    const cached = assetsCache.find(a => a.ticker === pos.ticker);
+    const prevClose = previousCloseMap[pos.ticker] ?? (cached as any)?.previous_close ?? pos.currentPrice;
+    const priceDiff = pos.currentPrice - prevClose;
+    const rate = getExchangeRate(pos.currency, baseCurrency, assetsCache);
+    change += pos.quantity * priceDiff * rate;
+  }
+
+  // FX impact on cash balances
+  for (const [cur, amount] of Object.entries(cashBalances || {})) {
+    if (cur === baseCurrency || Math.abs(amount) < 0.01) continue;
+    const currentRate = getExchangeRate(cur, baseCurrency, assetsCache);
+    const fxTicker = `${cur}${baseCurrency}=X`;
+    const fxTickerInv = `${baseCurrency}${cur}=X`;
+    const cached = assetsCache.find(a => a.ticker === fxTicker);
+    const cachedInv = assetsCache.find(a => a.ticker === fxTickerInv);
+    const prevRate = previousCloseMap[fxTicker] ?? (cached as any)?.previous_close ??
+      (previousCloseMap[fxTickerInv] ? 1 / previousCloseMap[fxTickerInv] : null) ??
+      ((cachedInv as any)?.previous_close ? 1 / (cachedInv as any).previous_close : currentRate);
+    change += amount * (currentRate - prevRate);
+  }
+
+  const previousTotal = totalValue - change;
+  const changePct = previousTotal > 0 ? (change / previousTotal) * 100 : 0;
+
+  return { change, changePct };
+}

@@ -1,6 +1,7 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { AssetPosition, formatCurrency } from "@/lib/calculations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getLogoDomain } from "./TickerLogo";
 
 // Brand colors for well-known tickers
 const BRAND_COLORS: Record<string, string> = {
@@ -117,8 +118,28 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
   );
 
   const sorted = [...data].sort((a, b) => b.value - a.value);
+  const totalRaw = sorted.reduce((s, d) => s + d.value, 0);
 
-  if (sorted.length === 0) {
+  let chartData: AllocationItem[] = [];
+  let otherValue = 0;
+
+  // Keep top items that are at least 2% of total, or max 12 items
+  sorted.forEach((item, index) => {
+    const pct = totalRaw > 0 ? (item.value / totalRaw) : 0;
+    if (index < 14 && pct >= 0.02) {
+      chartData.push(item);
+    } else {
+      otherValue += item.value;
+    }
+  });
+
+  if (otherValue > 0) {
+    chartData.push({ name: "Autres", value: otherValue });
+  }
+
+  const total = chartData.reduce((s, d) => s + d.value, 0);
+
+  if (chartData.length === 0) {
     return (
       <Card className="border-border/50">
         <CardHeader className="pb-2">
@@ -130,8 +151,6 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
       </Card>
     );
   }
-
-  const total = sorted.reduce((s, d) => s + d.value, 0);
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.[0]) return null;
@@ -145,52 +164,85 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
     );
   };
 
+  // Custom label render function
+  const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, value, index, name }: any) => {
+    const RADIAN = Math.PI / 180;
+    const radius = outerRadius * 1.25; // Adjusted spacing from 1.4
+
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    const pct = total > 0 ? ((value / total) * 100).toFixed(1) : "0";
+
+    const domain = getLogoDomain(name);
+    const hasLogo = !!domain && name !== "Autres";
+
+    // Determine text anchor based on position
+    const textAnchor = x > cx ? 'start' : 'end';
+
+    // Adjust spacing
+    const imageOffset = x > cx ? 0 : -18;
+    const textOffset = hasLogo ? (x > cx ? 22 : -22) : 0;
+
+    return (
+      <g>
+        {hasLogo && (
+          <image
+            x={x + imageOffset - (x > cx ? -4 : 4)}
+            y={y - 9}
+            width={18}
+            height={18}
+            href={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+            style={{ borderRadius: '4px' }}
+          />
+        )}
+        <text
+          x={x + textOffset}
+          y={y}
+          fill={name === "Autres" ? "#9ca3af" : getColor(name, index)}
+          textAnchor={textAnchor}
+          dominantBaseline="central"
+          className="font-bold"
+          style={{ fontSize: '11px', fill: 'hsl(var(--foreground))' }} // Smaller font size
+        >
+          {`${name} ${pct}%`}
+        </text>
+      </g>
+    );
+  };
+
   return (
-    <Card className="border-border/50">
+    <Card className="border-border/50 col-span-1">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
+        <CardTitle className="text-xl font-bold">{title}</CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="flex items-center gap-6">
-          <ResponsiveContainer width="45%" height={200}>
-            <PieChart>
-              <Pie
-                data={sorted}
-                cx="50%"
-                cy="50%"
-                innerRadius={50}
-                outerRadius={90}
-                paddingAngle={1.5}
-                dataKey="value"
-                stroke="hsl(var(--background))"
-                strokeWidth={2}
-              >
-                {sorted.map((item, i) => (
-                  <Cell key={i} fill={getColor(item.name, i)} />
-                ))}
-              </Pie>
-              <Tooltip content={<CustomTooltip />} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="flex-1 overflow-y-auto max-h-[200px] space-y-0.5 pr-1" style={{ scrollbarWidth: "thin" }}>
-            {sorted.map((d, i) => {
-              const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : "0";
-              const color = getColor(d.name, i);
-              return (
-                <div key={d.name} className="flex items-center justify-between text-xs py-1.5 px-2 rounded-md hover:bg-muted/30 transition-colors">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
-                    <span className="text-foreground font-medium truncate">{d.name}</span>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0 ml-3">
-                    <span className="text-muted-foreground tabular-nums text-[11px]">{formatCurrency(d.value)}</span>
-                    <span className="text-foreground tabular-nums font-medium w-12 text-right">{pct}%</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      <CardContent className="h-[400px] flex items-center justify-center">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={chartData}
+              cx="50%"
+              cy="50%"
+              innerRadius={0}
+              outerRadius={110} // Reduced radius to fit in 400px height
+              paddingAngle={1}
+              dataKey="value"
+              stroke="hsl(var(--background))"
+              strokeWidth={1}
+              label={renderCustomizedLabel}
+              labelLine={true}
+              isAnimationActive={true}
+            >
+              {chartData.map((item, i) => (
+                <Cell
+                  key={i}
+                  fill={item.name === "Autres" ? "#6b7280" : getColor(item.name, i)}
+                />
+              ))}
+            </Pie>
+            <Tooltip content={<CustomTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
       </CardContent>
     </Card>
   );

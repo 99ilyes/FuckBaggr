@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { usePortfolios, useTransactions, useAssetsCache, useHistoricalPrices } from "@/hooks/usePortfolios";
-import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats, formatCurrency, formatPercent } from "@/lib/calculations";
-import { KPICards } from "@/components/KPICards";
+import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats, formatCurrency, formatPercent, calculateDailyPerformance } from "@/lib/calculations";
+import { KPICards, PortfolioPerformance } from "@/components/KPICards";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
 import { CreatePortfolioDialog } from "@/components/CreatePortfolioDialog";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
@@ -176,6 +176,35 @@ export default function Index() {
     setRefreshing(false);
   };
 
+  const portfolioPerformances = useMemo(() => {
+    if (selectedPortfolioId) return [];
+
+    return portfolios.map((p) => {
+      const txs = allTransactions.filter((t) => t.portfolio_id === p.id);
+      const pCurrency = (p as any)?.currency || "EUR";
+      const pos = calculatePositions(txs, effectiveAssetsCache, pCurrency);
+      const cash = calculateCashBalances(txs);
+
+      const { change, changePct } = calculateDailyPerformance(
+        pos,
+        cash,
+        effectiveAssetsCache,
+        calculatePortfolioStats(pos, cash, effectiveAssetsCache, txs, pCurrency).totalValue,
+        baseCurrency, // Use global base currency for display
+        previousCloseMap
+      );
+
+      return {
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        dailyChange: change,
+        dailyChangePct: changePct,
+        currency: pCurrency,
+      } as PortfolioPerformance;
+    });
+  }, [selectedPortfolioId, portfolios, allTransactions, effectiveAssetsCache, baseCurrency, previousCloseMap]);
+
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-border/50 px-4 py-3 md:px-6">
@@ -237,6 +266,7 @@ export default function Index() {
           baseCurrency={baseCurrency}
           previousCloseMap={previousCloseMap}
           transactions={filteredTransactions}
+          portfolioPerformances={portfolioPerformances}
         />
 
         <div className="grid gap-4 md:grid-cols-2">
