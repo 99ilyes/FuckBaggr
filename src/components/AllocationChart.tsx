@@ -2,18 +2,94 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { AssetPosition, formatCurrency } from "@/lib/calculations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-const COLORS = [
-  "hsl(217, 91%, 60%)",
-  "hsl(142, 71%, 45%)",
-  "hsl(38, 92%, 50%)",
-  "hsl(263, 70%, 50%)",
-  "hsl(330, 81%, 60%)",
-  "hsl(190, 95%, 39%)",
-  "hsl(25, 95%, 53%)",
-  "hsl(160, 60%, 45%)",
-  "hsl(45, 93%, 47%)",
-  "hsl(200, 98%, 39%)",
+// Brand colors for well-known tickers
+const BRAND_COLORS: Record<string, string> = {
+  // Tech
+  NVDA: "#76B900",  // NVIDIA green
+  GOOG: "#4285F4",  // Google blue
+  GOOGL: "#4285F4",
+  AAPL: "#A2AAAD",  // Apple silver
+  MSFT: "#00A4EF",  // Microsoft blue
+  AMZN: "#FF9900",  // Amazon orange
+  META: "#0082FB",  // Meta blue
+  TSLA: "#CC0000",  // Tesla red
+  TSM: "#D71920",  // TSMC red
+  AMD: "#ED1C24",  // AMD red
+  INTC: "#0071C5",  // Intel blue
+  NFLX: "#E50914",  // Netflix red
+  CRM: "#00A1E0",  // Salesforce blue
+  ADBE: "#FF0000",  // Adobe red
+  ORCL: "#F80000",  // Oracle red
+  CSCO: "#1BA0D7",  // Cisco blue
+  AVGO: "#CC092F",  // Broadcom red
+  QCOM: "#3253DC",  // Qualcomm blue
+  IBM: "#0530AD",  // IBM blue
+
+  // Finance
+  NU: "#820AD1",  // Nubank purple
+  "BRK-B": "#6B0F24",  // Berkshire burgundy
+  JPM: "#0E3A74",  // JPMorgan blue
+  V: "#1A1F71",  // Visa dark blue
+  MA: "#EB001B",  // Mastercard red
+  GS: "#6EAEDE",  // Goldman light blue
+  BAC: "#012169",  // BofA blue
+  MS: "#003986",  // Morgan Stanley blue
+
+  // ETFs / Gold
+  "GOLD-EUR.PA": "#FFD700", // Gold
+  GLD: "#FFD700",
+  GC: "#FFD700",
+  SPY: "#005A9C",    // S&P 500 blue
+  QQQ: "#7B3FE4",    // Nasdaq purple
+  VTI: "#96151D",    // Vanguard red
+  VOO: "#96151D",
+
+  // Japanese
+  "6857.T": "#0067B1",  // Advantest blue
+  "7203.T": "#EB0A1E",  // Toyota red
+  "6758.T": "#000000",  // Sony black → use dark teal instead
+  "9984.T": "#FFCC00",  // SoftBank yellow
+
+  // French
+  "B28A.PA": "#0060A9",  // Believe blue
+  "AI.PA": "#0051A5",  // Air Liquide blue
+  "MC.PA": "#5C4033",  // LVMH brown/gold
+  "OR.PA": "#000000",  // L'Oréal → use warm black
+  "SAN.PA": "#EF3340",  // Sanofi red
+  "BNP.PA": "#009A44",  // BNP green
+  "SU.PA": "#00529B",  // Schneider blue
+  "CAP.PA": "#0070AD",  // Capgemini blue
+
+  // Portfolios
+  CTO: "#4285F4",  // Blue
+  PEA: "#FF9900",  // Orange
+  "Crédit": "#34A853",  // Green
+};
+
+// Fallback palette for unknown tickers (distinct, muted, professional)
+const FALLBACK_COLORS = [
+  "#6366F1", // indigo
+  "#14B8A6", // teal
+  "#F59E0B", // amber
+  "#EC4899", // pink
+  "#8B5CF6", // violet
+  "#06B6D4", // cyan
+  "#F97316", // orange
+  "#10B981", // emerald
+  "#E11D48", // rose
+  "#3B82F6", // blue
 ];
+
+function getColor(name: string, index: number): string {
+  // Try exact match
+  if (BRAND_COLORS[name]) return BRAND_COLORS[name];
+
+  // Try without exchange suffix (e.g., "NVDA" from "NVDA.PA")
+  const base = name.split(".")[0];
+  if (BRAND_COLORS[base]) return BRAND_COLORS[base];
+
+  return FALLBACK_COLORS[index % FALLBACK_COLORS.length];
+}
 
 interface AllocationItem {
   name: string;
@@ -75,36 +151,41 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
         <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="flex items-start gap-4">
-          <ResponsiveContainer width="40%" height={180}>
+        <div className="flex items-center gap-6">
+          <ResponsiveContainer width="45%" height={200}>
             <PieChart>
               <Pie
                 data={sorted}
                 cx="50%"
                 cy="50%"
-                innerRadius={45}
-                outerRadius={80}
-                paddingAngle={2}
+                innerRadius={50}
+                outerRadius={90}
+                paddingAngle={1.5}
                 dataKey="value"
-                stroke="none"
+                stroke="hsl(var(--background))"
+                strokeWidth={2}
               >
-                {sorted.map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                {sorted.map((item, i) => (
+                  <Cell key={i} fill={getColor(item.name, i)} />
                 ))}
               </Pie>
               <Tooltip content={<CustomTooltip />} />
             </PieChart>
           </ResponsiveContainer>
-          <div className="flex-1 overflow-y-auto max-h-[180px] space-y-0.5 pr-1" style={{ scrollbarWidth: "thin" }}>
+          <div className="flex-1 overflow-y-auto max-h-[200px] space-y-0.5 pr-1" style={{ scrollbarWidth: "thin" }}>
             {sorted.map((d, i) => {
               const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : "0";
+              const color = getColor(d.name, i);
               return (
-                <div key={d.name} className="flex items-center justify-between text-xs py-1 px-1.5 rounded hover:bg-muted/20 transition-colors">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                    <span className="text-foreground truncate">{d.name}</span>
+                <div key={d.name} className="flex items-center justify-between text-xs py-1.5 px-2 rounded-md hover:bg-muted/30 transition-colors">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+                    <span className="text-foreground font-medium truncate">{d.name}</span>
                   </div>
-                  <span className="text-muted-foreground tabular-nums shrink-0 ml-3">{pct}%</span>
+                  <div className="flex items-center gap-3 shrink-0 ml-3">
+                    <span className="text-muted-foreground tabular-nums text-[11px]">{formatCurrency(d.value)}</span>
+                    <span className="text-foreground tabular-nums font-medium w-12 text-right">{pct}%</span>
+                  </div>
                 </div>
               );
             })}
