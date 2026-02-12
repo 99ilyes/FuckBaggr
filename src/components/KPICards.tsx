@@ -38,99 +38,37 @@ export function KPICards({
     ([, amount]) => Math.abs(amount) >= 0.01
   );
 
-  // Calculate daily performance (True P&L: Change in Portfolio Value adjusted for Net Flows)
+  // Calculate daily performance: sum of (qty * (currentPrice - previousClose)) per position, in base currency
   const dailyPerf = useMemo(() => {
-    // Helper to get previous exchange rate
-    const getPrevRate = (currency: string) => {
-      if (currency === baseCurrency) return 1;
-      // Direct pair: e.g. USDEUR=X
-      const directTicker = `${currency}${baseCurrency}=X`;
-      if (previousCloseMap[directTicker]) return previousCloseMap[directTicker];
-      const directCached = assetsCache.find(a => a.ticker === directTicker);
-      if (directCached?.previous_close) return directCached.previous_close;
-      if (directCached?.last_price) return directCached.last_price;
+    let change = 0;
 
-      // Inverted pair
-      const invertedTicker = `${baseCurrency}${currency}=X`;
-      if (previousCloseMap[invertedTicker]) return 1 / previousCloseMap[invertedTicker];
-      const invertedCached = assetsCache.find(a => a.ticker === invertedTicker);
-      if (invertedCached?.previous_close) return 1 / invertedCached.previous_close;
-      if (invertedCached?.last_price) return 1 / invertedCached.last_price;
+    for (const pos of positions) {
+      const cached = assetsCache.find(a => a.ticker === pos.ticker);
+      const prevClose = previousCloseMap[pos.ticker] ?? (cached as any)?.previous_close ?? pos.currentPrice;
+      const priceDiff = pos.currentPrice - prevClose;
+      const rate = getExchangeRate(pos.currency, baseCurrency, assetsCache);
+      change += pos.quantity * priceDiff * rate;
+    }
 
-      console.warn(`Missing FX rate for ${currency}. Available keys:`, Object.keys(previousCloseMap));
-      return 1;
-    };
-
-    // 1. Reconstruct Previous Portfolio State
-    const prevAssets = new Map<string, number>(); // ticker -> qty
-    positions.forEach(p => prevAssets.set(p.ticker, p.quantity));
-
-    const prevCash = { ...cashBalances };
-    let netFlowsValue = 0;
-
-    // Filter for TODAY's transactions
-    // Assuming t.date is ISO or parseable and consistent timezone
-    const todayString = new Date().toDateString();
-
-    const todayTxs = transactions.filter(t => new Date(t.date).toDateString() === todayString);
-
-    todayTxs.forEach(tx => {
-      const cur = tx.currency || "EUR";
-      const quantity = tx.quantity || 0;
-      const price = tx.unit_price || 0;
-      const fees = tx.fees || 0;
-      const amount = quantity * price;
-
+    // FX impact on cash balances
+    for (const [cur, amount] of Object.entries(cashBalances || {})) {
+      if (cur === baseCurrency || Math.abs(amount) < 0.01) continue;
       const currentRate = getExchangeRate(cur, baseCurrency, assetsCache);
+      const fxTicker = `${cur}${baseCurrency}=X`;
+      const fxTickerInv = `${baseCurrency}${cur}=X`;
+      const cached = assetsCache.find(a => a.ticker === fxTicker);
+      const cachedInv = assetsCache.find(a => a.ticker === fxTickerInv);
+      const prevRate = previousCloseMap[fxTicker] ?? (cached as any)?.previous_close ?? 
+                       (previousCloseMap[fxTickerInv] ? 1 / previousCloseMap[fxTickerInv] : null) ??
+                       ((cachedInv as any)?.previous_close ? 1 / (cachedInv as any).previous_close : currentRate);
+      change += amount * (currentRate - prevRate);
+    }
 
-      if (tx.type === 'buy') {
-        // Revert buy: Cash + (Amount + Fees), Asset - Qty
-        prevCash[cur] = (prevCash[cur] || 0) + (amount + fees);
-        if (tx.ticker) prevAssets.set(tx.ticker, (prevAssets.get(tx.ticker) || 0) - quantity);
-      } else if (tx.type === 'sell') {
-        // Revert sell: Cash - (Amount - Fees), Asset + Qty
-        prevCash[cur] = (prevCash[cur] || 0) - (amount - fees);
-        if (tx.ticker) prevAssets.set(tx.ticker, (prevAssets.get(tx.ticker) || 0) + quantity);
-      } else if (tx.type === 'deposit') {
-        // Revert deposit: Cash - Amount
-        prevCash[cur] = (prevCash[cur] || 0) - amount;
-        netFlowsValue += (amount * currentRate);
-      } else if (tx.type === 'withdrawal') {
-        // Revert withdrawal: Cash + Amount
-        prevCash[cur] = (prevCash[cur] || 0) + amount;
-        netFlowsValue -= (amount * currentRate);
-      } else if (tx.type === 'conversion') {
-        const src = tx.ticker || "EUR";
-        // Revert conversion: Src + (Cost + Fees), Dest - Qty
-        prevCash[src] = (prevCash[src] || 0) + (amount + fees);
-        prevCash[cur] = (prevCash[cur] || 0) - quantity;
-      }
-    });
-
-    // 2. Calculate Previous Total Value
-    let previousTotalBase = 0;
-
-    prevAssets.forEach((qty, ticker) => {
-      if (qty <= 0.000001) return;
-      const cached = assetsCache.find(a => a.ticker === ticker);
-      const prevPrice = previousCloseMap[ticker] || cached?.previous_close || cached?.last_price || 0;
-      const currency = cached?.currency || "USD";
-      const rate = getPrevRate(currency);
-      previousTotalBase += qty * prevPrice * rate;
-    });
-
-    Object.entries(prevCash).forEach(([cur, amount]) => {
-      if (Math.abs(amount) < 0.01) return;
-      const rate = getPrevRate(cur);
-      previousTotalBase += amount * rate;
-    });
-
-    // 3. P&L
-    const change = totalValue - previousTotalBase - netFlowsValue;
-    const changePct = previousTotalBase > 0 ? (change / previousTotalBase) * 100 : 0;
+    const previousTotal = totalValue - change;
+    const changePct = previousTotal > 0 ? (change / previousTotal) * 100 : 0;
 
     return { change, changePct };
-  }, [positions, cashBalances, transactions, assetsCache, baseCurrency, previousCloseMap, totalValue]);
+  }, [positions, cashBalances, assetsCache, baseCurrency, previousCloseMap, totalValue]);
 
   const isDayPositive = dailyPerf.change >= 0;
 
