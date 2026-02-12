@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { usePortfolios, useTransactions, useAssetsCache } from "@/hooks/usePortfolios";
+import { usePortfolios, useTransactions, useAssetsCache, useHistoricalPrices } from "@/hooks/usePortfolios";
 import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats, formatCurrency, formatPercent } from "@/lib/calculations";
 import { KPICards } from "@/components/KPICards";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
@@ -9,6 +9,7 @@ import { ImportTransactionsDialog } from "@/components/ImportTransactionsDialog"
 import { PositionsTable } from "@/components/PositionsTable";
 import { TransactionsTable } from "@/components/TransactionsTable";
 import { AllocationChart } from "@/components/AllocationChart";
+import { TopMovers } from "@/components/TopMovers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -60,6 +61,13 @@ export default function Index() {
     () => calculatePositions(filteredTransactions, effectiveAssetsCache, baseCurrency),
     [filteredTransactions, effectiveAssetsCache, baseCurrency]
   );
+
+  // Get unique tickers from positions for historical price fetching
+  const positionTickers = useMemo(
+    () => positions.map(p => p.ticker).filter(t => !t.includes("=X")),
+    [positions]
+  );
+  const { data: historicalPrices = {} } = useHistoricalPrices(positionTickers);
 
   const cashBalances = useMemo(
     () => calculateCashBalances(filteredTransactions),
@@ -233,12 +241,10 @@ export default function Index() {
 
         <div className="grid gap-4 md:grid-cols-2">
           <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
-          {!selectedPortfolioId && portfolios.length > 1 && (
-            <AllocationChart
-              data={portfolioAllocation}
-              title="Par portefeuille"
-            />
-          )}
+          <TopMovers
+            positions={positions}
+            assetsCache={effectiveAssetsCache}
+          />
         </div>
 
         <Tabs defaultValue="positions" className="space-y-4">
