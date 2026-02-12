@@ -81,7 +81,7 @@ serve(async (req) => {
 
     const results: Record<string, any> = {};
 
-    for (const ticker of tickers) {
+    const fetchTicker = async (ticker: string) => {
       try {
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
         const response = await fetch(url, {
@@ -90,16 +90,12 @@ serve(async (req) => {
 
         if (!response.ok) {
           console.error(`Failed to fetch ${ticker}: ${response.status}`);
-          results[ticker] = { error: `HTTP ${response.status}` };
-          continue;
+          return { ticker, result: { error: `HTTP ${response.status}` } };
         }
 
         const data = await response.json();
         const meta = data.chart?.result?.[0]?.meta;
-        if (!meta) {
-          results[ticker] = { error: "No data" };
-          continue;
-        }
+        if (!meta) return { ticker, result: { error: "No data" } };
 
         const price = meta.regularMarketPrice || 0;
         const previousClose = meta.chartPreviousClose || meta.previousClose || null;
@@ -107,29 +103,26 @@ serve(async (req) => {
         const currency = meta.currency || "USD";
 
         // Upsert into assets_cache
-        const { error: upsertError } = await supabase
+        await supabase
           .from("assets_cache")
           .upsert(
-            {
-              ticker,
-              last_price: price,
-              previous_close: previousClose,
-              name,
-              currency,
-              updated_at: new Date().toISOString(),
-            },
+            { ticker, last_price: price, previous_close: previousClose, name, currency, updated_at: new Date().toISOString() },
             { onConflict: "ticker" }
           );
 
-        if (upsertError) {
-          console.error(`Upsert error for ${ticker}:`, upsertError);
-        }
-
-        results[ticker] = { price, previousClose, name, currency };
+        return { ticker, result: { price, previousClose, name, currency } };
       } catch (err) {
         console.error(`Error fetching ${ticker}:`, err);
-        results[ticker] = { error: String(err) };
+        return { ticker, result: { error: String(err) } };
       }
+    };
+
+    // Fetch all tickers in parallel (batches of 5)
+    const batchSize = 5;
+    for (let i = 0; i < tickers.length; i += batchSize) {
+      const batch = tickers.slice(i, i + batchSize);
+      const batchResults = await Promise.all(batch.map(fetchTicker));
+      batchResults.forEach(({ ticker, result }) => { results[ticker] = result; });
     }
 
     return new Response(JSON.stringify({ results }), {
