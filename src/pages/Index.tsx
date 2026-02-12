@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { usePortfolios, useTransactions, useAssetsCache } from "@/hooks/usePortfolios";
-import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats } from "@/lib/calculations";
+import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats, formatCurrency, formatPercent } from "@/lib/calculations";
 import { KPICards } from "@/components/KPICards";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
 import { CreatePortfolioDialog } from "@/components/CreatePortfolioDialog";
@@ -108,20 +108,25 @@ export default function Index() {
     }
   }, []);
 
-  // Fetch on load
+  // Track tickers to avoid infinite re-fetch loop
+  const fetchedTickersRef = useRef<string>("");
+
+  // Fetch on load (only when ticker list actually changes)
   useEffect(() => {
-    const tickers = new Set(positions.map(p => p.ticker));
+    const tickerSet = new Set(positions.map(p => p.ticker));
     Object.keys(cashBalances).forEach(c => {
       if (c !== baseCurrency && Math.abs(cashBalances[c]) > 0.01) {
-        tickers.add(`${c}${baseCurrency}=X`);
-        tickers.add(`${baseCurrency}${c}=X`);
+        tickerSet.add(`${c}${baseCurrency}=X`);
+        tickerSet.add(`${baseCurrency}${c}=X`);
       }
     });
 
-    if (tickers.size > 0) {
-      fetchMarketData(Array.from(tickers));
+    const tickerKey = Array.from(tickerSet).sort().join(",");
+    if (tickerKey && tickerKey !== fetchedTickersRef.current) {
+      fetchedTickersRef.current = tickerKey;
+      fetchMarketData(Array.from(tickerSet));
     }
-  }, [positions, cashBalances, baseCurrency]);
+  }, [positions, cashBalances, baseCurrency, fetchMarketData]);
 
   const handleRefreshPrices = async () => {
     setRefreshing(true);
@@ -158,16 +163,24 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border/50 px-4 py-3 md:px-6">
+      <header className="sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-border/50 px-4 py-3 md:px-6">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="FuckBaggr" className="h-8 w-auto" />
-            <span className="text-lg font-semibold tracking-tight">FuckBaggr</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <img src="/logo.png" alt="FuckBaggr" className="h-8 w-auto" />
+              <span className="text-lg font-semibold tracking-tight">FuckBaggr</span>
+            </div>
+            <div className="hidden sm:flex items-center gap-3 ml-2 pl-4 border-l border-border/50">
+              <span className="text-sm font-medium tabular-nums">{formatCurrency(totalValue, baseCurrency)}</span>
+              <span className={`text-sm font-medium tabular-nums ${totalGainLossPercent >= 0 ? "text-gain" : "text-loss"}`}>
+                {formatPercent(totalGainLossPercent)}
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleRefreshPrices} disabled={refreshing}>
               <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline ml-1">Actualiser Prix</span>
+              <span className="hidden sm:inline ml-1">Actualiser</span>
             </Button>
             <Button size="sm" onClick={() => setAddTransactionOpen(true)}>
               <Plus className="h-4 w-4" />
