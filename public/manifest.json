@@ -1,0 +1,16 @@
+{
+    "name": "FuckBaggr",
+    "short_name": "FuckBaggr",
+    "description": "Gérez votre patrimoine simplement.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#ffffff",
+    "icons": [
+        {
+            "src": "/logo.png",
+            "sizes": "750x750",
+            "type": "image/png"
+        }
+    ]
+}
