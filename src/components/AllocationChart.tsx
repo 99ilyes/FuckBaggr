@@ -3,18 +3,16 @@ import { AssetPosition, formatCurrency } from "@/lib/calculations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const COLORS = [
-  "hsl(217, 91%, 60%)",  // blue
-  "hsl(142, 71%, 45%)",  // green
-  "hsl(38, 92%, 50%)",   // amber
-  "hsl(0, 84%, 60%)",    // red
-  "hsl(263, 70%, 50%)",  // violet
-  "hsl(330, 81%, 60%)",  // pink
-  "hsl(190, 95%, 39%)",  // cyan
-  "hsl(25, 95%, 53%)",   // orange
-  "hsl(160, 60%, 45%)",  // teal
-  "hsl(280, 65%, 60%)",  // purple
-  "hsl(45, 93%, 47%)",   // yellow
-  "hsl(200, 98%, 39%)",  // sky
+  "hsl(217, 91%, 60%)",
+  "hsl(142, 71%, 45%)",
+  "hsl(38, 92%, 50%)",
+  "hsl(263, 70%, 50%)",
+  "hsl(330, 81%, 60%)",
+  "hsl(190, 95%, 39%)",
+  "hsl(25, 95%, 53%)",
+  "hsl(160, 60%, 45%)",
+  "hsl(45, 93%, 47%)",
+  "hsl(200, 98%, 39%)",
 ];
 
 interface AllocationItem {
@@ -59,20 +57,14 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
 
   const total = sorted.reduce((s, d) => s + d.value, 0);
 
-  // Custom tooltip
   const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.[0]) return null;
     const d = payload[0].payload;
     const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : "0";
     return (
-      <div style={{
-        backgroundColor: "hsl(228, 12%, 11%)",
-        border: "1px solid hsl(228, 10%, 18%)",
-        borderRadius: 8, padding: "8px 12px", fontSize: 12, lineHeight: 1.6,
-      }}>
-        <p style={{ color: "hsl(215, 15%, 85%)", fontWeight: 600 }}>{d.name}</p>
-        <p style={{ color: "hsl(217, 91%, 60%)" }}>{formatCurrency(d.value)}</p>
-        <p style={{ color: "hsl(215, 15%, 55%)" }}>{pct}%</p>
+      <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-lg">
+        <p className="font-medium text-foreground">{d.name}</p>
+        <p className="text-muted-foreground">{formatCurrency(d.value)} · {pct}%</p>
       </div>
     );
   };
@@ -84,15 +76,15 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
       </CardHeader>
       <CardContent>
         <div className="flex items-start gap-4">
-          <ResponsiveContainer width="45%" height={200}>
+          <ResponsiveContainer width="40%" height={180}>
             <PieChart>
               <Pie
                 data={sorted}
                 cx="50%"
                 cy="50%"
-                innerRadius={50}
-                outerRadius={85}
-                paddingAngle={1.5}
+                innerRadius={45}
+                outerRadius={80}
+                paddingAngle={2}
                 dataKey="value"
                 stroke="none"
               >
@@ -103,22 +95,16 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
               <Tooltip content={<CustomTooltip />} />
             </PieChart>
           </ResponsiveContainer>
-          <div className="flex-1 overflow-y-auto max-h-[200px] space-y-1 pr-1" style={{ scrollbarWidth: "thin" }}>
+          <div className="flex-1 overflow-y-auto max-h-[180px] space-y-0.5 pr-1" style={{ scrollbarWidth: "thin" }}>
             {sorted.map((d, i) => {
               const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : "0";
               return (
-                <div key={d.name} className="flex items-center justify-between text-xs py-0.5 group hover:bg-muted/20 rounded px-1 transition-colors">
+                <div key={d.name} className="flex items-center justify-between text-xs py-1 px-1.5 rounded hover:bg-muted/20 transition-colors">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                    />
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                     <span className="text-foreground truncate">{d.name}</span>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0 ml-2">
-                    <span className="text-muted-foreground tabular-nums">{formatCurrency(d.value)}</span>
-                    <span className="text-muted-foreground tabular-nums w-12 text-right">{pct}%</span>
-                  </div>
+                  <span className="text-muted-foreground tabular-nums shrink-0 ml-3">{pct}%</span>
                 </div>
               );
             })}

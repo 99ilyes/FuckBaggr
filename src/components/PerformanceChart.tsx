@@ -208,31 +208,20 @@ export function PerformanceChart({ transactions, assetsCache }: Props) {
   const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.[0]) return null;
     const p = payload[0].payload;
-
     return (
-      <div style={{
-        backgroundColor: "hsl(228, 12%, 11%)",
-        border: "1px solid hsl(228, 10%, 18%)",
-        borderRadius: 8, padding: "10px 14px", fontSize: 12, lineHeight: 1.7,
-      }}>
-        <p style={{ color: "hsl(215, 15%, 55%)", marginBottom: 2 }}>{p.date}</p>
-        <p style={{ color: "hsl(217, 91%, 60%)", fontWeight: 600 }}>
-          Valeur: {formatCurrency(p.value)}
-        </p>
-        <p style={{ color: "hsl(215, 15%, 65%)" }}>
-          Investi: {formatCurrency(p.invested)}
-        </p>
-        <p style={{
-          color: p.portfolioPct >= 0 ? "hsl(142, 71%, 45%)" : "hsl(0, 84%, 60%)",
-          fontWeight: 600, marginTop: 4,
-        }}>
-          TWR: {p.portfolioPct >= 0 ? "+" : ""}{p.portfolioPct?.toFixed(2)}%
-        </p>
-        {p.benchPct !== null && p.benchPct !== undefined && (
-          <p style={{ color: "hsl(25, 95%, 53%)" }}>
-            ESE.PA: {p.benchPct >= 0 ? "+" : ""}{p.benchPct?.toFixed(2)}%
-          </p>
-        )}
+      <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-lg space-y-0.5">
+        <p className="text-muted-foreground">{p.date}</p>
+        <p className="text-foreground font-medium">{formatCurrency(p.value)}</p>
+        <div className="flex items-center gap-2">
+          <span className={p.portfolioPct >= 0 ? "text-gain font-medium" : "text-loss font-medium"}>
+            {p.portfolioPct >= 0 ? "+" : ""}{p.portfolioPct?.toFixed(2)}%
+          </span>
+          {p.benchPct !== null && p.benchPct !== undefined && (
+            <span className="text-muted-foreground">
+              vs {p.benchPct >= 0 ? "+" : ""}{p.benchPct?.toFixed(2)}%
+            </span>
+          )}
+        </div>
       </div>
     );
   };
@@ -312,14 +301,14 @@ export function PerformanceChart({ transactions, assetsCache }: Props) {
           </ResponsiveContainer>
         )}
         {chartData.length > 0 && (
-          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-0.5 rounded" style={{ backgroundColor: "hsl(217, 91%, 60%)" }} />
-              <span>Portfolio TWR</span>
+              <div className="w-3 h-0.5 rounded bg-primary" />
+              <span>Portfolio</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-3 h-0.5 rounded" style={{ backgroundColor: "hsl(25, 95%, 53%)" }} />
-              <span>ESE.PA (S&P 500)</span>
+              <span>S&P 500</span>
             </div>
           </div>
         )}
