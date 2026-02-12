@@ -37,6 +37,13 @@ export default function Index() {
     }));
   }, [assetsCache, livePriceMap]);
 
+  const lastUpdate = useMemo(() => {
+    if (!assetsCache || assetsCache.length === 0) return null;
+    const dates = assetsCache.map(a => new Date(a.updated_at).getTime());
+    const maxDate = Math.max(...dates);
+    return maxDate > 0 ? new Date(maxDate) : null;
+  }, [assetsCache]);
+
   const filteredTransactions = useMemo(
     () =>
       selectedPortfolioId
@@ -178,10 +185,17 @@ export default function Index() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleRefreshPrices} disabled={refreshing}>
-              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline ml-1">Actualiser</span>
-            </Button>
+            <div className="flex items-center gap-2">
+              {lastUpdate && (
+                <span className="text-[10px] text-muted-foreground tabular-nums hidden sm:inline-block">
+                  {lastUpdate.toLocaleString()}
+                </span>
+              )}
+              <Button variant="outline" size="sm" onClick={handleRefreshPrices} disabled={refreshing}>
+                <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+                <span className="hidden sm:inline ml-1">Actualiser</span>
+              </Button>
+            </div>
             <Button size="sm" onClick={() => setAddTransactionOpen(true)}>
               <Plus className="h-4 w-4" />
               <span className="hidden sm:inline ml-1">Transaction</span>

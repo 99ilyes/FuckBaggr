@@ -10,7 +10,7 @@ interface Props {
   baseCurrency?: string;
 }
 
-type SortKey = "ticker" | "quantity" | "currentPrice" | "currentValueBase" | "gainLossPercent";
+type SortKey = "ticker" | "quantity" | "currentPrice" | "currentValueBase" | "gainLossPercent" | "pru" | "currentValue";
 
 interface SortConfig {
   key: SortKey;
@@ -67,7 +67,9 @@ export function PositionsTable({ positions, baseCurrency = "EUR" }: Props) {
         <TableRow className="border-border/30 hover:bg-transparent">
           <SortHeader label="Actif" keyName="ticker" />
           <SortHeader label="Qté" keyName="quantity" className="text-right" />
+          <SortHeader label="PRU" keyName="pru" className="text-right" />
           <SortHeader label="Prix" keyName="currentPrice" className="text-right" />
+          <SortHeader label="Val. Devise" keyName="currentValue" className="text-right" />
           <SortHeader label="Valeur" keyName="currentValueBase" className="text-right" />
           <SortHeader label="P&L" keyName="gainLossPercent" className="text-right" />
           <TableHead className="text-right text-xs text-muted-foreground">Poids</TableHead>
@@ -89,8 +91,14 @@ export function PositionsTable({ positions, baseCurrency = "EUR" }: Props) {
               <TableCell className="text-right tabular-nums text-sm py-2.5">
                 {pos.quantity % 1 === 0 ? pos.quantity : pos.quantity.toFixed(2)}
               </TableCell>
+              <TableCell className="text-right tabular-nums text-sm py-2.5 text-muted-foreground">
+                {formatCurrency(pos.pru, pos.currency)}
+              </TableCell>
               <TableCell className="text-right tabular-nums text-sm py-2.5">
                 {formatCurrency(pos.currentPrice, pos.currency)}
+              </TableCell>
+              <TableCell className="text-right tabular-nums text-sm py-2.5 text-muted-foreground">
+                {formatCurrency(pos.currentValue, pos.currency)}
               </TableCell>
               <TableCell className="text-right tabular-nums text-sm font-medium py-2.5">
                 {formatCurrency(pos.currentValueBase, baseCurrency)}
