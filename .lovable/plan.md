@@ -1,42 +1,48 @@
 
 
-# Application de Gestion Multi-Portefeuilles d'Investissements
+## Amelioration de la lisibilite du graphique de repartition
 
-## Design & Thème
-- **Dark mode uniquement**, style minimaliste inspiré de Linear/Stripe
-- Typographie épurée, couleurs sombres avec accents subtils (vert pour gains, rouge pour pertes)
-- Composants Shadcn/UI (Card, Table, Dialog, Tabs, Select)
-- Design responsive
+### Probleme actuel
+Le graphique en camembert (pie chart) utilise des labels SVG positionnes autour du graphique. Quand il y a beaucoup d'actifs, les labels se chevauchent et deviennent illisibles. Les logos et textes sont petits et difficiles a lire sur fond sombre.
 
-## Architecture Backend (Supabase / Lovable Cloud)
-- **Table `portfolios`** : nom, description, type (PEA, CTO, Crypto), couleur
-- **Table `transactions`** : type (achat/vente), ticker, quantité, prix unitaire, frais, date, lié au portefeuille, fonction depot retrait et conversion de cash
-- **Table `assets_cache`** : ticker, dernier prix, secteur, nom complet, date de mise à jour
-- **Edge Function** pour récupérer les prix via Yahoo Finance API et mettre à jour le cache
+### Solution proposee
+Remplacer les labels SVG par une **legende HTML triee** a droite du donut chart, beaucoup plus lisible et professionnelle (style Linear/Stripe).
 
-## Page principale — Dashboard Global
-- **KPI Cards** en haut : valeur totale tous portefeuilles, performance globale (%), gain/perte total en €, nombre d'actifs
-- **Sélecteur de portefeuille** : switcher entre la vue globale et un portefeuille spécifique
-- **Graphique en aires (Area Chart)** : évolution de la valeur du portefeuille dans le temps (TWR - Time Weighted Return)
-- **Graphique Donut** : répartition par actif et par secteur
+### Changements prevus
 
-## Gestion des Portefeuilles
-- Créer, renommer et supprimer des portefeuilles via un dialogue modal
-- Chaque portefeuille affiche ses propres KPIs et graphiques quand sélectionné
-- Liste des portefeuilles accessible via un sélecteur/tabs
+**Fichier : `src/components/AllocationChart.tsx`**
 
-## Gestion des Transactions
-- **Formulaire modal** pour ajouter une transaction : type (achat/vente), ticker, quantité, prix, frais, date
-- **Table des transactions** avec tri et filtres par portefeuille
-- Possibilité de supprimer une transaction
+1. **Donut chart sans labels externes** : Supprimer `label` et `labelLine` du composant `Pie`. Utiliser `innerRadius` pour creer un donut (plus moderne qu'un camembert plein).
 
-## Calculs Automatiques
-- **PRU (Prix de Revient Unitaire)** calculé automatiquement pour chaque actif en fonction des transactions
-- **Plus/moins-values** latentes et réalisées par actif
-- **Performance TWR** simulée à partir de l'historique des transactions
+2. **Legende HTML triee** : Afficher a droite du graphique une liste verticale triee par poids decroissant, chaque ligne contenant :
+   - Un point colore (pastille)
+   - Le logo du ticker (via `TickerLogo`)
+   - Le nom du ticker
+   - Le pourcentage (aligne a droite)
 
-## Données Financières (MVP)
-- Edge Function Supabase appelant l'API Yahoo Finance pour récupérer les prix en temps réel
-- Cache des prix dans la table `assets_cache` pour éviter les appels excessifs
-- Rafraîchissement des prix à la demande ou au chargement
+3. **Layout flex** : Utiliser un layout `flex` horizontal avec le donut a gauche (~40%) et la legende a droite (~60%), au lieu du graphique seul centre.
 
+4. **Reduire la hauteur** du conteneur de 400px a 320px pour un rendu plus compact.
+
+5. **Tooltip** : Conserver le tooltip existant au survol des segments.
+
+### Rendu attendu
+
+```text
++----------------------------------------------+
+| Par actif                                    |
+|                                              |
+|    ___                                       |
+|   /   \     [logo] NVDA ............ 25.3%   |
+|  | donut|   [logo] AAPL ............ 18.1%   |
+|   \___/     [logo] MSFT ............ 12.4%   |
+|             [logo] AMZN .............  8.7%   |
+|                    Autres ...........  5.2%   |
++----------------------------------------------+
+```
+
+### Details techniques
+- Importer `TickerLogo` pour afficher les logos dans la legende
+- Utiliser `ScrollArea` si plus de ~10 items pour eviter le debordement
+- Conserver les `BRAND_COLORS` et `FALLBACK_COLORS` existants
+- Garder le `CustomTooltip` actuel
