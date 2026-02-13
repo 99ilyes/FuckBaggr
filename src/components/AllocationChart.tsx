@@ -146,10 +146,10 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
 
     // We assume the chart container has roughly these dimensions
     // We use a fixed layout logic where cx, cy are relative to the chart center
-    const cy = 300; // Conceptual center Y
+    const cy = 250; // Conceptual center Y (500/2)
     const cx = 200; // Conceptual center X
-    const innerRadius = 90;
-    const labelRadius = 140;
+    const innerRadius = 105;
+    const labelRadius = 155;
 
     let currentAngle = 90; // Start at 12 o'clock
 
@@ -259,8 +259,8 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
     const item = layout[name];
     if (!item) return null;
 
-    // We calculated Y relative to 300. Now apply to actual cy.
-    const yDelta = item.y - 300;
+    // We calculated Y relative to 250. Now apply to actual cy.
+    const yDelta = item.y - 250;
     const finalY = cy + yDelta;
     const finalX = cx + item.finalXOffset;
 
@@ -335,7 +335,7 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
       <CardHeader className="pb-2">
         <CardTitle className="text-xl font-bold">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="h-[600px] flex items-center justify-center">
+      <CardContent className="h-[500px] flex items-center justify-center">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
@@ -345,7 +345,7 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
               startAngle={90}
               endAngle={-270}
               innerRadius={0}
-              outerRadius={90}
+              outerRadius={105}
               paddingAngle={1}
               dataKey="value"
               stroke="hsl(var(--background))"
