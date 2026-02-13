@@ -123,10 +123,10 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
   let chartData: AllocationItem[] = [];
   let otherValue = 0;
 
-  // Keep top items that are at least 2% of total, or max 12 items
+  // Keep top items that are at least 4% of total, or max 9 items
   sorted.forEach((item, index) => {
     const pct = totalRaw > 0 ? (item.value / totalRaw) : 0;
-    if (index < 14 && pct >= 0.02) {
+    if (index < 9 && pct >= 0.04) {
       chartData.push(item);
     } else {
       otherValue += item.value;
@@ -167,7 +167,7 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
   // Custom label render function
   const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, value, index, name }: any) => {
     const RADIAN = Math.PI / 180;
-    const radius = outerRadius * 1.25; // Adjusted spacing from 1.4
+    const radius = outerRadius * 1.35; // Increased spacing for better readability
 
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
@@ -224,7 +224,7 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
               cx="50%"
               cy="50%"
               innerRadius={0}
-              outerRadius={110} // Reduced radius to fit in 400px height
+              outerRadius={105} // Slightly reduced radius for more label space
               paddingAngle={1}
               dataKey="value"
               stroke="hsl(var(--background))"
