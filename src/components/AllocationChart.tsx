@@ -120,22 +120,8 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
   const sorted = [...data].sort((a, b) => b.value - a.value);
   const totalRaw = sorted.reduce((s, d) => s + d.value, 0);
 
-  let chartData: AllocationItem[] = [];
-  let otherValue = 0;
-
-  // Keep top items that are at least 4% of total, or max 9 items
-  sorted.forEach((item, index) => {
-    const pct = totalRaw > 0 ? (item.value / totalRaw) : 0;
-    if (index < 9 && pct >= 0.04) {
-      chartData.push(item);
-    } else {
-      otherValue += item.value;
-    }
-  });
-
-  if (otherValue > 0) {
-    chartData.push({ name: "Autres", value: otherValue });
-  }
+  // Keep all items, sorted by value
+  const chartData = sorted;
 
   const total = chartData.reduce((s, d) => s + d.value, 0);
 
@@ -167,7 +153,7 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
   // Custom label render function
   const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, value, index, name }: any) => {
     const RADIAN = Math.PI / 180;
-    const radius = outerRadius * 1.35; // Increased spacing for better readability
+    const radius = outerRadius * 1.35; // Keep spacious spacing
 
     const x = cx + radius * Math.cos(-midAngle * RADIAN);
     const y = cy + radius * Math.sin(-midAngle * RADIAN);
@@ -175,7 +161,7 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
     const pct = total > 0 ? ((value / total) * 100).toFixed(1) : "0";
 
     const domain = getLogoDomain(name);
-    const hasLogo = !!domain && name !== "Autres";
+    const hasLogo = !!domain; // No "Autres" check needed anymore
 
     // Determine text anchor based on position
     const textAnchor = x > cx ? 'start' : 'end';
@@ -192,18 +178,18 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
             y={y - 9}
             width={18}
             height={18}
-            href={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+            href={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`} // High res for TSM
             style={{ borderRadius: '4px' }}
           />
         )}
         <text
           x={x + textOffset}
           y={y}
-          fill={name === "Autres" ? "#9ca3af" : getColor(name, index)}
+          fill={getColor(name, index)}
           textAnchor={textAnchor}
           dominantBaseline="central"
           className="font-bold"
-          style={{ fontSize: '11px', fill: 'hsl(var(--foreground))' }} // Smaller font size
+          style={{ fontSize: '11px', fill: 'hsl(var(--foreground))' }}
         >
           {`${name} ${pct}%`}
         </text>
@@ -236,7 +222,7 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
               {chartData.map((item, i) => (
                 <Cell
                   key={i}
-                  fill={item.name === "Autres" ? "#6b7280" : getColor(item.name, i)}
+                  fill={getColor(item.name, i)}
                 />
               ))}
             </Pie>
