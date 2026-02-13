@@ -1,10 +1,8 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { AssetPosition, formatCurrency } from "@/lib/calculations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TickerLogo, getLogoDomain } from "./TickerLogo";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { getLogoDomain } from "./TickerLogo";
 
-// Brand colors for well-known tickers
 const BRAND_COLORS: Record<string, string> = {
   NVDA: "#76B900", GOOG: "#4285F4", GOOGL: "#4285F4",
   AAPL: "#A2AAAD", MSFT: "#00A4EF", AMZN: "#FF9900",
@@ -36,16 +34,47 @@ function getColor(name: string, index: number): string {
   return FALLBACK_COLORS[index % FALLBACK_COLORS.length];
 }
 
-interface AllocationItem {
-  name: string;
-  value: number;
-}
+interface AllocationItem { name: string; value: number; }
 
 interface Props {
   data?: AllocationItem[];
   positions?: AssetPosition[];
   title?: string;
   groupBy?: "asset" | "sector";
+}
+
+/**
+ * Resolve label positions so they don't overlap.
+ * Labels are sorted by their natural y, then pushed apart if too close.
+ */
+function resolveOverlaps(
+  labels: { x: number; y: number; anchor: "start" | "end"; name: string; pct: string; midAngle: number }[],
+  minGap: number
+) {
+  // Split into left and right halves, resolve each independently
+  const left = labels.filter((l) => l.anchor === "end").sort((a, b) => a.y - b.y);
+  const right = labels.filter((l) => l.anchor === "start").sort((a, b) => a.y - b.y);
+
+  function push(arr: typeof labels) {
+    for (let i = 1; i < arr.length; i++) {
+      const diff = arr[i].y - arr[i - 1].y;
+      if (diff < minGap) {
+        arr[i].y = arr[i - 1].y + minGap;
+      }
+    }
+    // Push back up if overflow at bottom
+    for (let i = arr.length - 2; i >= 0; i--) {
+      const diff = arr[i + 1].y - arr[i].y;
+      if (diff < minGap) {
+        arr[i].y = arr[i + 1].y - minGap;
+      }
+    }
+  }
+
+  push(left);
+  push(right);
+
+  return [...left, ...right];
 }
 
 export function AllocationChart({ data: externalData, positions, title = "Répartition", groupBy = "asset" }: Props) {
@@ -107,68 +136,116 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
     );
   };
 
+  const RADIAN = Math.PI / 180;
+  const outerR = 100;
+  const labelRadius = outerR + 20;
+  const lineEndRadius = outerR + 14;
+
+  // Pre-compute label positions
+  const computeLabels = () => {
+    let cumValue = 0;
+    const raw = chartData.map((item, i) => {
+      const startAngle = 90 - (cumValue / total) * 360;
+      const sliceAngle = (item.value / total) * 360;
+      cumValue += item.value;
+      const midAngle = startAngle - sliceAngle / 2;
+
+      const x = labelRadius * Math.cos(midAngle * RADIAN);
+      const y = -labelRadius * Math.sin(midAngle * RADIAN);
+      const anchor: "start" | "end" = x >= 0 ? "start" : "end";
+      const pct = total > 0 ? ((item.value / total) * 100).toFixed(1) : "0";
+
+      return { x, y, anchor, name: item.name, pct, midAngle, index: i };
+    });
+
+    const resolved = resolveOverlaps(
+      raw.map((r) => ({ x: r.x, y: r.y, anchor: r.anchor, name: r.name, pct: r.pct, midAngle: r.midAngle })),
+      14
+    );
+
+    return resolved;
+  };
+
+  const labels = computeLabels();
+
+  const renderCustomLabel = (props: any) => {
+    const { cx, cy, index } = props;
+    const label = labels.find((l) => l.name === chartData[index]?.name);
+    if (!label) return null;
+
+    const lineStartX = cx + (outerR + 4) * Math.cos(label.midAngle * RADIAN);
+    const lineStartY = cy - (outerR + 4) * Math.sin(label.midAngle * RADIAN);
+    const lineEndX = cx + lineEndRadius * Math.cos(label.midAngle * RADIAN);
+    const lineEndY = cy - lineEndRadius * Math.sin(label.midAngle * RADIAN);
+
+    const textX = cx + (label.anchor === "start" ? labelRadius + 6 : -(labelRadius + 6));
+    const textY = cy + label.y;
+
+    const domain = getLogoDomain(label.name);
+    const hasLogo = !!domain && label.name !== "Autres";
+    const logoOffset = hasLogo ? (label.anchor === "start" ? 0 : -20) : 0;
+    const textShift = hasLogo ? (label.anchor === "start" ? 22 : -2) : 0;
+
+    return (
+      <g>
+        <path
+          d={`M${lineStartX},${lineStartY} L${lineEndX},${lineEndY} L${textX - (label.anchor === "start" ? 4 : -4)},${textY}`}
+          fill="none"
+          stroke="hsl(var(--muted-foreground))"
+          strokeWidth={0.8}
+          opacity={0.5}
+        />
+        {hasLogo && (
+          <image
+            x={textX + logoOffset}
+            y={textY - 8}
+            width={16}
+            height={16}
+            href={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+          />
+        )}
+        <text
+          x={textX + textShift}
+          y={textY}
+          textAnchor={label.anchor}
+          dominantBaseline="central"
+          style={{ fontSize: "10px", fill: "hsl(var(--foreground))" }}
+        >
+          {`${label.name} ${label.pct}%`}
+        </text>
+      </g>
+    );
+  };
+
   return (
     <Card className="border-border/50 col-span-1">
       <CardHeader className="pb-2">
         <CardTitle className="text-xl font-bold">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="h-[320px]">
-        <div className="flex h-full gap-2">
-          {/* Donut chart */}
-          <div className="w-[40%] min-w-[160px] flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={chartData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={100}
-                  paddingAngle={1}
-                  dataKey="value"
-                  stroke="hsl(var(--background))"
-                  strokeWidth={2}
-                  isAnimationActive={true}
-                >
-                  {chartData.map((item, i) => (
-                    <Cell
-                      key={i}
-                      fill={item.name === "Autres" ? "#6b7280" : getColor(item.name, i)}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip content={<CustomTooltip />} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Legend */}
-          <div className="w-[60%] flex items-center">
-            <ScrollArea className="h-full w-full pr-2">
-              <div className="flex flex-col gap-1.5 py-2">
-                {chartData.map((item, i) => {
-                  const pct = total > 0 ? ((item.value / total) * 100).toFixed(1) : "0";
-                  const color = item.name === "Autres" ? "#6b7280" : getColor(item.name, i);
-                  return (
-                    <div key={item.name} className="flex items-center gap-2 text-sm">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: color }}
-                      />
-                      {item.name !== "Autres" && groupBy === "asset" && (
-                        <TickerLogo ticker={item.name} />
-                      )}
-                      <span className="text-foreground truncate">{item.name}</span>
-                      <span className="ml-auto text-muted-foreground tabular-nums whitespace-nowrap">
-                        {pct}%
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </ScrollArea>
-          </div>
-        </div>
+      <CardContent className="h-[420px] flex items-center justify-center">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={chartData}
+              cx="50%"
+              cy="50%"
+              innerRadius={0}
+              outerRadius={outerR}
+              paddingAngle={1}
+              dataKey="value"
+              stroke="hsl(var(--background))"
+              strokeWidth={1}
+              label={renderCustomLabel}
+              labelLine={false}
+              isAnimationActive={true}
+            >
+              {chartData.map((item, i) => (
+                <Cell key={i} fill={item.name === "Autres" ? "#6b7280" : getColor(item.name, i)} />
+              ))}
+            </Pie>
+            <Tooltip content={<CustomTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
       </CardContent>
     </Card>
   );
