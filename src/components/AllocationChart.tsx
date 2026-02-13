@@ -55,7 +55,7 @@ const BRAND_COLORS: Record<string, string> = {
   VOO: "#96151D",
 
   // Japanese
-  "6857.T": "#0067B1",  // Advantest blue
+  "6857.T": "#91003C",  // Advantest magenta
   "7203.T": "#EB0A1E",  // Toyota red
   "6758.T": "#5865F2",  // Sony blueish (custom)
   "9984.T": "#FFCC00",  // SoftBank yellow
@@ -72,6 +72,7 @@ const BRAND_COLORS: Record<string, string> = {
   "RMS.PA": "#F37021",  // Hermes orange
   "TTE.PA": "#ED0000",  // Total red
   "GTT.PA": "#009BDB",  // GTT blue
+  "ADYEN.AS": "#0ABF53", // Adyen green
 
   // Latam
   MELI: "#FFE600", // MercadoLibre yellow
