@@ -45,7 +45,7 @@ const TICKER_DOMAINS: Record<string, string> = {
 
 // Direct image overrides for when favicons are blurry or incorrect
 const TICKER_IMAGE_OVERRIDES: Record<string, string> = {
-    TSM: "https://companieslogo.com/img/orig/TSM-0905d21e.png",
+    TSM: "/tsmc.png",
 };
 
 export function getLogoDomain(ticker: string): string | null {
