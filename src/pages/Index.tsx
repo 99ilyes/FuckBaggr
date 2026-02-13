@@ -32,29 +32,29 @@ export default function Index() {
 
   // Create an effective cache that overrides DB values with live proxy values
   const effectiveAssetsCache = useMemo(() => {
-    return assetsCache.map(a => ({
+    return assetsCache.map((a) => ({
       ...a,
-      last_price: livePriceMap[a.ticker] || a.last_price,
+      last_price: livePriceMap[a.ticker] || a.last_price
     }));
   }, [assetsCache, livePriceMap]);
 
   const lastUpdate = useMemo(() => {
     if (!assetsCache || assetsCache.length === 0) return null;
-    const dates = assetsCache.map(a => new Date(a.updated_at).getTime());
+    const dates = assetsCache.map((a) => new Date(a.updated_at).getTime());
     const maxDate = Math.max(...dates);
     return maxDate > 0 ? new Date(maxDate) : null;
   }, [assetsCache]);
 
   const filteredTransactions = useMemo(
     () =>
-      selectedPortfolioId
-        ? allTransactions.filter((t) => t.portfolio_id === selectedPortfolioId)
-        : allTransactions,
+    selectedPortfolioId ?
+    allTransactions.filter((t) => t.portfolio_id === selectedPortfolioId) :
+    allTransactions,
     [allTransactions, selectedPortfolioId]
   );
 
   // Use EUR as base currency for now
-  const selectedPortfolio = portfolios.find(p => p.id === selectedPortfolioId);
+  const selectedPortfolio = portfolios.find((p) => p.id === selectedPortfolioId);
   const baseCurrency = (selectedPortfolio as any)?.currency || "EUR";
 
   const positions = useMemo(
@@ -64,7 +64,7 @@ export default function Index() {
 
   // Get unique tickers from positions for historical price fetching
   const positionTickers = useMemo(
-    () => positions.map(p => p.ticker).filter(t => !t.includes("=X")),
+    () => positions.map((p) => p.ticker).filter((t) => !t.includes("=X")),
     [positions]
   );
   const { data: historicalPrices = {} } = useHistoricalPrices(positionTickers);
@@ -96,14 +96,14 @@ export default function Index() {
   }, [portfolios, allTransactions, effectiveAssetsCache]);
 
   const totalGainLoss = totalValue - totalInvested;
-  const totalGainLossPercent = totalInvested > 0 ? (totalGainLoss / totalInvested) * 100 : 0;
+  const totalGainLossPercent = totalInvested > 0 ? totalGainLoss / totalInvested * 100 : 0;
 
   // Fetch market data (prev close + current price) via edge function
   const fetchMarketData = useCallback(async (tickers: string[]) => {
     if (tickers.length === 0) return;
     try {
       const { data, error } = await supabase.functions.invoke("fetch-prices", {
-        body: { tickers },
+        body: { tickers }
       });
       if (error) {
         console.warn("fetch-prices error:", error);
@@ -116,8 +116,8 @@ export default function Index() {
         if (info?.previousClose) prevMap[ticker] = info.previousClose;
         if (info?.price) liveMap[ticker] = info.price;
       }
-      setPreviousCloseMap(prev => ({ ...prev, ...prevMap }));
-      setLivePriceMap(prev => ({ ...prev, ...liveMap }));
+      setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
+      setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
     } catch (e) {
       console.warn("Failed to fetch market data", e);
     }
@@ -128,8 +128,8 @@ export default function Index() {
 
   // Fetch on load (only when ticker list actually changes)
   useEffect(() => {
-    const tickerSet = new Set(positions.map(p => p.ticker));
-    Object.keys(cashBalances).forEach(c => {
+    const tickerSet = new Set(positions.map((p) => p.ticker));
+    Object.keys(cashBalances).forEach((c) => {
       if (c !== baseCurrency && Math.abs(cashBalances[c]) > 0.01) {
         tickerSet.add(`${c}${baseCurrency}=X`);
         tickerSet.add(`${baseCurrency}${c}=X`);
@@ -148,10 +148,10 @@ export default function Index() {
     try {
       const tickers = [...new Set(allTransactions.filter((t) => t.ticker).map((t) => t.ticker!))] as string[];
       // Add FX pairs for used currencies
-      const currencies = new Set(positions.map(p => p.currency));
-      Object.keys(cashBalances).forEach(c => currencies.add(c));
+      const currencies = new Set(positions.map((p) => p.currency));
+      Object.keys(cashBalances).forEach((c) => currencies.add(c));
       currencies.delete(baseCurrency);
-      currencies.forEach(c => {
+      currencies.forEach((c) => {
         tickers.push(`${c}${baseCurrency}=X`);
         tickers.push(`${baseCurrency}${c}=X`);
       });
@@ -163,7 +163,7 @@ export default function Index() {
       }
 
       const { error } = await supabase.functions.invoke("fetch-prices", {
-        body: { tickers },
+        body: { tickers }
       });
       if (error) console.warn("Supabase fetch-prices error (ignoring if proxy works):", error);
 
@@ -200,7 +200,7 @@ export default function Index() {
         color: p.color,
         dailyChange: change,
         dailyChangePct: changePct,
-        currency: pCurrency,
+        currency: pCurrency
       } as PortfolioPerformance;
     });
   }, [selectedPortfolioId, portfolios, allTransactions, effectiveAssetsCache, baseCurrency, previousCloseMap]);
@@ -216,18 +216,18 @@ export default function Index() {
             </div>
             <div className="hidden sm:flex items-center gap-3 ml-2 pl-4 border-l border-border/50">
               <span className="text-sm font-medium tabular-nums">{formatCurrency(totalValue, baseCurrency)}</span>
-              <span className={`text-sm font-medium tabular-nums ${totalGainLossPercent >= 0 ? "text-gain" : "text-loss"}`}>
-                {formatPercent(totalGainLossPercent)}
-              </span>
+              
+
+
             </div>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2">
-              {lastUpdate && (
-                <span className="text-[10px] text-muted-foreground tabular-nums hidden sm:inline-block">
+              {lastUpdate &&
+              <span className="text-[10px] text-muted-foreground tabular-nums hidden sm:inline-block">
                   {lastUpdate.toLocaleString()}
                 </span>
-              )}
+              }
               <Button variant="outline" size="sm" onClick={handleRefreshPrices} disabled={refreshing}>
                 <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
                 <span className="hidden sm:inline ml-1">Actualiser</span>
@@ -250,8 +250,8 @@ export default function Index() {
           portfolios={portfolios}
           selectedId={selectedPortfolioId}
           onSelect={setSelectedPortfolioId}
-          onCreateClick={() => setCreatePortfolioOpen(true)}
-        />
+          onCreateClick={() => setCreatePortfolioOpen(true)} />
+
 
         <KPICards
           totalValue={totalValue}
@@ -266,15 +266,15 @@ export default function Index() {
           baseCurrency={baseCurrency}
           previousCloseMap={previousCloseMap}
           transactions={filteredTransactions}
-          portfolioPerformances={portfolioPerformances}
-        />
+          portfolioPerformances={portfolioPerformances} />
+
 
         <div className="grid gap-4 md:grid-cols-2">
           <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
           <TopMovers
             positions={positions}
-            assetsCache={effectiveAssetsCache}
-          />
+            assetsCache={effectiveAssetsCache} />
+
         </div>
 
         <Tabs defaultValue="positions" className="space-y-4">
@@ -314,13 +314,13 @@ export default function Index() {
         open={addTransactionOpen}
         onOpenChange={setAddTransactionOpen}
         portfolios={portfolios}
-        defaultPortfolioId={selectedPortfolioId || undefined}
-      />
+        defaultPortfolioId={selectedPortfolioId || undefined} />
+
       <ImportTransactionsDialog
         open={importTransactionsOpen}
         onOpenChange={setImportTransactionsOpen}
-        portfolios={portfolios}
-      />
-    </div>
-  );
+        portfolios={portfolios} />
+
+    </div>);
+
 }
