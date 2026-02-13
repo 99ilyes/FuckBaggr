@@ -77,7 +77,7 @@ const BRAND_COLORS: Record<string, string> = {
   MELI: "#FFE600", // MercadoLibre yellow
 
   // Others
-  NBIS: "#000000",
+  NBIS: "#33C481", // Nebius Green
   GEV: "#005F9E",
 
   // Portfolios (fallback)
