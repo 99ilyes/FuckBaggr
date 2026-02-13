@@ -43,6 +43,11 @@ const TICKER_DOMAINS: Record<string, string> = {
     LITE: "lumentum.com",
 };
 
+// Direct image overrides for when favicons are blurry or incorrect
+const TICKER_IMAGE_OVERRIDES: Record<string, string> = {
+    TSM: "https://logodownload.org/wp-content/uploads/2022/05/tsmc-logo-1.png", // Clearer logo
+};
+
 export function getLogoDomain(ticker: string): string | null {
     if (TICKER_DOMAINS[ticker]) return TICKER_DOMAINS[ticker];
     const base = ticker.split(".")[0];
@@ -50,11 +55,22 @@ export function getLogoDomain(ticker: string): string | null {
     return null;
 }
 
+export function getLogoUrl(ticker: string): string | null {
+    if (TICKER_IMAGE_OVERRIDES[ticker]) return TICKER_IMAGE_OVERRIDES[ticker];
+    const base = ticker.split(".")[0];
+    if (TICKER_IMAGE_OVERRIDES[base]) return TICKER_IMAGE_OVERRIDES[base];
+
+    const domain = getLogoDomain(ticker);
+    if (!domain) return null;
+
+    return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+}
+
 export function TickerLogo({ ticker }: { ticker: string }) {
     const [failed, setFailed] = useState(false);
-    const domain = getLogoDomain(ticker);
+    const logoUrl = getLogoUrl(ticker);
 
-    if (!domain || failed) {
+    if (!logoUrl || failed) {
         // Fallback: colored initial letter
         const letter = ticker.charAt(0).toUpperCase();
         const hue = ticker.split("").reduce((h, c) => h + c.charCodeAt(0), 0) % 360;
@@ -70,7 +86,7 @@ export function TickerLogo({ ticker }: { ticker: string }) {
 
     return (
         <img
-            src={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`}
+            src={logoUrl}
             alt={ticker}
             className="w-7 h-7 rounded-md object-contain shrink-0 p-0.5 bg-white/90"
             onError={() => setFailed(true)}
