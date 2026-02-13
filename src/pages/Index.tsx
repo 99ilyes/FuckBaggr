@@ -215,7 +215,7 @@ export default function Index() {
               <span className="text-lg font-semibold tracking-tight">FuckBaggr</span>
             </div>
             <div className="hidden sm:flex items-center gap-3 ml-2 pl-4 border-l border-border/50">
-              <span className="text-sm font-medium tabular-nums">{formatCurrency(totalValue, baseCurrency)}</span>
+              
               
 
 
