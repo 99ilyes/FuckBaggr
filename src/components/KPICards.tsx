@@ -72,7 +72,7 @@ export function KPICards({
             <span className="text-xs font-medium uppercase tracking-wider">Valeur totale</span>
           </div>
           <div className="flex-1 flex flex-col justify-center w-full">
-            <p className="text-3xl font-bold tracking-tight">{formatCurrency(totalValue, baseCurrency)}</p>
+            <p className="text-2xl font-bold tracking-tight">{formatCurrency(totalValue, baseCurrency)}</p>
             <p className="text-sm text-muted-foreground mt-1">
               Investi: {formatCurrency(totalInvested, baseCurrency)}
             </p>
@@ -91,7 +91,7 @@ export function KPICards({
             <span className="text-xs font-medium uppercase tracking-wider">Performance</span>
           </div>
           <div className="flex-1 flex flex-col justify-center w-full">
-            <p className={`text-3xl font-bold tracking-tight ${isPositive ? "text-emerald-500" : "text-rose-500"}`}>
+            <p className={`text-2xl font-bold tracking-tight ${isPositive ? "text-emerald-500" : "text-rose-500"}`}>
               {formatPercent(totalGainLossPercent)}
             </p>
             <p className={`text-sm mt-1 ${isPositive ? "text-emerald-500/70" : "text-rose-500/70"}`}>
@@ -108,7 +108,7 @@ export function KPICards({
             <span className="text-xs font-medium uppercase tracking-wider">Perf du jour</span>
           </div>
           <div className="flex-1 flex flex-col justify-center w-full">
-            <p className={`text-3xl font-bold tracking-tight ${isDayPositive ? "text-emerald-500" : "text-rose-500"}`}>
+            <p className={`text-2xl font-bold tracking-tight ${isDayPositive ? "text-emerald-500" : "text-rose-500"}`}>
               {formatPercent(dailyPerf.changePct)}
             </p>
             <p className={`text-sm mt-1 ${isDayPositive ? "text-emerald-500/70" : "text-rose-500/70"}`}>
@@ -158,14 +158,14 @@ export function KPICards({
               </div>
               {currencies.length === 0 ? (
                 <>
-                  <p className="text-xl font-semibold tracking-tight">
+                  <p className="text-2xl font-semibold tracking-tight">
                     {formatCurrency(0, baseCurrency)}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">Disponible</p>
                 </>
               ) : currencies.length === 1 ? (
                 <>
-                  <p className="text-xl font-semibold tracking-tight">
+                  <p className="text-2xl font-semibold tracking-tight">
                     {formatCurrency(currencies[0][1], currencies[0][0])}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">Disponible</p>
