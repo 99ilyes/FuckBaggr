@@ -45,12 +45,6 @@ const TICKER_DOMAINS: Record<string, string> = {
 
 // Direct image overrides for when favicons are blurry or incorrect
 const TICKER_IMAGE_OVERRIDES: Record<string, string> = {
-    TSM: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/29/TSMC_logo.svg/512px-TSMC_logo.svg.png",
-    // Fallback if the above fails again: "https://cdn.worldvectorlogo.com/logos/tsmc-1.svg"
-    // Let's try a different stable PNG source if the user says it failed.
-    // Actually, let's use a very generic reliable one.
-    // Reverting to the one that worked for me or a new one.
-    // Let's try:
     TSM: "https://companieslogo.com/img/orig/TSM-0905d21e.png",
 };
 
