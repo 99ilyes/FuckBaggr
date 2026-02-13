@@ -45,7 +45,8 @@ const TICKER_DOMAINS: Record<string, string> = {
 
 // Direct image overrides for when favicons are blurry or incorrect
 const TICKER_IMAGE_OVERRIDES: Record<string, string> = {
-    TSM: "/tsmc.png",
+    // Embedded SVG for reliability. Simple red text on white background.
+    TSM: "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 100'%3E%3Crect width='100%25' height='100%25' fill='white'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-weight='bold' font-size='80' fill='%23CC0000'%3ETSMC%3C/text%3E%3C/svg%3E",
 };
 
 export function getLogoDomain(ticker: string): string | null {
