@@ -37,87 +37,91 @@ export function TransactionsTable({ transactions, portfolios }: Props) {
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Date</TableHead>
-          <TableHead>Type</TableHead>
-          <TableHead>Ticker</TableHead>
-          <TableHead>Portefeuille</TableHead>
-          <TableHead className="text-right">Qté</TableHead>
-          <TableHead className="text-right">Prix</TableHead>
-          <TableHead className="text-right">Frais</TableHead>
-          <TableHead className="text-right">Total</TableHead>
-          <TableHead></TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {transactions.map((tx) => {
-          const total = (tx.quantity || 0) * (tx.unit_price || 0) + tx.fees;
-          const portfolio = portfolioMap.get(tx.portfolio_id);
-          return (
-            <TableRow key={tx.id}>
-              <TableCell className="text-sm">
-                {format(new Date(tx.date), "dd MMM yyyy", { locale: fr })}
-              </TableCell>
-              <TableCell>
-                <span className={`text-xs font-medium px-2 py-0.5 rounded ${tx.type === "buy" ? "bg-primary/20 text-primary" :
-                  tx.type === "sell" ? "bg-loss/20 text-loss" :
-                    tx.type === "deposit" ? "bg-gain/20 text-gain" :
-                      tx.type === "conversion" ? "bg-accent text-accent-foreground" :
-                        "bg-muted text-muted-foreground"
-                  }`}>
-                  {TYPE_LABELS[tx.type] || tx.type}
-                </span>
-              </TableCell>
-              <TableCell className="font-mono text-sm">
-                {tx.type === "conversion"
-                  ? `${tx.ticker || "?"} → ${(tx as any).currency || "?"}`
-                  : tx.ticker || "—"}
-              </TableCell>
-              <TableCell className="text-sm">
-                <div className="flex items-center gap-1.5">
-                  {portfolio && (
-                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: portfolio.color }} />
-                  )}
-                  {portfolio?.name || "—"}
-                </div>
-              </TableCell>
-              <TableCell className="text-right font-mono text-sm">{tx.quantity?.toFixed(2) || "—"}</TableCell>
-              <TableCell className="text-right font-mono text-sm">
-                {tx.unit_price ? formatCurrency(tx.unit_price, tx.currency || "EUR") : "—"}
-              </TableCell>
-              <TableCell className="text-right font-mono text-sm">{formatCurrency(tx.fees, tx.currency || "EUR")}</TableCell>
-              <TableCell className="text-right font-mono text-sm">{formatCurrency(total, tx.currency || "EUR")}</TableCell>
-              <TableCell>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-primary"
-                  onClick={() => setEditingTransaction(tx)}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-loss"
-                  onClick={() => deleteTransaction.mutate(tx.id)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </TableCell>
+    <div className="overflow-x-auto">
+      <div className="min-w-[800px]">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Ticker</TableHead>
+              <TableHead>Portefeuille</TableHead>
+              <TableHead className="text-right">Qté</TableHead>
+              <TableHead className="text-right">Prix</TableHead>
+              <TableHead className="text-right">Frais</TableHead>
+              <TableHead className="text-right">Total</TableHead>
+              <TableHead></TableHead>
             </TableRow>
-          );
-        })}
-      </TableBody>
-      {editingTransaction && (
-        <EditTransactionDialog
-          open={!!editingTransaction}
-          onOpenChange={(open) => !open && setEditingTransaction(null)}
-          transaction={editingTransaction}
-        />
-      )}
-    </Table>
+          </TableHeader>
+          <TableBody>
+            {transactions.map((tx) => {
+              const total = (tx.quantity || 0) * (tx.unit_price || 0) + tx.fees;
+              const portfolio = portfolioMap.get(tx.portfolio_id);
+              return (
+                <TableRow key={tx.id}>
+                  <TableCell className="text-sm">
+                    {format(new Date(tx.date), "dd MMM yyyy", { locale: fr })}
+                  </TableCell>
+                  <TableCell>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${tx.type === "buy" ? "bg-primary/20 text-primary" :
+                      tx.type === "sell" ? "bg-loss/20 text-loss" :
+                        tx.type === "deposit" ? "bg-gain/20 text-gain" :
+                          tx.type === "conversion" ? "bg-accent text-accent-foreground" :
+                            "bg-muted text-muted-foreground"
+                      }`}>
+                      {TYPE_LABELS[tx.type] || tx.type}
+                    </span>
+                  </TableCell>
+                  <TableCell className="font-mono text-sm">
+                    {tx.type === "conversion"
+                      ? `${tx.ticker || "?"} → ${(tx as any).currency || "?"}`
+                      : tx.ticker || "—"}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <div className="flex items-center gap-1.5">
+                      {portfolio && (
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: portfolio.color }} />
+                      )}
+                      {portfolio?.name || "—"}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">{tx.quantity?.toFixed(2) || "—"}</TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    {tx.unit_price ? formatCurrency(tx.unit_price, tx.currency || "EUR") : "—"}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">{formatCurrency(tx.fees, tx.currency || "EUR")}</TableCell>
+                  <TableCell className="text-right font-mono text-sm">{formatCurrency(total, tx.currency || "EUR")}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-primary"
+                      onClick={() => setEditingTransaction(tx)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-loss"
+                      onClick={() => deleteTransaction.mutate(tx.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+          {editingTransaction && (
+            <EditTransactionDialog
+              open={!!editingTransaction}
+              onOpenChange={(open) => !open && setEditingTransaction(null)}
+              transaction={editingTransaction}
+            />
+          )}
+        </Table>
+      </div>
+    </div>
   );
 }

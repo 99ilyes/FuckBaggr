@@ -47,9 +47,9 @@ export default function Index() {
 
   const filteredTransactions = useMemo(
     () =>
-    selectedPortfolioId ?
-    allTransactions.filter((t) => t.portfolio_id === selectedPortfolioId) :
-    allTransactions,
+      selectedPortfolioId ?
+        allTransactions.filter((t) => t.portfolio_id === selectedPortfolioId) :
+        allTransactions,
     [allTransactions, selectedPortfolioId]
   );
 
@@ -215,8 +215,8 @@ export default function Index() {
               <span className="text-lg font-semibold tracking-tight">FuckBaggr</span>
             </div>
             <div className="hidden sm:flex items-center gap-3 ml-2 pl-4 border-l border-border/50">
-              
-              
+
+
 
 
             </div>
@@ -224,7 +224,7 @@ export default function Index() {
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2">
               {lastUpdate &&
-              <span className="text-[10px] text-muted-foreground tabular-nums hidden sm:inline-block">
+                <span className="text-[10px] text-muted-foreground tabular-nums hidden sm:inline-block">
                   {lastUpdate.toLocaleString()}
                 </span>
               }
@@ -269,7 +269,7 @@ export default function Index() {
           portfolioPerformances={portfolioPerformances} />
 
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
           <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
           <TopMovers
             positions={positions}
