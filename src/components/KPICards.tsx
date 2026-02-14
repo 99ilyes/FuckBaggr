@@ -126,26 +126,22 @@ export function KPICards({
                 <TrendingUp className="h-4 w-4" />
                 <span className="text-xs font-medium uppercase tracking-wider">Détail par portefeuille</span>
               </div>
-              <div className="space-y-2 w-full">
+              <div className="space-y-2 w-full overflow-hidden">
                 {portfolioPerformances.map((perf) => (
-                  <div key={perf.id} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: perf.color }}
-                      />
-                      <span className="truncate max-w-[80px] sm:max-w-[100px]" title={perf.name}>
-                        {perf.name}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className={perf.dailyChange >= 0 ? "text-emerald-500" : "text-rose-500"}>
-                        {formatPercent(perf.dailyChangePct)}
-                      </span>
-                      <span className="text-muted-foreground tabular-nums">
-                        {formatCurrency(perf.dailyChange, baseCurrency)}
-                      </span>
-                    </div>
+                  <div key={perf.id} className="flex items-center gap-1.5 text-xs min-w-0">
+                    <span
+                      className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: perf.color }}
+                    />
+                    <span className="font-medium shrink-0" title={perf.name}>
+                      {perf.name}
+                    </span>
+                    <span className={`shrink-0 ${perf.dailyChange >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                      {formatPercent(perf.dailyChangePct)}
+                    </span>
+                    <span className="text-muted-foreground tabular-nums truncate hidden sm:inline">
+                      {formatCurrency(perf.dailyChange, baseCurrency)}
+                    </span>
                   </div>
                 ))}
               </div>
