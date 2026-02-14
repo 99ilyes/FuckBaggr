@@ -139,7 +139,7 @@ export function KPICards({
                     <span className={`shrink-0 ${perf.dailyChange >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
                       {formatPercent(perf.dailyChangePct)}
                     </span>
-                    <span className="text-muted-foreground tabular-nums truncate hidden sm:inline">
+                    <span className="text-muted-foreground tabular-nums truncate">
                       {formatCurrency(perf.dailyChange, baseCurrency)}
                     </span>
                   </div>
