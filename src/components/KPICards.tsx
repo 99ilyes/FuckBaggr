@@ -64,7 +64,7 @@ export function KPICards({
   const isDayPositive = dailyPerf.change >= 0;
 
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:gap-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 lg:gap-4">
       <Card className="border-border/50">
         <CardContent className="p-4 flex flex-col items-center h-full text-center">
           <div className="flex items-center justify-center gap-2 text-muted-foreground mb-2 w-full">
