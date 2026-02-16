@@ -190,7 +190,7 @@ export default function Index() {
         cash,
         effectiveAssetsCache,
         calculatePortfolioStats(pos, cash, effectiveAssetsCache, txs, pCurrency).totalValue,
-        baseCurrency, // Use global base currency for display
+        pCurrency, // Use portfolio currency for display consistency with totalValue
         previousCloseMap
       );
 
@@ -200,7 +200,8 @@ export default function Index() {
         color: p.color,
         dailyChange: change,
         dailyChangePct: changePct,
-        currency: pCurrency
+        currency: pCurrency,
+        totalValue: calculatePortfolioStats(pos, cash, effectiveAssetsCache, txs, pCurrency).totalValue
       } as PortfolioPerformance;
     });
   }, [selectedPortfolioId, portfolios, allTransactions, effectiveAssetsCache, baseCurrency, previousCloseMap]);

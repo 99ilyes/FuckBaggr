@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Wallet, CalendarClock, Coins } from "lucide-react";
-import { formatCurrency, formatPercent, CashBalances, AssetPosition, getExchangeRate, calculateDailyPerformance } from "@/lib/calculations";
+import { formatCurrency, formatPercent, CashBalances, AssetPosition, calculateDailyPerformance } from "@/lib/calculations";
 import { useMemo } from "react";
 import { AssetCache, Transaction } from "@/hooks/usePortfolios";
 
@@ -11,6 +11,7 @@ export interface PortfolioPerformance {
   dailyChange: number;
   dailyChangePct: number;
   currency: string;
+  totalValue: number;
 }
 
 interface KPICardsProps {
@@ -126,22 +127,28 @@ export function KPICards({
                 <TrendingUp className="h-4 w-4" />
                 <span className="text-xs font-medium uppercase tracking-wider">Détail par portefeuille</span>
               </div>
-              <div className="space-y-2 w-full overflow-hidden">
+              <div className="flex flex-col justify-center h-full w-full overflow-hidden gap-1.5 py-1">
                 {portfolioPerformances.map((perf) => (
-                  <div key={perf.id} className="flex items-center gap-1.5 text-xs min-w-0">
-                    <span
-                      className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: perf.color }}
-                    />
-                    <span className="font-medium shrink-0" title={perf.name}>
-                      {perf.name}
-                    </span>
-                    <span className={`shrink-0 ${perf.dailyChange >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
-                      {formatPercent(perf.dailyChangePct)}
-                    </span>
-                    <span className="text-muted-foreground tabular-nums truncate">
-                      {formatCurrency(perf.dailyChange, baseCurrency)}
-                    </span>
+                  <div key={perf.id} className="flex items-center justify-between w-full text-xs min-w-0 gap-2">
+                    <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: perf.color }}
+                      />
+                      <span className="font-medium truncate text-sm" title={perf.name}>
+                        {perf.name}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-0.5 shrink-0 ml-auto text-right">
+                      <span className="text-sm font-bold tabular-nums leading-none">
+                        {formatCurrency(perf.totalValue, perf.currency)}
+                      </span>
+                      <div className={`flex items-center justify-end gap-1 text-xs font-medium tabular-nums leading-none ${perf.dailyChange >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                        <span>{perf.dailyChange > 0 ? "+" : ""}{formatCurrency(perf.dailyChange, perf.currency)}</span>
+                        <span className="opacity-80">({formatPercent(perf.dailyChangePct)})</span>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

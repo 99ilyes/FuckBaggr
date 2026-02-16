@@ -111,10 +111,10 @@ export function PositionsTable({ positions, baseCurrency = "EUR" }: Props) {
                     {formatCurrency(pos.currentValueBase, baseCurrency)}
                   </TableCell>
                   <TableCell className="text-right py-2.5">
-                    <div className={`text-sm font-medium tabular-nums ${pos.gainLossPercent >= 0 ? "text-gain" : "text-loss"}`}>
+                    <div className={`text-sm font-medium tabular-nums ${pos.gainLossPercent >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
                       {formatPercent(pos.gainLossPercent)}
                     </div>
-                    <div className={`text-[11px] tabular-nums ${pos.gainLossBase >= 0 ? "text-gain/60" : "text-loss/60"}`}>
+                    <div className={`text-[11px] tabular-nums ${pos.gainLossBase >= 0 ? "text-emerald-500/70" : "text-rose-500/70"}`}>
                       {formatCurrency(pos.gainLossBase, baseCurrency)}
                     </div>
                   </TableCell>
