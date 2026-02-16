@@ -78,40 +78,44 @@ serve(async (req) => {
     if (mode === "fundamentals") {
       const results: Record<string, any> = {};
 
-      const batchSize = 10;
-      for (let i = 0; i < tickers.length; i += batchSize) {
-        const batch = tickers.slice(i, i + batchSize);
-        const symbols = batch.map(encodeURIComponent).join(",");
-        try {
-          const url = `https://query1.finance.yahoo.com/v6/finance/quote?symbols=${symbols}`;
+      try {
+        // Step 1: Get Yahoo session cookies
+        const pageResp = await fetch("https://finance.yahoo.com/quote/AAPL", {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+          redirect: "follow",
+        });
+        const cookies = pageResp.headers.get("set-cookie") || "";
+
+        // Step 2: Get crumb using cookies
+        const crumbResp = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            Cookie: cookies,
+          },
+        });
+        const crumb = await crumbResp.text();
+
+        // Step 3: Fetch quotes in batches using crumb
+        const batchSize = 10;
+        for (let i = 0; i < tickers.length; i += batchSize) {
+          const batch = tickers.slice(i, i + batchSize);
+          const symbols = batch.map(encodeURIComponent).join(",");
+
+          const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&crumb=${encodeURIComponent(crumb)}`;
           const response = await fetch(url, {
-            headers: { "User-Agent": "Mozilla/5.0" },
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              Cookie: cookies,
+            },
           });
 
           if (!response.ok) {
-            console.error(`Failed to fetch quotes: ${response.status}`);
-            const url7 = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
-            const resp7 = await fetch(url7, {
-              headers: { "User-Agent": "Mozilla/5.0" },
-            });
-            if (resp7.ok) {
-              const data7 = await resp7.json();
-              const quotes7 = data7.quoteResponse?.result || [];
-              for (const q of quotes7) {
-                results[q.symbol] = {
-                  trailingEps: q.epsTrailingTwelveMonths ?? null,
-                  forwardEps: q.epsForward ?? null,
-                  trailingPE: q.trailingPE ?? null,
-                  forwardPE: q.forwardPE ?? null,
-                  currentPrice: q.regularMarketPrice ?? null,
-                  currency: q.currency ?? "USD",
-                  name: q.shortName ?? q.longName ?? q.symbol,
-                  sector: q.sector ?? null,
-                  industry: q.industry ?? null,
-                };
-              }
-              continue;
-            }
+            console.error(`Failed to fetch quotes: ${response.status}`, await response.text());
             batch.forEach((t) => {
               results[t] = { error: `HTTP ${response.status}` };
             });
@@ -134,12 +138,12 @@ serve(async (req) => {
               industry: q.industry ?? null,
             };
           }
-        } catch (err) {
-          console.error(`Error fetching fundamentals batch:`, err);
-          batch.forEach((t) => {
-            results[t] = { error: String(err) };
-          });
         }
+      } catch (err) {
+        console.error("Error fetching fundamentals:", err);
+        tickers.forEach((t) => {
+          if (!results[t]) results[t] = { error: String(err) };
+        });
       }
 
       return new Response(JSON.stringify({ results }), {
@@ -175,6 +179,7 @@ serve(async (req) => {
         const name = meta.shortName || meta.longName || ticker;
         const currency = meta.currency || "USD";
 
+        // Upsert into assets_cache
         await supabase
           .from("assets_cache")
           .upsert(
@@ -196,6 +201,7 @@ serve(async (req) => {
       }
     };
 
+    // Fetch all tickers in parallel (batches of 5)
     const batchSize = 5;
     for (let i = 0; i < tickers.length; i += batchSize) {
       const batch = tickers.slice(i, i + batchSize);
