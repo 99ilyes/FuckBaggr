@@ -74,6 +74,57 @@ serve(async (req) => {
       });
     }
 
+    // --- MODE: FUNDAMENTALS ---
+    if (mode === "fundamentals") {
+      const results: Record<string, any> = {};
+
+      for (const ticker of tickers) {
+        try {
+          const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=defaultKeyStatistics,financialData,price,earningsTrend`;
+          const response = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+          });
+
+          if (!response.ok) {
+            console.error(`Failed to fetch fundamentals for ${ticker}: ${response.status}`);
+            results[ticker] = { error: `HTTP ${response.status}` };
+            continue;
+          }
+
+          const data = await response.json();
+          const summary = data.quoteSummary?.result?.[0];
+
+          if (!summary) {
+            results[ticker] = { error: "No data" };
+            continue;
+          }
+
+          const keyStats = summary.defaultKeyStatistics || {};
+          const financialData = summary.financialData || {};
+          const priceData = summary.price || {};
+
+          results[ticker] = {
+            trailingEps: keyStats.trailingEps?.raw ?? financialData.trailingEps?.raw ?? null,
+            forwardEps: keyStats.forwardEps?.raw ?? financialData.forwardEps?.raw ?? null,
+            trailingPE: keyStats.trailingPE?.raw ?? priceData.trailingPE?.raw ?? null,
+            forwardPE: keyStats.forwardPE?.raw ?? priceData.forwardPE?.raw ?? null,
+            currentPrice: priceData.regularMarketPrice?.raw ?? financialData.currentPrice?.raw ?? null,
+            currency: priceData.currency ?? "USD",
+            name: priceData.shortName ?? priceData.longName ?? ticker,
+            sector: priceData.sector ?? null,
+            industry: priceData.industry ?? null,
+          };
+        } catch (err) {
+          console.error(`Error fetching fundamentals for ${ticker}:`, err);
+          results[ticker] = { error: String(err) };
+        }
+      }
+
+      return new Response(JSON.stringify({ results }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // --- MODE: DEFAULT (current prices + upsert cache) ---
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -106,8 +157,15 @@ serve(async (req) => {
         await supabase
           .from("assets_cache")
           .upsert(
-            { ticker, last_price: price, previous_close: previousClose, name, currency, updated_at: new Date().toISOString() },
-            { onConflict: "ticker" }
+            {
+              ticker,
+              last_price: price,
+              previous_close: previousClose,
+              name,
+              currency,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "ticker" },
           );
 
         return { ticker, result: { price, previousClose, name, currency } };
@@ -122,7 +180,9 @@ serve(async (req) => {
     for (let i = 0; i < tickers.length; i += batchSize) {
       const batch = tickers.slice(i, i + batchSize);
       const batchResults = await Promise.all(batch.map(fetchTicker));
-      batchResults.forEach(({ ticker, result }) => { results[ticker] = result; });
+      batchResults.forEach(({ ticker, result }) => {
+        results[ticker] = result;
+      });
     }
 
     return new Response(JSON.stringify({ results }), {
