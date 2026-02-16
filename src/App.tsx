@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import Index from "./pages/Index";
 import EarningsTracker from "./pages/EarningsTracker";
+import Watchlist from "./pages/Watchlist";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -20,6 +21,7 @@ const App = () => (
           <Route element={<AppLayout />}>
             <Route path="/" element={<Index />} />
             <Route path="/earnings" element={<EarningsTracker />} />
+            <Route path="/watchlist" element={<Watchlist />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

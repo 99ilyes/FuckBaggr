@@ -74,6 +74,74 @@ serve(async (req) => {
       });
     }
 
+    // --- MODE: FUNDAMENTALS ---
+    if (mode === "fundamentals") {
+      const results: Record<string, any> = {};
+
+      try {
+        // Step 1: Get Yahoo session cookies
+        const pageResp = await fetch("https://finance.yahoo.com/quote/AAPL", {
+          headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+          redirect: "follow",
+        });
+        const cookies = pageResp.headers.get("set-cookie") || "";
+
+        // Step 2: Get crumb using cookies
+        const crumbResp = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Cookie": cookies,
+          },
+        });
+        const crumb = await crumbResp.text();
+
+        // Step 3: Fetch quotes in batches using crumb
+        const batchSize = 10;
+        for (let i = 0; i < tickers.length; i += batchSize) {
+          const batch = tickers.slice(i, i + batchSize);
+          const symbols = batch.map(encodeURIComponent).join(",");
+
+          const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&crumb=${encodeURIComponent(crumb)}`;
+          const response = await fetch(url, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Cookie": cookies,
+            },
+          });
+
+          if (!response.ok) {
+            console.error(`Failed to fetch quotes: ${response.status}`, await response.text());
+            batch.forEach(t => { results[t] = { error: `HTTP ${response.status}` }; });
+            continue;
+          }
+
+          const data = await response.json();
+          const quotes = data.quoteResponse?.result || [];
+
+          for (const q of quotes) {
+            results[q.symbol] = {
+              trailingEps: q.epsTrailingTwelveMonths ?? null,
+              forwardEps: q.epsForward ?? null,
+              trailingPE: q.trailingPE ?? null,
+              forwardPE: q.forwardPE ?? null,
+              currentPrice: q.regularMarketPrice ?? null,
+              currency: q.currency ?? "USD",
+              name: q.shortName ?? q.longName ?? q.symbol,
+              sector: q.sector ?? null,
+              industry: q.industry ?? null,
+            };
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching fundamentals:", err);
+        tickers.forEach(t => { if (!results[t]) results[t] = { error: String(err) }; });
+      }
+
+      return new Response(JSON.stringify({ results }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // --- MODE: DEFAULT (current prices + upsert cache) ---
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

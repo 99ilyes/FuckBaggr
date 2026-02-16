@@ -1,4 +1,4 @@
-import { LayoutDashboard, BarChart3 } from "lucide-react";
+import { LayoutDashboard, BarChart3, Eye } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import {
@@ -15,6 +15,7 @@ import {
 const items = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Earnings Tracker", url: "/earnings", icon: BarChart3 },
+  { title: "Watchlist", url: "/watchlist", icon: Eye },
 ];
 
 export function AppSidebar() {
