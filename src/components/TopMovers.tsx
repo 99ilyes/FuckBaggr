@@ -78,9 +78,9 @@ export function TopMovers({ positions, assetsCache }: Props) {
             </CardHeader>
             <CardContent className="py-0 px-2 pb-2">
                 {variations.length > 0 ? (
-                    <ScrollArea className="max-h-[400px]">
+                    <div>
                         {variations.map(v => <MoverRow key={v.ticker} item={v} />)}
-                    </ScrollArea>
+                    </div>
                 ) : (
                     <div className="text-xs text-muted-foreground p-4 text-center">Aucune variation disponible</div>
                 )}
