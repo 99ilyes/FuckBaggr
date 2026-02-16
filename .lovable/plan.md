@@ -1,52 +1,37 @@
 
 
-## Adaptation mobile du graphique de repartition
+## Afficher toutes les variations dans une seule liste
 
-### Probleme
-Sur mobile (390px de large), le camembert avec les traits de legende deborde completement :
-- Les labels a gauche sortent de l'ecran
-- Les traits se croisent et se superposent
-- Le rayon du camembert (105px) et l'offset des labels (160px) sont fixes et ne s'adaptent pas a la largeur
+### Objectif
+Remplacer les deux cartes separees "Plus fortes hausses (Top 5)" et "Plus fortes baisses (Top 5)" par une **unique carte** listant **toutes** les variations des titres detenus, triees de la plus forte hausse a la plus forte baisse.
 
-### Solution
-Sur mobile, basculer automatiquement vers un **donut compact + legende HTML en dessous** (pas de traits SVG). Sur desktop, conserver le camembert plein avec traits.
+### Changements dans `src/components/TopMovers.tsx`
 
-### Changements dans `src/components/AllocationChart.tsx`
+1. **Supprimer le split gainers/losers** : Plus de `.filter()` ni de `.slice(0, 5)`. La liste `variations` (deja triee par `changePercent` decroissant) est utilisee directement.
 
-1. **Detecter le mobile** avec le hook `useIsMobile()` deja present dans le projet (`src/hooks/use-mobile.tsx`, breakpoint 768px).
+2. **Une seule Card** : Remplacer la grille 2 colonnes par une seule carte avec le titre "Variations du jour".
 
-2. **Mode mobile** (< 768px) :
-   - Donut chart compact (`innerRadius={40}`, `outerRadius={80}`) sans labels SVG (`label={false}`)
-   - Legende HTML en grille 2 colonnes sous le graphique : pastille couleur + ticker + pourcentage
-   - Hauteur du conteneur reduite a 380px (200px donut + ~180px legende)
-   - Pas de `ScrollArea`, juste un `flex-wrap` pour la legende
+3. **ScrollArea si necessaire** : Ajouter un `ScrollArea` avec une hauteur max (~400px) pour gerer les portefeuilles avec beaucoup de positions sans exploser la page.
 
-3. **Mode desktop** (>= 768px) :
-   - Aucun changement : camembert plein avec traits et algorithme anti-chevauchement actuel
+4. **MoverRow inchange** : Le composant de ligne reste identique (logo, nom, ticker, prix, variation %, variation devise).
 
-4. **Regroupement "Autres"** sur mobile : les positions < 2% ou au-dela du top 10 sont fusionnees pour limiter les entrees de la legende
+5. **Message vide** : Si aucune variation disponible, afficher "Aucune variation disponible".
 
-### Rendu mobile attendu
+### Rendu attendu
 
 ```text
-+---------------------------+
-| Par actif                 |
-|                           |
-|        ___                |
-|       /   \               |
-|      | donut|             |
-|       \___/               |
-|                           |
-| * NVDA  25%  * AAPL  18% |
-| * MSFT  12%  * AMZN   9% |
-| * META   7%  * TSLA   5% |
-| * Autres 4%              |
-+---------------------------+
++--------------------------------+
+| Variations du jour             |
+|                                |
+| NVDA   +3.2%   +4.12 USD      |
+| AAPL   +1.8%   +2.50 USD      |
+| MSFT   +0.3%   +0.95 USD      |
+| AMZN   -0.5%   -1.20 USD      |
+| META   -1.2%   -3.40 USD      |
+| TSLA   -2.8%   -6.15 USD      |
++--------------------------------+
 ```
 
-### Details techniques
-- Import `useIsMobile` depuis `@/hooks/use-mobile`
-- Rendu conditionnel : `isMobile ? <MobileLayout /> : <DesktopLayout />` dans le return du composant
-- La legende mobile utilise `getColor()` pour la pastille et affiche `item.pct%`
-- Le tooltip Recharts reste actif dans les deux modes
+### Impact sur `Index.tsx`
+Aucun changement necessaire -- les props `positions` et `assetsCache` restent les memes.
 
