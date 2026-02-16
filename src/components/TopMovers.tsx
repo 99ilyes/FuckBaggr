@@ -2,8 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AssetPosition } from "@/lib/calculations";
 import { AssetCache } from "@/hooks/usePortfolios";
 import { formatPercent, formatCurrency } from "@/lib/calculations";
-import { ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowUp, ArrowDown, TrendingUp } from "lucide-react";
 import { TickerLogo } from "@/components/TickerLogo";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Props {
     positions: AssetPosition[];
@@ -20,7 +21,6 @@ interface AssetVariation {
 }
 
 export function TopMovers({ positions, assetsCache }: Props) {
-    // Compute daily variation for each held position
     const variations: AssetVariation[] = positions
         .filter(p => p.quantity > 0)
         .map(p => {
@@ -28,9 +28,6 @@ export function TopMovers({ positions, assetsCache }: Props) {
             if (!asset || !asset.last_price || !asset.previous_close) return null;
 
             const change = ((asset.last_price - asset.previous_close) / asset.previous_close) * 100;
-            // Option: Total variation = (price - prev) * qty
-            // requested: "variation en devise du titre" (unit variation)
-            // Interpretation: likely unit price variation since "du titre" (of the security)
             const valueVariation = asset.last_price - asset.previous_close;
 
             return {
@@ -38,15 +35,12 @@ export function TopMovers({ positions, assetsCache }: Props) {
                 name: asset.name || p.ticker,
                 changePercent: change,
                 currentPrice: asset.last_price,
-                valueVariation: valueVariation,
+                valueVariation,
                 currency: p.currency
             };
         })
         .filter((v): v is AssetVariation => v !== null)
         .sort((a, b) => b.changePercent - a.changePercent);
-
-    const gainers = variations.filter(v => v.changePercent > 0).slice(0, 5);
-    const losers = variations.filter(v => v.changePercent < 0).reverse().slice(0, 5);
 
     const MoverRow = ({ item }: { item: AssetVariation }) => (
         <div className="flex items-center justify-between py-3 border-b border-border/40 last:border-0 hover:bg-muted/30 transition-colors px-2 rounded-sm">
@@ -75,38 +69,22 @@ export function TopMovers({ positions, assetsCache }: Props) {
     );
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card className="border-border/50">
-                <CardHeader className="py-3 px-4">
-                    <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                        <ArrowUp className="h-4 w-4 text-emerald-500" />
-                        Plus fortes hausses (Top 5)
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="py-0 px-2 pb-2">
-                    {gainers.length > 0 ? (
-                        gainers.map(v => <MoverRow key={v.ticker} item={v} />)
-                    ) : (
-                        <div className="text-xs text-muted-foreground p-4 text-center">Aucune hausse aujourd'hui</div>
-                    )}
-                </CardContent>
-            </Card>
-
-            <Card className="border-border/50">
-                <CardHeader className="py-3 px-4">
-                    <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                        <ArrowDown className="h-4 w-4 text-rose-500" />
-                        Plus fortes baisses (Top 5)
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="py-0 px-2 pb-2">
-                    {losers.length > 0 ? (
-                        losers.map(v => <MoverRow key={v.ticker} item={v} />)
-                    ) : (
-                        <div className="text-xs text-muted-foreground p-4 text-center">Aucune baisse aujourd'hui</div>
-                    )}
-                </CardContent>
-            </Card>
-        </div>
+        <Card className="border-border/50">
+            <CardHeader className="py-3 px-4">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <TrendingUp className="h-4 w-4" />
+                    Variations du jour
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="py-0 px-2 pb-2">
+                {variations.length > 0 ? (
+                    <ScrollArea className="max-h-[400px]">
+                        {variations.map(v => <MoverRow key={v.ticker} item={v} />)}
+                    </ScrollArea>
+                ) : (
+                    <div className="text-xs text-muted-foreground p-4 text-center">Aucune variation disponible</div>
+                )}
+            </CardContent>
+        </Card>
     );
 }
