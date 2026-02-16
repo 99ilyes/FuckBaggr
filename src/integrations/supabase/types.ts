@@ -47,6 +47,51 @@ export type Database = {
         }
         Relationships: []
       }
+      earnings: {
+        Row: {
+          created_at: string
+          debt_ebitda: number | null
+          id: string
+          moat: boolean
+          notes: string | null
+          operating_margin: number | null
+          quarter: string
+          revenue_growth: number | null
+          roe: number | null
+          status: string
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          debt_ebitda?: number | null
+          id?: string
+          moat?: boolean
+          notes?: string | null
+          operating_margin?: number | null
+          quarter: string
+          revenue_growth?: number | null
+          roe?: number | null
+          status?: string
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          debt_ebitda?: number | null
+          id?: string
+          moat?: boolean
+          notes?: string | null
+          operating_margin?: number | null
+          quarter?: string
+          revenue_growth?: number | null
+          roe?: number | null
+          status?: string
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       portfolios: {
         Row: {
           cash_balance: number
