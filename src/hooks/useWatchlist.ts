@@ -87,6 +87,7 @@ export function useFundamentals(tickers: string[]) {
                 return {};
             }
 
+            console.log("Fundamentals data received:", data);
             return (data?.results || {}) as Record<string, TickerFundamentals>;
         },
         enabled: tickers.length > 0,

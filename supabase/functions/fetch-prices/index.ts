@@ -12,11 +12,38 @@ serve(async (req) => {
   }
 
   try {
-    const body = await req.json();
-    const { tickers, mode } = body;
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400, headers: corsHeaders });
+    }
+
+    let { tickers, mode } = body;
+
+    // Handle stringified body (sometimes happens with raw requests)
+    if (typeof body === "string") {
+      try {
+        const parsed = JSON.parse(body);
+        tickers = parsed.tickers;
+        mode = parsed.mode;
+      } catch { }
+    }
+
+    // Handle nested body (if client wraps it in 'body')
+    if (!tickers && body.body) {
+      let inner = body.body;
+      if (typeof inner === "string") {
+        try { inner = JSON.parse(inner); } catch { }
+      }
+      if (inner.tickers) {
+        tickers = inner.tickers;
+        mode = inner.mode;
+      }
+    }
 
     if (!tickers || !Array.isArray(tickers) || tickers.length === 0) {
-      return new Response(JSON.stringify({ error: "tickers array required" }), {
+      return new Response(JSON.stringify({ error: "tickers array required", debugBody: body }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -122,7 +149,7 @@ serve(async (req) => {
             results[q.symbol] = {
               trailingEps: q.epsTrailingTwelveMonths ?? null,
               forwardEps: q.epsForward ?? null,
-              trailingPE: q.trailingPE ?? null,
+              trailingPE: q.trailingPE ?? q.peRatio ?? null,
               forwardPE: q.forwardPE ?? null,
               currentPrice: q.regularMarketPrice ?? null,
               currency: q.currency ?? "USD",
@@ -137,7 +164,7 @@ serve(async (req) => {
         tickers.forEach(t => { if (!results[t]) results[t] = { error: String(err) }; });
       }
 
-      return new Response(JSON.stringify({ results }), {
+      return new Response(JSON.stringify({ results, debugMode: mode }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

@@ -79,6 +79,11 @@ const BRAND_COLORS: Record<string, string> = {
   CTO: "#4285F4",
   PEA: "#FF9900",
   "Crédit": "#34A853",
+  // User requests
+  ASML: "#272A78",
+  "ASML.AS": "#272A78",
+  RACE: "#D40000",
+  "RACE.MI": "#D40000",
 };
 
 const FALLBACK_COLORS = [
