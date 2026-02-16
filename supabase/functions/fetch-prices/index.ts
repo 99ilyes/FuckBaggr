@@ -78,45 +78,67 @@ serve(async (req) => {
     if (mode === "fundamentals") {
       const results: Record<string, any> = {};
 
-      for (const ticker of tickers) {
+      const batchSize = 10;
+      for (let i = 0; i < tickers.length; i += batchSize) {
+        const batch = tickers.slice(i, i + batchSize);
+        const symbols = batch.map(encodeURIComponent).join(",");
         try {
-          const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=defaultKeyStatistics,financialData,price,earningsTrend`;
+          const url = `https://query1.finance.yahoo.com/v6/finance/quote?symbols=${symbols}`;
           const response = await fetch(url, {
             headers: { "User-Agent": "Mozilla/5.0" },
           });
 
           if (!response.ok) {
-            console.error(`Failed to fetch fundamentals for ${ticker}: ${response.status}`);
-            results[ticker] = { error: `HTTP ${response.status}` };
+            console.error(`Failed to fetch quotes: ${response.status}`);
+            const url7 = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
+            const resp7 = await fetch(url7, {
+              headers: { "User-Agent": "Mozilla/5.0" },
+            });
+            if (resp7.ok) {
+              const data7 = await resp7.json();
+              const quotes7 = data7.quoteResponse?.result || [];
+              for (const q of quotes7) {
+                results[q.symbol] = {
+                  trailingEps: q.epsTrailingTwelveMonths ?? null,
+                  forwardEps: q.epsForward ?? null,
+                  trailingPE: q.trailingPE ?? null,
+                  forwardPE: q.forwardPE ?? null,
+                  currentPrice: q.regularMarketPrice ?? null,
+                  currency: q.currency ?? "USD",
+                  name: q.shortName ?? q.longName ?? q.symbol,
+                  sector: q.sector ?? null,
+                  industry: q.industry ?? null,
+                };
+              }
+              continue;
+            }
+            batch.forEach((t) => {
+              results[t] = { error: `HTTP ${response.status}` };
+            });
             continue;
           }
 
           const data = await response.json();
-          const summary = data.quoteSummary?.result?.[0];
+          const quotes = data.quoteResponse?.result || [];
 
-          if (!summary) {
-            results[ticker] = { error: "No data" };
-            continue;
+          for (const q of quotes) {
+            results[q.symbol] = {
+              trailingEps: q.epsTrailingTwelveMonths ?? null,
+              forwardEps: q.epsForward ?? null,
+              trailingPE: q.trailingPE ?? null,
+              forwardPE: q.forwardPE ?? null,
+              currentPrice: q.regularMarketPrice ?? null,
+              currency: q.currency ?? "USD",
+              name: q.shortName ?? q.longName ?? q.symbol,
+              sector: q.sector ?? null,
+              industry: q.industry ?? null,
+            };
           }
-
-          const keyStats = summary.defaultKeyStatistics || {};
-          const financialData = summary.financialData || {};
-          const priceData = summary.price || {};
-
-          results[ticker] = {
-            trailingEps: keyStats.trailingEps?.raw ?? financialData.trailingEps?.raw ?? null,
-            forwardEps: keyStats.forwardEps?.raw ?? financialData.forwardEps?.raw ?? null,
-            trailingPE: keyStats.trailingPE?.raw ?? priceData.trailingPE?.raw ?? null,
-            forwardPE: keyStats.forwardPE?.raw ?? priceData.forwardPE?.raw ?? null,
-            currentPrice: priceData.regularMarketPrice?.raw ?? financialData.currentPrice?.raw ?? null,
-            currency: priceData.currency ?? "USD",
-            name: priceData.shortName ?? priceData.longName ?? ticker,
-            sector: priceData.sector ?? null,
-            industry: priceData.industry ?? null,
-          };
         } catch (err) {
-          console.error(`Error fetching fundamentals for ${ticker}:`, err);
-          results[ticker] = { error: String(err) };
+          console.error(`Error fetching fundamentals batch:`, err);
+          batch.forEach((t) => {
+            results[t] = { error: String(err) };
+          });
         }
       }
 
@@ -153,7 +175,6 @@ serve(async (req) => {
         const name = meta.shortName || meta.longName || ticker;
         const currency = meta.currency || "USD";
 
-        // Upsert into assets_cache
         await supabase
           .from("assets_cache")
           .upsert(
@@ -175,7 +196,6 @@ serve(async (req) => {
       }
     };
 
-    // Fetch all tickers in parallel (batches of 5)
     const batchSize = 5;
     for (let i = 0; i < tickers.length; i += batchSize) {
       const batch = tickers.slice(i, i + batchSize);
