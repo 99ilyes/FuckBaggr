@@ -1,100 +1,51 @@
 
 
-## Earnings Tracker -- Nouvelle page avec menu lateral
+## Corriger la Watchlist : afficher le PER et verifier le fair price
 
-### Vue d'ensemble
+### Problemes identifies
 
-Transformer l'application mono-page en application multi-pages avec un menu lateral (sidebar), et ajouter une page "Earnings Tracker" permettant de suivre les resultats trimestriels des entreprises detenues en portefeuille.
+1. **Edge Function `fetch-prices` cassee** : Le fichier est tronque apres le mode "fundamentals". Il manque tout le code du mode par defaut (recuperation des prix). C'est la cause de l'erreur de build.
 
----
+2. **Le PER n'est pas affiche** : L'appel `useFundamentals` dans la Watchlist invoque `fetch-prices` avec `mode: "fundamentals"`, mais la reponse contient `price`/`previousClose` au lieu de `trailingPE`/`trailingEps`. Cela signifie que le mode fundamentals n'est pas atteint correctement, probablement parce que la fonction deployee est l'ancienne version complete (sans le mode fundamentals) ou que la version actuelle ne compile pas.
 
-### 1. Creer la table `earnings` dans la base de donnees
+3. **Formule de fair price** : La formule dans `calculateFairPrice` est correcte mathematiquement :
+   - `futureEps = EPS * (1 + croissance)^annees`
+   - `futureValue = futureEps * PE_terminal`
+   - `fairPrice = futureValue / (1 + rendement_min)^annees`
+   - `upside = (fairPrice / prix_actuel - 1) * 100`
 
-Nouvelle table avec les colonnes suivantes :
+   C'est un modele DCF simplifie standard. Pas de correction necessaire.
 
-| Colonne | Type | Notes |
-|---------|------|-------|
-| `id` | uuid (PK) | gen_random_uuid() |
-| `ticker` | text | NOT NULL |
-| `quarter` | text | Ex: "Q1 2025" |
-| `revenue_growth` | numeric | Croissance du CA en % |
-| `operating_margin` | numeric | Marge OP en % |
-| `roe` | numeric | ROE en % |
-| `debt_ebitda` | numeric | Ratio Dette/EBITDA |
-| `moat` | boolean | default false |
-| `status` | text | 'hold', 'alleger', 'sell' -- default 'hold' |
-| `notes` | text | Optionnel |
-| `created_at` | timestamptz | default now() |
-| `updated_at` | timestamptz | default now() |
+### Changements prevus
 
-La colonne "Criteres valides /5" sera **calculee dynamiquement** cote frontend (pas stockee en base) en comptant les criteres respectes :
-- Croissance CA > 10%
-- Marge OP > 20%
-- ROE > 30%
-- Dette/EBITDA < 1.5
-- Moat = true
+#### 1. Restaurer `supabase/functions/fetch-prices/index.ts`
 
-RLS : politique ouverte (coherent avec les tables existantes).
+Reecrire le fichier complet avec :
 
----
+- **Mode "fundamentals"** (existant) : Utilise `yahooFinance.quote()` pour recuperer EPS, PE, prix, devise, nom, secteur. Retourne ces donnees dans le champ `results`.
 
-### 2. Ajouter un layout avec sidebar
+- **Mode par defaut (prix)** : Restaurer le code manquant qui :
+  - Recupere les prix actuels via `yahooFinance.quote()` en batches de 5
+  - Met a jour le cache dans la table `assets_cache` (upsert avec prix, nom, devise, previous_close)
+  - Retourne les prix dans le format `{ price, previousClose, name, currency }`
 
-Transformer `App.tsx` pour integrer un `SidebarProvider` et un composant `AppSidebar` avec deux entrees :
-- **Dashboard** (route `/`) -- la page actuelle
-- **Earnings Tracker** (route `/earnings`)
+Le code du mode par defaut sera reconstruit a partir du pattern observe dans les reponses reseau (le format de sortie `{ results: { TICKER: { price, previousClose, name, currency } } }`) et du pattern de batch processing mentionne dans les notes du projet.
 
-Le sidebar utilisera les composants Shadcn existants (`Sidebar`, `SidebarMenu`, etc.) et le composant `NavLink` deja present dans le projet.
+#### 2. Aucun changement dans la Watchlist
 
----
-
-### 3. Creer la page Earnings Tracker
-
-Nouvelle page `src/pages/EarningsTracker.tsx` contenant :
-- Un **tableau** affichant toutes les entrees earnings avec les colonnes :
-  - Ticker (avec logo via `TickerLogo`)
-  - Trimestre
-  - Croissance CA (%) -- vert si > 10%, rouge sinon
-  - Marge OP (%) -- vert si > 20%, rouge sinon
-  - ROE (%) -- vert si > 30%, rouge sinon
-  - Dette/EBITDA -- vert si < 1.5, rouge sinon
-  - Moat -- vert si oui, rouge sinon
-  - Criteres valides /5 -- badge colore selon le score
-  - Statut -- badge hold/alleger/sell
-- Un bouton **"Ajouter"** ouvrant un dialog pour saisir une nouvelle entree
-- Possibilite de **modifier** et **supprimer** des entrees existantes
-- Filtrage possible par ticker
-
----
-
-### 4. Fichiers a creer / modifier
-
-| Fichier | Action |
-|---------|--------|
-| Migration SQL | Creer la table `earnings` |
-| `src/components/AppSidebar.tsx` | Nouveau -- composant sidebar |
-| `src/components/AppLayout.tsx` | Nouveau -- layout avec sidebar + contenu |
-| `src/pages/EarningsTracker.tsx` | Nouveau -- page Earnings Tracker |
-| `src/components/AddEarningsDialog.tsx` | Nouveau -- dialog d'ajout/edition |
-| `src/components/EarningsTable.tsx` | Nouveau -- tableau avec mise en forme conditionnelle |
-| `src/hooks/useEarnings.ts` | Nouveau -- hooks CRUD pour la table earnings |
-| `src/App.tsx` | Modifier -- ajouter le layout sidebar et la route `/earnings` |
-| `src/pages/Index.tsx` | Modification mineure -- retrait du header standalone (integre dans le layout) |
-
----
+La page `Watchlist.tsx` et le hook `useWatchlist.ts` sont deja correctement codes pour afficher le PER (`trailingPE`) et calculer le fair price. Une fois la fonction edge corrigee et deployee, les donnees fondamentales seront correctement recuperees et affichees.
 
 ### Details techniques
 
-**Mise en forme conditionnelle** : chaque cellule de critere utilisera une couleur de fond/texte conditionnelle :
-- Critere valide : texte vert (`text-emerald-500`) + icone check
-- Critere non valide : texte rouge (`text-rose-500`) + icone X
+Le fichier `fetch-prices/index.ts` restaure contiendra :
 
-**Badge Criteres /5** : couleur graduee selon le score (0-1 rouge, 2-3 orange, 4-5 vert).
+```text
+1. CORS headers
+2. Body parsing robuste
+3. Mode "fundamentals" -> yahooFinance.quote() -> retourne EPS, PE, prix, etc.
+4. Mode par defaut -> yahooFinance.quote() en batches de 5 -> upsert assets_cache -> retourne prix
+5. Gestion d'erreurs avec CORS headers sur toutes les reponses
+```
 
-**Badge Statut** :
-- Hold : badge neutre/bleu
-- Alleger : badge orange/warning
-- Sell : badge rouge/destructive
-
-**Tickers disponibles** : le selecteur de ticker dans le dialog d'ajout listera les tickers uniques provenant des transactions existantes pour faciliter la saisie.
+La connexion Supabase dans la fonction utilisera les variables d'environnement `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY` (disponibles automatiquement dans les edge functions).
 
