@@ -168,6 +168,7 @@ export default function EarningsTracker() {
         <CardContent>
           <EarningsTable
             earnings={filtered}
+            allEarnings={earnings}
             onEdit={handleEdit}
             onDelete={handleDelete}
             onUpdateNote={handleUpdateNote}
