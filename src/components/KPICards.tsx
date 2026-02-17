@@ -184,33 +184,35 @@ export function KPICards({
             </>
           ) : (
             <>
-              <div className="flex items-center justify-center gap-2 text-muted-foreground mb-1 w-full">
+              <div className="flex items-center justify-center gap-2 text-muted-foreground mb-2 w-full">
                 <Coins className="h-4 w-4" />
                 <span className="text-xs font-medium uppercase tracking-wider">Cash</span>
               </div>
-              {currencies.length === 0 ? (
-                <>
-                  <p className="text-2xl font-semibold tracking-tight">
-                    {formatCurrency(0, baseCurrency)}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">Disponible</p>
-                </>
-              ) : currencies.length === 1 ? (
-                <>
-                  <p className="text-2xl font-semibold tracking-tight">
-                    {formatCurrency(currencies[0][1], currencies[0][0])}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">Disponible</p>
-                </>
-              ) : (
-                <div className="space-y-0.5">
-                  {currencies.map(([cur, amount]) => (
-                    <p key={cur} className="text-sm font-semibold tracking-tight">
-                      {formatCurrency(amount, cur)}
+              <div className="flex-1 flex flex-col justify-center w-full">
+                {currencies.length === 0 ? (
+                  <>
+                    <p className="text-2xl font-bold tracking-tight">
+                      {formatCurrency(0, baseCurrency)}
                     </p>
-                  ))}
-                </div>
-              )}
+                    <p className="text-sm text-muted-foreground mt-1">Disponible</p>
+                  </>
+                ) : currencies.length === 1 ? (
+                  <>
+                    <p className="text-2xl font-bold tracking-tight">
+                      {formatCurrency(currencies[0][1], currencies[0][0])}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">Disponible</p>
+                  </>
+                ) : (
+                  <div className="space-y-0.5">
+                    {currencies.map(([cur, amount]) => (
+                      <p key={cur} className="text-sm font-bold tracking-tight">
+                        {formatCurrency(amount, cur)}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </CardContent>

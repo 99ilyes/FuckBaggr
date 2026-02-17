@@ -25,6 +25,7 @@ export default function Index() {
   const [refreshing, setRefreshing] = useState(false);
   const [previousCloseMap, setPreviousCloseMap] = useState<Record<string, number>>({});
   const [livePriceMap, setLivePriceMap] = useState<Record<string, number>>({});
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
 
   const { data: portfolios = [] } = usePortfolios();
   const { data: allTransactions = [] } = useTransactions();
@@ -39,11 +40,16 @@ export default function Index() {
   }, [assetsCache, livePriceMap]);
 
   const lastUpdate = useMemo(() => {
-    if (!assetsCache || assetsCache.length === 0) return null;
-    const dates = assetsCache.map((a) => new Date(a.updated_at).getTime());
-    const maxDate = Math.max(...dates);
+    const candidates: number[] = [];
+    if (assetsCache && assetsCache.length > 0) {
+      const dates = assetsCache.map((a) => new Date(a.updated_at).getTime());
+      candidates.push(Math.max(...dates));
+    }
+    if (lastRefreshTime) candidates.push(lastRefreshTime.getTime());
+    if (candidates.length === 0) return null;
+    const maxDate = Math.max(...candidates);
     return maxDate > 0 ? new Date(maxDate) : null;
-  }, [assetsCache]);
+  }, [assetsCache, lastRefreshTime]);
 
   const filteredTransactions = useMemo(
     () =>
@@ -118,6 +124,7 @@ export default function Index() {
       }
       setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
       setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
+      if (Object.keys(liveMap).length > 0) setLastRefreshTime(new Date());
     } catch (e) {
       console.warn("Failed to fetch market data", e);
     }
@@ -169,6 +176,7 @@ export default function Index() {
 
       await refetchCache();
       await fetchMarketData(tickers);
+      setLastRefreshTime(new Date());
       toast({ title: "Prix mis à jour" });
     } catch (e: any) {
       toast({ title: "Erreur", description: e.message, variant: "destructive" });
