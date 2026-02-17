@@ -23,14 +23,12 @@ serve(async (req) => {
 
     const results: Record<string, any> = {};
 
-    // Suppress console spam
     try {
       yahooFinance.suppressNotices(["yahooSurvey"]);
     } catch {}
 
     for (const ticker of tickers) {
       try {
-        // yahoo-finance2 chart method
         const result = await yahooFinance.chart(ticker, { range, interval });
 
         if (!result || !result.quotes) {
@@ -38,8 +36,6 @@ serve(async (req) => {
           continue;
         }
 
-        // Map to our expected format
-        // The library returns 'quotes' array with { date, open, high, low, close, adjclose, volume }
         const history = result.quotes
           .map((q: any) => ({
             time: new Date(q.date).getTime() / 1000,
