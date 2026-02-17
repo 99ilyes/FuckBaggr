@@ -145,7 +145,8 @@ export default function Index() {
     }
   }, [positions, cashBalances, baseCurrency, fetchMarketData]);
 
-  const handleRefreshPrices = async () => {
+  const handleRefreshPrices = useCallback(async () => {
+    if (refreshing) return;
     setRefreshing(true);
     try {
       // Only fetch prices for tickers currently held in portfolio
@@ -160,7 +161,7 @@ export default function Index() {
       });
 
       if (tickers.length === 0) {
-        toast({ title: "Aucun ticker à rafraîchir" });
+        // toast({ title: "Aucun ticker à rafraîchir" }); // Too noisy for auto-refresh
         setRefreshing(false);
         return;
       }
@@ -182,12 +183,34 @@ export default function Index() {
       refetchCache();
 
       setLastRefreshTime(new Date());
-      toast({ title: `Prix mis à jour (${Object.keys(liveMap).length}/${tickers.length} tickers)` });
+      // toast({ title: `Prix mis à jour` }); // Optional: remove noise
     } catch (e: any) {
-      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+      console.error("Auto-refresh error:", e);
     }
     setRefreshing(false);
-  };
+  }, [positions, cashBalances, baseCurrency, refreshing, refetchCache]);
+
+  // Auto-refresh when window gains focus
+  useEffect(() => {
+    const handleFocus = () => {
+      // Refresh if window becomes visible or focused
+      if (document.visibilityState === "visible") {
+        // Check if we haven't refreshed in the last 10 seconds to avoid spamming on rapid toggles
+        const now = new Date();
+        if (!lastRefreshTime || (now.getTime() - lastRefreshTime.getTime() > 10000)) {
+          handleRefreshPrices();
+        }
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [handleRefreshPrices, lastRefreshTime]);
 
   const portfolioPerformances = useMemo(() => {
     if (selectedPortfolioId) return [];
