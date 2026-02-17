@@ -8,7 +8,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// ─── Main handler ────────────────────────────────────────────────────────────
+// ─── Main handler ───────────────────────────────────────
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -59,8 +59,6 @@ serve(async (req) => {
     // --- MODE: FUNDAMENTALS ---
     if (mode === "fundamentals") {
       const results: Record<string, any> = {};
-
-      // Suppress console spam from library
       try {
         yahooFinance.suppressNotices(["yahooSurvey"]);
       } catch {}
@@ -74,15 +72,12 @@ serve(async (req) => {
             currentPrice: q.regularMarketPrice,
             currency: q.currency,
             name: q.longName || q.shortName || q.symbol || t,
-            // Add fundamental fields expected by useFundamentals hook
             trailingPE: q.trailingPE ?? null,
             forwardPE: q.forwardPE ?? null,
             trailingEps: q.epsTrailingTwelveMonths ?? null,
             forwardEps: q.epsForward ?? null,
-            // quote() might not return sector/industry, but let's try mapping if available or null
-            // For full sector/industry, we might need quoteSummary, but keeping it simple for now to avoid multiple requests
             sector: null,
-            industry: null
+            industry: null,
           };
         } catch (err) {
           console.error(`Fundamentals error for ${t}:`, err);
@@ -100,9 +95,6 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const results: Record<string, any> = {};
-
-    // Use the library's batching or just map promises
-    // The library handles cookies/crumbs automatically
     try {
       yahooFinance.suppressNotices(["yahooSurvey"]);
     } catch {}
@@ -118,7 +110,6 @@ serve(async (req) => {
         };
       } catch (err) {
         console.error(`Quote error for ${t}:`, err);
-        // Return structure even on error so client doesn't break
         results[t] = { price: null, previousClose: null, name: t, currency: "USD", error: String(err) };
       }
     });
