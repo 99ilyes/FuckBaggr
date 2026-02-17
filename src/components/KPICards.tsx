@@ -1,5 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Wallet, CalendarClock, Coins } from "lucide-react";
+import { SaxoLogo, IBKRLogo, getBrokerForPortfolio } from "@/components/BrokerLogos";
 import { formatCurrency, formatPercent, CashBalances, AssetPosition, calculateDailyPerformance, getMarketStatusForPositions, MarketStatus } from "@/lib/calculations";
 import { useMemo } from "react";
 import { AssetCache, Transaction } from "@/hooks/usePortfolios";
@@ -161,10 +162,8 @@ export function KPICards({
                 {portfolioPerformances.map((perf) => (
                   <div key={perf.id} className="flex items-center justify-between w-full min-w-0 gap-3 py-2 first:pt-0 last:pb-0">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <span
-                        className="w-3 h-3 rounded-full flex-shrink-0 ring-2 ring-background"
-                        style={{ backgroundColor: perf.color }}
-                      />
+                      {getBrokerForPortfolio(perf.name) === "saxo" && <SaxoLogo className="w-4 h-4 rounded-sm flex-shrink-0" />}
+                      {getBrokerForPortfolio(perf.name) === "ibkr" && <IBKRLogo className="w-4 h-4 rounded-sm flex-shrink-0" />}
                       <span className="text-sm font-semibold truncate" title={perf.name}>
                         {perf.name}
                       </span>

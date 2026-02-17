@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { usePortfolios, useTransactions, useAssetsCache, useHistoricalPrices } from "@/hooks/usePortfolios";
 import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats, formatCurrency, formatPercent, calculateDailyPerformance, getMarketStatusForPositions } from "@/lib/calculations";
+import { fetchPricesClientSide } from "@/lib/yahooFinance";
 import { KPICards, PortfolioPerformance } from "@/components/KPICards";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
 import { CreatePortfolioDialog } from "@/components/CreatePortfolioDialog";
@@ -105,28 +106,43 @@ export default function Index() {
   const totalGainLossPercent = totalInvested > 0 ? totalGainLoss / totalInvested * 100 : 0;
 
   // Fetch market data (prev close + current price) via edge function
+  // Fetch prices client-side (primary) — bypasses Supabase edge function rate limits
   const fetchMarketData = useCallback(async (tickers: string[]) => {
     if (tickers.length === 0) return;
     try {
-      const { data, error } = await supabase.functions.invoke("fetch-prices", {
-        body: { tickers }
-      });
-      if (error) {
-        console.warn("fetch-prices error:", error);
-        return;
-      }
-      const results = data?.results || {};
+      const results = await fetchPricesClientSide(tickers);
       const prevMap: Record<string, number> = {};
       const liveMap: Record<string, number> = {};
-      for (const [ticker, info] of Object.entries(results as Record<string, any>)) {
+      for (const [ticker, info] of Object.entries(results)) {
         if (info?.previousClose) prevMap[ticker] = info.previousClose;
         if (info?.price) liveMap[ticker] = info.price;
       }
-      setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
-      setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
-      if (Object.keys(liveMap).length > 0) setLastRefreshTime(new Date());
+      if (Object.keys(liveMap).length > 0) {
+        setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
+        setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
+        setLastRefreshTime(new Date());
+      }
     } catch (e) {
-      console.warn("Failed to fetch market data", e);
+      console.warn("Client-side fetch failed, trying edge function fallback...", e);
+      // Fallback to edge function
+      try {
+        const { data, error } = await supabase.functions.invoke("fetch-prices", {
+          body: { tickers }
+        });
+        if (!error && data?.results) {
+          const prevMap: Record<string, number> = {};
+          const liveMap: Record<string, number> = {};
+          for (const [ticker, info] of Object.entries(data.results as Record<string, any>)) {
+            if (info?.previousClose) prevMap[ticker] = info.previousClose;
+            if (info?.price) liveMap[ticker] = info.price;
+          }
+          setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
+          setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
+          if (Object.keys(liveMap).length > 0) setLastRefreshTime(new Date());
+        }
+      } catch (e2) {
+        console.warn("Edge function fallback also failed", e2);
+      }
     }
   }, []);
 
@@ -153,7 +169,8 @@ export default function Index() {
   const handleRefreshPrices = async () => {
     setRefreshing(true);
     try {
-      const tickers = [...new Set(allTransactions.filter((t) => t.ticker).map((t) => t.ticker!))] as string[];
+      // Only fetch prices for tickers currently held in portfolio
+      const tickers = [...new Set(positions.map((p) => p.ticker))];
       // Add FX pairs for used currencies
       const currencies = new Set(positions.map((p) => p.currency));
       Object.keys(cashBalances).forEach((c) => currencies.add(c));
@@ -169,15 +186,27 @@ export default function Index() {
         return;
       }
 
-      const { error } = await supabase.functions.invoke("fetch-prices", {
-        body: { tickers }
-      });
-      if (error) console.warn("Supabase fetch-prices error (ignoring if proxy works):", error);
+      // Primary: client-side fetch via CORS proxy
+      const results = await fetchPricesClientSide(tickers);
+      const prevMap: Record<string, number> = {};
+      const liveMap: Record<string, number> = {};
+      for (const [ticker, info] of Object.entries(results)) {
+        if (info?.previousClose) prevMap[ticker] = info.previousClose;
+        if (info?.price) liveMap[ticker] = info.price;
+      }
 
-      await refetchCache();
-      await fetchMarketData(tickers);
+      if (Object.keys(liveMap).length > 0) {
+        setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
+        setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
+      }
+
+      // Background: update DB cache via edge function (fire and forget)
+      supabase.functions.invoke("fetch-prices", { body: { tickers } })
+        .then(() => refetchCache())
+        .catch(() => { });
+
       setLastRefreshTime(new Date());
-      toast({ title: "Prix mis à jour" });
+      toast({ title: `Prix mis à jour (${Object.keys(liveMap).length}/${tickers.length} tickers)` });
     } catch (e: any) {
       toast({ title: "Erreur", description: e.message, variant: "destructive" });
     }

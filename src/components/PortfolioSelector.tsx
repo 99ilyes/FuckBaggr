@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Portfolio, useDeletePortfolio } from "@/hooks/usePortfolios";
 import { Button } from "@/components/ui/button";
+import { SaxoLogo, IBKRLogo, getBrokerForPortfolio } from "@/components/BrokerLogos";
 import { Plus, Trash2 } from "lucide-react";
 import {
   ContextMenu,
@@ -51,8 +52,8 @@ export function PortfolioSelector({
         <button
           onClick={() => onSelect(null)}
           className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${selectedId === null
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground hover:bg-accent"
+            ? "bg-primary text-primary-foreground"
+            : "bg-secondary text-secondary-foreground hover:bg-accent"
             }`}
         >
           Vue globale
@@ -63,14 +64,12 @@ export function PortfolioSelector({
               <button
                 onClick={() => onSelect(p.id)}
                 className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${selectedId === p.id
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-secondary-foreground hover:bg-accent"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-secondary-foreground hover:bg-accent"
                   }`}
               >
-                <span
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: p.color }}
-                />
+                {getBrokerForPortfolio(p.name) === "saxo" && <SaxoLogo className="w-4 h-4 rounded-sm" />}
+                {getBrokerForPortfolio(p.name) === "ibkr" && <IBKRLogo className="w-4 h-4 rounded-sm" />}
                 {p.name}
                 <span className="text-xs opacity-60">{(p as any).currency || "EUR"}</span>
               </button>
