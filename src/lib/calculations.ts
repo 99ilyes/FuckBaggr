@@ -194,6 +194,113 @@ export function formatPercent(value: number): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+export interface MarketStatus {
+  name: string;
+  isOpen: boolean;
+}
+
+/**
+ * Returns { openMinutes, closeMinutes } in UTC for the exchange of a given ticker.
+ * Returns null for FX pairs (trade 24/5).
+ * Uses winter-time approximations (CET=UTC+1, EST=UTC-5, JST=UTC+9, HKT=UTC+8).
+ */
+export function getMarketScheduleUTC(ticker: string): { openMinutes: number; closeMinutes: number } | null {
+  if (ticker.includes("=X")) return null; // FX pairs — always active on weekdays
+
+  const dotIndex = ticker.lastIndexOf(".");
+  const suffix = dotIndex >= 0 ? ticker.substring(dotIndex + 1).toUpperCase() : "";
+
+  // Tokyo Stock Exchange — 9:00–15:00 JST = 0:00–6:00 UTC
+  if (suffix === "T") return { openMinutes: 0, closeMinutes: 6 * 60 };
+
+  // European exchanges — 9:00–17:30 CET = 8:00–16:30 UTC
+  if (["PA", "AS", "MI", "DE", "BR", "SW", "MC", "L"].includes(suffix))
+    return { openMinutes: 8 * 60, closeMinutes: 16 * 60 + 30 };
+
+  // Hong Kong — 9:30–16:00 HKT = 1:30–8:00 UTC
+  if (suffix === "HK") return { openMinutes: 1 * 60 + 30, closeMinutes: 8 * 60 };
+
+  // US exchanges (no dot suffix) — 9:30–16:00 EST = 14:30–21:00 UTC
+  return { openMinutes: 14 * 60 + 30, closeMinutes: 21 * 60 };
+}
+
+/**
+ * Returns a human-readable exchange name from a ticker symbol.
+ */
+export function getMarketName(ticker: string): string {
+  if (ticker.includes("=X")) return "Forex";
+
+  const dotIndex = ticker.lastIndexOf(".");
+  const suffix = dotIndex >= 0 ? ticker.substring(dotIndex + 1).toUpperCase() : "";
+
+  const names: Record<string, string> = {
+    PA: "Euronext Paris",
+    AS: "Euronext Amsterdam",
+    MI: "Borsa Italiana",
+    DE: "Xetra",
+    BR: "Euronext Bruxelles",
+    SW: "SIX Swiss",
+    MC: "BME Madrid",
+    L: "LSE London",
+    T: "Tokyo",
+    HK: "Hong Kong",
+  };
+
+  return names[suffix] || "NYSE/NASDAQ";
+}
+
+/**
+ * Returns true if the ticker's exchange is currently in its trading session.
+ * On weekends, returns false for all tickers.
+ */
+export function isMarketCurrentlyOpen(ticker: string): boolean {
+  const schedule = getMarketScheduleUTC(ticker);
+  if (schedule === null) {
+    // FX: open Mon–Fri
+    const day = new Date().getUTCDay();
+    return day !== 0 && day !== 6;
+  }
+
+  const now = new Date();
+  const day = now.getUTCDay();
+  if (day === 0 || day === 6) return false;
+
+  const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  return currentMinutes >= schedule.openMinutes && currentMinutes < schedule.closeMinutes;
+}
+
+/**
+ * Returns true if the ticker's exchange has already opened for today's session.
+ * On weekends, returns false for all tickers.
+ */
+export function hasMarketOpenedToday(ticker: string): boolean {
+  const schedule = getMarketScheduleUTC(ticker);
+  if (schedule === null) return true; // FX always considered active
+
+  const now = new Date();
+  const day = now.getUTCDay();
+  if (day === 0 || day === 6) return false;
+
+  const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  return currentMinutes >= schedule.openMinutes;
+}
+
+/**
+ * Returns a deduplicated list of markets with their open/closed status
+ * for a given set of positions.
+ */
+export function getMarketStatusForPositions(positions: AssetPosition[]): MarketStatus[] {
+  const seen = new Map<string, boolean>();
+  for (const pos of positions) {
+    if (pos.ticker.includes("=X")) continue; // skip FX
+    const name = getMarketName(pos.ticker);
+    if (!seen.has(name)) {
+      seen.set(name, isMarketCurrentlyOpen(pos.ticker));
+    }
+  }
+  return Array.from(seen.entries()).map(([name, isOpen]) => ({ name, isOpen }));
+}
+
 export function calculateDailyPerformance(
   positions: AssetPosition[],
   cashBalances: CashBalances,
@@ -204,7 +311,13 @@ export function calculateDailyPerformance(
 ) {
   let change = 0;
 
+  // If at least one position's market has opened today, exclude stale ones.
+  // If none have opened (weekend), include all to avoid showing empty data.
+  const anyOpen = positions.some((p) => hasMarketOpenedToday(p.ticker));
+
   for (const pos of positions) {
+    if (anyOpen && !hasMarketOpenedToday(pos.ticker)) continue;
+
     const cached = assetsCache.find(a => a.ticker === pos.ticker);
     const prevClose = previousCloseMap[pos.ticker] ?? (cached as any)?.previous_close ?? pos.currentPrice;
     const priceDiff = pos.currentPrice - prevClose;
@@ -212,7 +325,7 @@ export function calculateDailyPerformance(
     change += pos.quantity * priceDiff * rate;
   }
 
-  // FX impact on cash balances
+  // FX impact on cash balances (FX trades 24/5, always included)
   for (const [cur, amount] of Object.entries(cashBalances || {})) {
     if (cur === baseCurrency || Math.abs(amount) < 0.01) continue;
     const currentRate = getExchangeRate(cur, baseCurrency, assetsCache);

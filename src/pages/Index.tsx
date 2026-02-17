@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { usePortfolios, useTransactions, useAssetsCache, useHistoricalPrices } from "@/hooks/usePortfolios";
-import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats, formatCurrency, formatPercent, calculateDailyPerformance } from "@/lib/calculations";
+import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats, formatCurrency, formatPercent, calculateDailyPerformance, getMarketStatusForPositions } from "@/lib/calculations";
 import { KPICards, PortfolioPerformance } from "@/components/KPICards";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
 import { CreatePortfolioDialog } from "@/components/CreatePortfolioDialog";
@@ -194,6 +194,9 @@ export default function Index() {
         previousCloseMap
       );
 
+      const portfolioMarkets = getMarketStatusForPositions(pos);
+      const hasAnyOpen = portfolioMarkets.some((m) => m.isOpen);
+
       return {
         id: p.id,
         name: p.name,
@@ -201,7 +204,9 @@ export default function Index() {
         dailyChange: change,
         dailyChangePct: changePct,
         currency: pCurrency,
-        totalValue: calculatePortfolioStats(pos, cash, effectiveAssetsCache, txs, pCurrency).totalValue
+        totalValue: calculatePortfolioStats(pos, cash, effectiveAssetsCache, txs, pCurrency).totalValue,
+        hasAnyOpenMarket: hasAnyOpen,
+        marketsInfo: portfolioMarkets,
       } as PortfolioPerformance;
     });
   }, [selectedPortfolioId, portfolios, allTransactions, effectiveAssetsCache, baseCurrency, previousCloseMap]);

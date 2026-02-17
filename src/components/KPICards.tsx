@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Wallet, CalendarClock, Coins } from "lucide-react";
-import { formatCurrency, formatPercent, CashBalances, AssetPosition, calculateDailyPerformance } from "@/lib/calculations";
+import { formatCurrency, formatPercent, CashBalances, AssetPosition, calculateDailyPerformance, getMarketStatusForPositions, MarketStatus } from "@/lib/calculations";
 import { useMemo } from "react";
 import { AssetCache, Transaction } from "@/hooks/usePortfolios";
 
@@ -12,6 +12,8 @@ export interface PortfolioPerformance {
   dailyChangePct: number;
   currency: string;
   totalValue: number;
+  hasAnyOpenMarket: boolean;
+  marketsInfo: MarketStatus[];
 }
 
 interface KPICardsProps {
@@ -63,6 +65,12 @@ export function KPICards({
   }, [positions, cashBalances, assetsCache, baseCurrency, previousCloseMap, totalValue]);
 
   const isDayPositive = dailyPerf.change >= 0;
+
+  // Compute market status for the current positions (portfolio view)
+  const marketsInfo = useMemo(() => {
+    if (portfolioPerformances && portfolioPerformances.length > 0) return []; // global view, handled differently
+    return getMarketStatusForPositions(positions);
+  }, [positions, portfolioPerformances]);
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 lg:gap-4">
@@ -116,6 +124,28 @@ export function KPICards({
               {formatCurrency(dailyPerf.change, baseCurrency)}
             </p>
           </div>
+          {/* Portfolio view: show market open/closed status */}
+          {marketsInfo.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 pt-2 border-t border-border/30 w-full">
+              {marketsInfo.map((m) => (
+                <span key={m.name} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <span className={`w-1.5 h-1.5 rounded-full ${m.isOpen ? "bg-emerald-500" : "bg-rose-500/60"}`} />
+                  {m.name}
+                </span>
+              ))}
+            </div>
+          )}
+          {/* Global view: show which portfolios are contributing */}
+          {portfolioPerformances && portfolioPerformances.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 pt-2 border-t border-border/30 w-full">
+              {portfolioPerformances.map((p) => (
+                <span key={p.id} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <span className={`w-1.5 h-1.5 rounded-full ${p.hasAnyOpenMarket ? "bg-emerald-500" : "bg-rose-500/60"}`} />
+                  {p.name}
+                </span>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -127,27 +157,26 @@ export function KPICards({
                 <TrendingUp className="h-4 w-4" />
                 <span className="text-xs font-medium uppercase tracking-wider">Détail par portefeuille</span>
               </div>
-              <div className="flex flex-col justify-center h-full w-full overflow-hidden gap-1.5 py-1">
+              <div className="flex-1 flex flex-col justify-center w-full divide-y divide-border/40">
                 {portfolioPerformances.map((perf) => (
-                  <div key={perf.id} className="flex items-center justify-between w-full text-xs min-w-0 gap-2">
-                    <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                  <div key={perf.id} className="flex items-center justify-between w-full min-w-0 gap-3 py-2 first:pt-0 last:pb-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <span
-                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        className="w-3 h-3 rounded-full flex-shrink-0 ring-2 ring-background"
                         style={{ backgroundColor: perf.color }}
                       />
-                      <span className="font-medium truncate text-sm" title={perf.name}>
+                      <span className="text-sm font-semibold truncate" title={perf.name}>
                         {perf.name}
                       </span>
                     </div>
 
-                    <div className="flex flex-col items-end gap-0.5 shrink-0 ml-auto text-right">
-                      <span className="text-sm font-bold tabular-nums leading-none">
+                    <div className="flex flex-col items-end shrink-0 ml-auto">
+                      <span className="text-base font-bold tabular-nums leading-tight">
                         {formatCurrency(perf.totalValue, perf.currency)}
                       </span>
-                      <div className={`flex items-center justify-end gap-1 text-xs font-medium tabular-nums leading-none ${perf.dailyChange >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
-                        <span>{perf.dailyChange > 0 ? "+" : ""}{formatCurrency(perf.dailyChange, perf.currency)}</span>
-                        <span className="opacity-80">({formatPercent(perf.dailyChangePct)})</span>
-                      </div>
+                      <span className={`text-xs tabular-nums leading-tight ${perf.dailyChange >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                        {perf.dailyChange > 0 ? "+" : ""}{formatCurrency(perf.dailyChange, perf.currency)} ({formatPercent(perf.dailyChangePct)})
+                      </span>
                     </div>
                   </div>
                 ))}
