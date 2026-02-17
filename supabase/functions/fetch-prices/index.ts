@@ -68,10 +68,21 @@ serve(async (req) => {
       for (const t of uniqueTickers) {
         try {
           const q = await yahooFinance.quote(t);
+          console.log(`Fetched fundamentals for ${t}: PE=${q.trailingPE} EPS=${q.epsTrailingTwelveMonths}`);
+
           results[t] = {
             currentPrice: q.regularMarketPrice,
             currency: q.currency,
             name: q.longName || q.shortName || q.symbol || t,
+            // Add fundamental fields expected by useFundamentals hook
+            trailingPE: q.trailingPE ?? null,
+            forwardPE: q.forwardPE ?? null,
+            trailingEps: q.epsTrailingTwelveMonths ?? null,
+            forwardEps: q.epsForward ?? null,
+            // quote() might not return sector/industry, but let's try mapping if available or null
+            // For full sector/industry, we might need quoteSummary, but keeping it simple for now to avoid multiple requests
+            sector: null,
+            industry: null
           };
         } catch (err) {
           console.error(`Fundamentals error for ${t}:`, err);
