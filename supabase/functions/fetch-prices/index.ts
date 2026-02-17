@@ -28,19 +28,30 @@ serve(async (req) => {
     let { tickers, mode } = body;
     // Handle potential double-encoding or nested body structure
     if (typeof body === "string") {
-      try { const p = JSON.parse(body); tickers = p.tickers; mode = p.mode; } catch { }
+      try {
+        const p = JSON.parse(body);
+        tickers = p.tickers;
+        mode = p.mode;
+      } catch {}
     }
     if (!tickers && body.body) {
       let i = body.body;
-      if (typeof i === "string") { try { i = JSON.parse(i); } catch { } }
-      if (i.tickers) { tickers = i.tickers; mode = i.mode; }
+      if (typeof i === "string") {
+        try {
+          i = JSON.parse(i);
+        } catch {}
+      }
+      if (i.tickers) {
+        tickers = i.tickers;
+        mode = i.mode;
+      }
     }
 
     if (!tickers || !Array.isArray(tickers) || tickers.length === 0) {
-      return new Response(
-        JSON.stringify({ error: "tickers array required", debugBody: body }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "tickers array required", debugBody: body }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const uniqueTickers = [...new Set(tickers)] as string[];
@@ -50,25 +61,35 @@ serve(async (req) => {
       const results: Record<string, any> = {};
 
       // Suppress console spam from library
-      try { yahooFinance.suppressNotices(['yahooSurvey']); } catch { }
+      try {
+        yahooFinance.suppressNotices(["yahooSurvey"]);
+      } catch {}
 
       for (const t of uniqueTickers) {
         try {
           const q = await yahooFinance.quote(t);
+          console.log(`Fetched fundamentals for ${t}: PE=${q.trailingPE} EPS=${q.epsTrailingTwelveMonths}`);
+
           results[t] = {
             currentPrice: q.regularMarketPrice,
             currency: q.currency,
             name: q.longName || q.shortName || q.symbol || t,
+            // Add fundamental fields expected by useFundamentals hook
+            trailingPE: q.trailingPE ?? null,
+            forwardPE: q.forwardPE ?? null,
+            trailingEps: q.epsTrailingTwelveMonths ?? null,
+            forwardEps: q.epsForward ?? null,
+            sector: null,
+            industry: null,
           };
         } catch (err) {
           console.error(`Fundamentals error for ${t}:`, err);
           results[t] = { error: String(err) };
         }
       }
-      return new Response(
-        JSON.stringify({ results, debugMode: mode }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ results, debugMode: mode }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // --- MODE DEFAULT: PRICES ---
@@ -78,9 +99,9 @@ serve(async (req) => {
 
     const results: Record<string, any> = {};
 
-    // Use the library's batching or just map promises
-    // The library handles cookies/crumbs automatically
-    try { yahooFinance.suppressNotices(['yahooSurvey']); } catch { }
+    try {
+      yahooFinance.suppressNotices(["yahooSurvey"]);
+    } catch {}
 
     const promises = uniqueTickers.map(async (t) => {
       try {
@@ -93,7 +114,6 @@ serve(async (req) => {
         };
       } catch (err) {
         console.error(`Quote error for ${t}:`, err);
-        // Return structure even on error so client doesn't break
         results[t] = { price: null, previousClose: null, name: t, currency: "USD", error: String(err) };
       }
     });
@@ -114,7 +134,7 @@ serve(async (req) => {
               sector: "",
               updated_at: new Date().toISOString(),
             },
-            { onConflict: "ticker" }
+            { onConflict: "ticker" },
           );
         } catch (cacheErr) {
           console.error(`Cache upsert error for ${ticker}:`, cacheErr);
