@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,10 +6,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Textarea } from "@/components/ui/textarea";
 import { TickerLogo } from "@/components/TickerLogo";
 import { Earning, calculateValidatedCriteria } from "@/hooks/useEarnings";
-import { Check, X, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare } from "lucide-react";
+import { Check, X, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, ChevronRight, ChevronDown, TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 interface Props {
   earnings: Earning[];
+  allEarnings: Earning[];
   onEdit: (e: Earning) => void;
   onDelete: (id: string) => void;
   onUpdateNote: (id: string, notes: string | null) => void;
@@ -20,7 +21,6 @@ interface Props {
 type SortKey = "ticker" | "quarter" | "revenue_growth" | "operating_margin" | "roe" | "debt_ebitda" | "score" | "status";
 type SortDir = "asc" | "desc";
 
-/** Parse "Q3 2025" → numeric sortable value (2025 * 10 + 3 = 20253) */
 function quarterToSortValue(q: string): number {
   const match = q.match(/Q(\d)\s+(\d{4})/);
   if (!match) return 0;
@@ -41,7 +41,22 @@ function SortableHead({ label, sortKey, currentKey, dir, onSort, className }: {
   );
 }
 
-function CriteriaCell({ value, threshold, inverse }: { value: number | null; threshold: number; inverse?: boolean }) {
+interface TrendProps {
+  current: number | null;
+  previous: number | null;
+  inverse?: boolean;
+}
+
+function TrendIndicator({ current, previous, inverse }: TrendProps) {
+  if (current == null || previous == null) return null;
+  const diff = current - previous;
+  if (Math.abs(diff) < 0.01) return <Minus className="h-3 w-3 text-muted-foreground" />;
+  const isPositive = inverse ? diff < 0 : diff > 0;
+  if (isPositive) return <TrendingUp className="h-3 w-3 text-emerald-500" />;
+  return <TrendingDown className="h-3 w-3 text-rose-500" />;
+}
+
+function CriteriaCell({ value, threshold, inverse, previousValue }: { value: number | null; threshold: number; inverse?: boolean; previousValue?: number | null }) {
   if (value == null) return <TableCell className="text-center text-muted-foreground">—</TableCell>;
   const pass = inverse ? value < threshold : value > threshold;
   return (
@@ -49,6 +64,7 @@ function CriteriaCell({ value, threshold, inverse }: { value: number | null; thr
       <span className={`inline-flex items-center gap-1 font-medium ${pass ? "text-emerald-500" : "text-rose-500"}`}>
         {pass ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
         {value.toFixed(1)}{inverse ? "x" : "%"}
+        {previousValue !== undefined && <TrendIndicator current={value} previous={previousValue} inverse={inverse} />}
       </span>
     </TableCell>
   );
@@ -65,13 +81,20 @@ function MoatCell({ value }: { value: boolean }) {
   );
 }
 
-function ScoreBadge({ score }: { score: number }) {
+function ScoreBadge({ score, previousScore }: { score: number; previousScore?: number }) {
   let variant: "default" | "destructive" | "secondary" = "default";
   let className = "";
   if (score <= 1) { variant = "destructive"; }
   else if (score <= 3) { className = "bg-amber-600 hover:bg-amber-700 text-white"; }
   else { className = "bg-emerald-600 hover:bg-emerald-700 text-white"; }
-  return <Badge variant={variant} className={className}>{score}/5</Badge>;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Badge variant={variant} className={className}>{score}/5</Badge>
+      {previousScore !== undefined && (
+        <TrendIndicator current={score} previous={previousScore} />
+      )}
+    </span>
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -133,15 +156,118 @@ function NotePopover({ earning, onUpdateNote }: { earning: Earning; onUpdateNote
 
 const statusOrder: Record<string, number> = { hold: 0, alleger: 1, sell: 2 };
 
-export function EarningsTable({ earnings, onEdit, onDelete, onUpdateNote, currentQuarter, tickerPortfolioMap }: Props) {
+function EarningRow({
+  earning,
+  previousEarning,
+  isExpanded,
+  isHistorical,
+  hasHistory,
+  onToggle,
+  onEdit,
+  onDelete,
+  onUpdateNote,
+  currentQuarter,
+  tickerPortfolioMap,
+}: {
+  earning: Earning;
+  previousEarning: Earning | null;
+  isExpanded?: boolean;
+  isHistorical?: boolean;
+  hasHistory?: boolean;
+  onToggle?: () => void;
+  onEdit: (e: Earning) => void;
+  onDelete: (id: string) => void;
+  onUpdateNote: (id: string, notes: string | null) => void;
+  currentQuarter: string;
+  tickerPortfolioMap: Map<string, Set<string>>;
+}) {
+  const score = calculateValidatedCriteria(earning);
+  const previousScore = previousEarning ? calculateValidatedCriteria(previousEarning) : undefined;
+  const currentQValue = quarterToSortValue(currentQuarter);
+  const earningQValue = quarterToSortValue(earning.quarter);
+  const isOutdated = earningQValue < currentQValue;
+
+  return (
+    <TableRow
+      className={`${isOutdated && !isHistorical ? "bg-amber-500/8 border-l-2 border-l-amber-500" : ""} ${isHistorical ? "bg-muted/30" : ""}`}
+    >
+      <TableCell>
+        <div className="flex items-center gap-1.5">
+          {!isHistorical && hasHistory && (
+            <Button variant="ghost" size="icon" className="h-6 w-6 p-0" onClick={onToggle}>
+              {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            </Button>
+          )}
+          {isHistorical && <span className="w-6" />}
+          {!isHistorical && (
+            <>
+              <TickerLogo ticker={earning.ticker} />
+              <span className="font-medium">{earning.ticker}</span>
+            </>
+          )}
+          {isHistorical && (
+            <span className="text-muted-foreground text-xs ml-1">↳</span>
+          )}
+        </div>
+      </TableCell>
+      {!isHistorical ? (
+        <PortfolioBadges portfolios={tickerPortfolioMap.get(earning.ticker)} />
+      ) : (
+        <TableCell />
+      )}
+      <TableCell>
+        {isOutdated ? (
+          <span className="inline-block px-2 py-0.5 rounded text-amber-400 bg-amber-500/15 font-medium text-xs">{earning.quarter}</span>
+        ) : (
+          <span className="inline-block px-2 py-0.5 rounded text-emerald-400 bg-emerald-500/15 font-medium text-xs">{earning.quarter}</span>
+        )}
+      </TableCell>
+      <CriteriaCell value={earning.revenue_growth} threshold={10} previousValue={!isHistorical ? previousEarning?.revenue_growth : undefined} />
+      <CriteriaCell value={earning.operating_margin} threshold={20} previousValue={!isHistorical ? previousEarning?.operating_margin : undefined} />
+      <CriteriaCell value={earning.roe} threshold={30} previousValue={!isHistorical ? previousEarning?.roe : undefined} />
+      <CriteriaCell value={earning.debt_ebitda} threshold={1.5} inverse previousValue={!isHistorical ? previousEarning?.debt_ebitda : undefined} />
+      <MoatCell value={earning.moat} />
+      <TableCell className="text-center">
+        <ScoreBadge score={score} previousScore={!isHistorical ? previousScore : undefined} />
+      </TableCell>
+      <TableCell className="text-center"><StatusBadge status={earning.status} /></TableCell>
+      <TableCell className="text-right">
+        <div className="flex items-center justify-end gap-1">
+          <NotePopover earning={earning} onUpdateNote={onUpdateNote} />
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(earning)}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onDelete(earning.id)}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+export function EarningsTable({ earnings, allEarnings, onEdit, onDelete, onUpdateNote, currentQuarter, tickerPortfolioMap }: Props) {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [expandedTickers, setExpandedTickers] = useState<Set<string>>(new Set());
+
+  // Build a map: ticker → sorted list of all earnings (newest first)
+  const tickerHistory = useMemo(() => {
+    const map = new Map<string, Earning[]>();
+    allEarnings.forEach((e) => {
+      if (!map.has(e.ticker)) map.set(e.ticker, []);
+      map.get(e.ticker)!.push(e);
+    });
+    // Sort each list by quarter descending
+    map.forEach((list) => {
+      list.sort((a, b) => quarterToSortValue(b.quarter) - quarterToSortValue(a.quarter));
+    });
+    return map;
+  }, [allEarnings]);
 
   if (earnings.length === 0) {
     return <p className="text-muted-foreground text-sm text-center py-8">Aucun résultat enregistré.</p>;
   }
-
-  const currentQValue = quarterToSortValue(currentQuarter);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -150,6 +276,15 @@ export function EarningsTable({ earnings, onEdit, onDelete, onUpdateNote, curren
       setSortKey(key);
       setSortDir("asc");
     }
+  };
+
+  const toggleExpand = (ticker: string) => {
+    setExpandedTickers((prev) => {
+      const next = new Set(prev);
+      if (next.has(ticker)) next.delete(ticker);
+      else next.add(ticker);
+      return next;
+    });
   };
 
   const sorted = [...earnings].sort((a, b) => {
@@ -188,48 +323,43 @@ export function EarningsTable({ earnings, onEdit, onDelete, onUpdateNote, curren
         </TableHeader>
         <TableBody>
           {sorted.map((e) => {
-            const score = calculateValidatedCriteria(e);
-            const earningQValue = quarterToSortValue(e.quarter);
-            const isOutdated = earningQValue < currentQValue;
+            const history = tickerHistory.get(e.ticker) || [];
+            const previousEarning = history.length > 1 ? history[1] : null;
+            const isExpanded = expandedTickers.has(e.ticker);
+            const hasHistory = history.length > 1;
 
             return (
-              <TableRow
-                key={e.id}
-                className={isOutdated ? "bg-amber-500/8 border-l-2 border-l-amber-500" : ""}
-              >
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <TickerLogo ticker={e.ticker} />
-                    <span className="font-medium">{e.ticker}</span>
-                  </div>
-                </TableCell>
-                <PortfolioBadges portfolios={tickerPortfolioMap.get(e.ticker)} />
-                <TableCell>
-                  {isOutdated ? (
-                    <span className="inline-block px-2 py-0.5 rounded text-amber-400 bg-amber-500/15 font-medium text-xs">{e.quarter}</span>
-                  ) : (
-                    <span className="inline-block px-2 py-0.5 rounded text-emerald-400 bg-emerald-500/15 font-medium text-xs">{e.quarter}</span>
-                  )}
-                </TableCell>
-                <CriteriaCell value={e.revenue_growth} threshold={10} />
-                <CriteriaCell value={e.operating_margin} threshold={20} />
-                <CriteriaCell value={e.roe} threshold={30} />
-                <CriteriaCell value={e.debt_ebitda} threshold={1.5} inverse />
-                <MoatCell value={e.moat} />
-                <TableCell className="text-center"><ScoreBadge score={score} /></TableCell>
-                <TableCell className="text-center"><StatusBadge status={e.status} /></TableCell>
-                <TableCell className="text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <NotePopover earning={e} onUpdateNote={onUpdateNote} />
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(e)}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onDelete(e.id)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
+              <>
+                <EarningRow
+                  key={e.id}
+                  earning={e}
+                  previousEarning={previousEarning}
+                  isExpanded={isExpanded}
+                  hasHistory={hasHistory}
+                  onToggle={() => toggleExpand(e.ticker)}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onUpdateNote={onUpdateNote}
+                  currentQuarter={currentQuarter}
+                  tickerPortfolioMap={tickerPortfolioMap}
+                />
+                {isExpanded && history.slice(1).map((histE, idx) => {
+                  const prevOfHist = history[idx + 2] || null;
+                  return (
+                    <EarningRow
+                      key={histE.id}
+                      earning={histE}
+                      previousEarning={prevOfHist}
+                      isHistorical
+                      onEdit={onEdit}
+                      onDelete={onDelete}
+                      onUpdateNote={onUpdateNote}
+                      currentQuarter={currentQuarter}
+                      tickerPortfolioMap={tickerPortfolioMap}
+                    />
+                  );
+                })}
+              </>
             );
           })}
         </TableBody>
