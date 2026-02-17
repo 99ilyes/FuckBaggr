@@ -15,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, RefreshCw, Upload } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 
 export default function Index() {
@@ -105,8 +104,7 @@ export default function Index() {
   const totalGainLoss = totalValue - totalInvested;
   const totalGainLossPercent = totalInvested > 0 ? totalGainLoss / totalInvested * 100 : 0;
 
-  // Fetch market data (prev close + current price) via edge function
-  // Fetch prices client-side (primary) — bypasses Supabase edge function rate limits
+  // Unified fetch: tries proxy in dev, edge function in production (handled inside fetchPricesClientSide)
   const fetchMarketData = useCallback(async (tickers: string[]) => {
     if (tickers.length === 0) return;
     try {
@@ -123,26 +121,7 @@ export default function Index() {
         setLastRefreshTime(new Date());
       }
     } catch (e) {
-      console.warn("Client-side fetch failed, trying edge function fallback...", e);
-      // Fallback to edge function
-      try {
-        const { data, error } = await supabase.functions.invoke("fetch-prices", {
-          body: { tickers }
-        });
-        if (!error && data?.results) {
-          const prevMap: Record<string, number> = {};
-          const liveMap: Record<string, number> = {};
-          for (const [ticker, info] of Object.entries(data.results as Record<string, any>)) {
-            if (info?.previousClose) prevMap[ticker] = info.previousClose;
-            if (info?.price) liveMap[ticker] = info.price;
-          }
-          setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
-          setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
-          if (Object.keys(liveMap).length > 0) setLastRefreshTime(new Date());
-        }
-      } catch (e2) {
-        console.warn("Edge function fallback also failed", e2);
-      }
+      console.warn("Price fetch failed:", e);
     }
   }, []);
 
@@ -186,7 +165,6 @@ export default function Index() {
         return;
       }
 
-      // Primary: client-side fetch via CORS proxy
       const results = await fetchPricesClientSide(tickers);
       const prevMap: Record<string, number> = {};
       const liveMap: Record<string, number> = {};
@@ -200,10 +178,8 @@ export default function Index() {
         setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
       }
 
-      // Background: update DB cache via edge function (fire and forget)
-      supabase.functions.invoke("fetch-prices", { body: { tickers } })
-        .then(() => refetchCache())
-        .catch(() => { });
+      // Also update the DB cache
+      refetchCache();
 
       setLastRefreshTime(new Date());
       toast({ title: `Prix mis à jour (${Object.keys(liveMap).length}/${tickers.length} tickers)` });
