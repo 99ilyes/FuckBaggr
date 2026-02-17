@@ -68,19 +68,10 @@ serve(async (req) => {
       for (const t of uniqueTickers) {
         try {
           const q = await yahooFinance.quote(t);
-          console.log(`Fetched fundamentals for ${t}: PE=${q.trailingPE} EPS=${q.epsTrailingTwelveMonths}`);
-
           results[t] = {
             currentPrice: q.regularMarketPrice,
             currency: q.currency,
             name: q.longName || q.shortName || q.symbol || t,
-            // Add fundamental fields expected by useFundamentals hook
-            trailingPE: q.trailingPE ?? null,
-            forwardPE: q.forwardPE ?? null,
-            trailingEps: q.epsTrailingTwelveMonths ?? null,
-            forwardEps: q.epsForward ?? null,
-            sector: null,
-            industry: null,
           };
         } catch (err) {
           console.error(`Fundamentals error for ${t}:`, err);
@@ -99,6 +90,8 @@ serve(async (req) => {
 
     const results: Record<string, any> = {};
 
+    // Use the library's batching or just map promises
+    // The library handles cookies/crumbs automatically
     try {
       yahooFinance.suppressNotices(["yahooSurvey"]);
     } catch {}
@@ -114,6 +107,7 @@ serve(async (req) => {
         };
       } catch (err) {
         console.error(`Quote error for ${t}:`, err);
+        // Return structure even on error so client doesn't break
         results[t] = { price: null, previousClose: null, name: t, currency: "USD", error: String(err) };
       }
     });
