@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import yahooFinance from "https://esm.sh/yahoo-finance2@2.13.3";
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -22,42 +23,34 @@ serve(async (req) => {
 
         const results: Record<string, any> = {};
 
+        // Suppress console spam
+        try { yahooFinance.suppressNotices(['yahooSurvey']); } catch { }
+
         for (const ticker of tickers) {
             try {
-                const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${interval}&range=${range}`;
-                const response = await fetch(url, {
-                    headers: { "User-Agent": "Mozilla/5.0" },
-                });
+                // yahoo-finance2 chart method
+                const result = await yahooFinance.chart(ticker, { range, interval });
 
-                if (!response.ok) {
-                    console.error(`Failed to fetch ${ticker}: ${response.status}`);
-                    results[ticker] = { error: `HTTP ${response.status}` };
-                    continue;
-                }
-
-                const data = await response.json();
-                const result = data.chart?.result?.[0];
-
-                if (!result) {
+                if (!result || !result.quotes) {
                     results[ticker] = { error: "No data" };
                     continue;
                 }
 
-                const meta = result.meta;
-                const timestamp = result.timestamp || [];
-                const quote = result.indicators?.quote?.[0] || {};
-                const close = quote.close || [];
-
-                // Filter out null values if any, mapping to simple { time, price } array
-                const history = timestamp.map((t: number, i: number) => ({
-                    time: t,
-                    price: close[i]
+                // Map to our expected format
+                // The library returns 'quotes' array with { date, open, high, low, close, adjclose, volume }
+                const history = result.quotes.map((q: any) => ({
+                    time: new Date(q.date).getTime() / 1000, // library returns Date object, we might want timestamp in seconds if that's what frontend expects?
+                    // Previous code: result.timestamp -> usually unixseconds.
+                    // Let's check previous implementation: 'timestamp' from raw response is usually seconds.
+                    // 'result.quotes' from library has 'date' as Date object.
+                    // So .getTime() is ms. / 1000 is seconds.
+                    price: q.close
                 })).filter((item: any) => item.price !== null && item.price !== undefined);
 
                 results[ticker] = {
-                    symbol: meta.symbol,
-                    currency: meta.currency,
-                    history
+                    symbol: result.meta.symbol,
+                    currency: result.meta.currency,
+                    history: history
                 };
 
             } catch (err) {
