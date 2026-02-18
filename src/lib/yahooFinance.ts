@@ -28,7 +28,16 @@ const YAHOO_TIMEOUT_MS = 5000;
 /** Fetch a single ticker directly from Yahoo Finance v8 (browser → unique IP). */
 async function fetchTickerBrowser(ticker: string): Promise<YahooQuoteResult | null> {
   try {
-    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d&includePrePost=false`;
+    // Use local proxy in development to avoid CORS issues
+    const baseUrl = import.meta.env.DEV
+      ? "/api/yf"
+      : "https://query2.finance.yahoo.com";
+
+    const url = `${baseUrl}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d&includePrePost=false`;
+
+    // Add logging for debugging
+    console.log(`Fetching ${ticker} from ${baseUrl}...`);
+
     const resp = await fetch(url, {
       signal: AbortSignal.timeout(YAHOO_TIMEOUT_MS),
       headers: {

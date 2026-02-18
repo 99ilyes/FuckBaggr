@@ -154,7 +154,7 @@ export default function Index() {
     }
   }, [positions, cashBalances, baseCurrency, fetchMarketData]);
 
-  const handleRefreshPrices = useCallback(async () => {
+  const handleRefreshPrices = useCallback(async (silent = false) => {
     if (refreshing) return;
     setRefreshing(true);
     try {
@@ -195,19 +195,19 @@ export default function Index() {
         setLastRefreshTime(new Date());
 
         if (liveCount > 0) {
-          toast({ title: `${liveCount} prix mis à jour en temps réel` });
+          if (!silent) toast({ title: `${liveCount} prix mis à jour en temps réel` });
           // Persist live prices to DB cache (fire-and-forget)
           persistPricesToCache(results);
           refetchCache();
-        } else if (cacheCount > 0) {
+        } else if (cacheCount > 0 && !silent) {
           toast({ title: "Prix depuis le cache", description: "Affichage des derniers prix enregistrés." });
         }
-      } else {
+      } else if (!silent) {
         toast({ title: "Impossible de récupérer les prix", description: "Yahoo Finance est actuellement indisponible.", variant: "destructive" });
       }
     } catch (e: any) {
       console.error("Refresh error:", e);
-      toast({ title: "Erreur de rafraîchissement", description: String(e), variant: "destructive" });
+      if (!silent) toast({ title: "Erreur de rafraîchissement", description: String(e), variant: "destructive" });
     }
     setRefreshing(false);
   }, [positions, cashBalances, baseCurrency, refreshing, refetchCache, toast]);
@@ -220,7 +220,7 @@ export default function Index() {
         // Check if we haven't refreshed in the last 10 seconds to avoid spamming on rapid toggles
         const now = new Date();
         if (!lastRefreshTime || (now.getTime() - lastRefreshTime.getTime() > 10000)) {
-          handleRefreshPrices();
+          handleRefreshPrices(true);
         }
       }
     };
@@ -293,7 +293,7 @@ export default function Index() {
                   {lastUpdate.toLocaleString()}
                 </span>
               }
-              <Button variant="outline" size="sm" onClick={handleRefreshPrices} disabled={refreshing}>
+              <Button variant="outline" size="sm" onClick={() => handleRefreshPrices(false)} disabled={refreshing}>
                 <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
                 <span className="hidden sm:inline ml-1">Actualiser</span>
               </Button>
