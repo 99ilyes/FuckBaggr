@@ -113,7 +113,7 @@ export default function Index() {
       const liveMap: Record<string, number> = {};
       let allFromCache = true;
       for (const [ticker, info] of Object.entries(results)) {
-        if (info?.previousClose) prevMap[ticker] = info.previousClose;
+        if (info?.previousClose != null) prevMap[ticker] = info.previousClose;
         if (info?.price) {
           liveMap[ticker] = info.price;
           if (!info.fromCache) allFromCache = false;
