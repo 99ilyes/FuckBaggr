@@ -47,6 +47,45 @@ export type Database = {
         }
         Relationships: []
       }
+      calculator_settings: {
+        Row: {
+          custom_payments: Json | null
+          id: string
+          insurance_amount: number | null
+          investment_return_rate: number | null
+          loan_amount: number | null
+          loan_interest_rate_repayment: number | null
+          loan_start_date: string | null
+          repayment_duration_years: number | null
+          repayment_start_date: string | null
+          updated_at: string
+        }
+        Insert: {
+          custom_payments?: Json | null
+          id?: string
+          insurance_amount?: number | null
+          investment_return_rate?: number | null
+          loan_amount?: number | null
+          loan_interest_rate_repayment?: number | null
+          loan_start_date?: string | null
+          repayment_duration_years?: number | null
+          repayment_start_date?: string | null
+          updated_at?: string
+        }
+        Update: {
+          custom_payments?: Json | null
+          id?: string
+          insurance_amount?: number | null
+          investment_return_rate?: number | null
+          loan_amount?: number | null
+          loan_interest_rate_repayment?: number | null
+          loan_start_date?: string | null
+          repayment_duration_years?: number | null
+          repayment_start_date?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       earnings: {
         Row: {
           created_at: string

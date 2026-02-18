@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Calculator as CalculatorIcon, Plus, Trash2 } from "lucide-react";
+import { Calculator as CalculatorIcon, Plus, Trash2, Cloud, CloudOff } from "lucide-react";
 import { format, addMonths, isSameMonth, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface CustomPayment {
     id: string;
@@ -20,32 +22,36 @@ interface SimulationRow {
     phase: "Epargne" | "Remboursement";
     capital: number;
     interestEarned: number;
-    expenses: number; // Tuition or other custom payments
+    expenses: number;
     insurancePaid: number;
     monthlyRepayment: number;
     remainingDebt: number;
     netValue: number;
 }
 
-const Calculator = () => {
-    // --- Inputs ---
-    // Loan & Deferral Phase
-    const STORAGE_KEY = "calculatrice-credit-data";
-    const getSaved = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; } };
+const STORAGE_KEY = "calculatrice-credit-data";
+const SETTINGS_ID = "default";
 
+const getSaved = () => {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; }
+};
+
+const DEFAULT_PAYMENTS: CustomPayment[] = [
+    { id: "1", date: "2026-09-01", amount: 5000, label: "Scolarité A1" },
+    { id: "2", date: "2027-09-01", amount: 5000, label: "Scolarité A2" },
+];
+
+const Calculator = () => {
+    const { toast } = useToast();
+    const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
+
+    // --- Inputs (initialized from localStorage for instant load) ---
     const [loanAmount, setLoanAmount] = useState<number>(() => getSaved().loanAmount ?? 20000);
     const [loanStartDate, setLoanStartDate] = useState<string>(() => getSaved().loanStartDate ?? format(new Date(), "yyyy-MM-dd"));
     const [insuranceAmount, setInsuranceAmount] = useState<number>(() => getSaved().insuranceAmount ?? 4.26);
     const [investmentReturnRate, setInvestmentReturnRate] = useState<number>(() => getSaved().investmentReturnRate ?? 5.0);
     const [repaymentStartDate, setRepaymentStartDate] = useState<string>(() => getSaved().repaymentStartDate ?? "2028-10-28");
-
-    // Custom Payments (e.g. Tuition)
-    const [customPayments, setCustomPayments] = useState<CustomPayment[]>(() => getSaved().customPayments ?? [
-        { id: "1", date: "2026-09-01", amount: 5000, label: "Scolarité A1" },
-        { id: "2", date: "2027-09-01", amount: 5000, label: "Scolarité A2" },
-    ]);
-
-    // Repayment Phase
+    const [customPayments, setCustomPayments] = useState<CustomPayment[]>(() => getSaved().customPayments ?? DEFAULT_PAYMENTS);
     const [repaymentDurationYears, setRepaymentDurationYears] = useState<number>(() => getSaved().repaymentDurationYears ?? 5);
     const [loanInterestRateRepayment, setLoanInterestRateRepayment] = useState<number>(() => getSaved().loanInterestRateRepayment ?? 1.0);
 
@@ -59,6 +65,78 @@ const Calculator = () => {
         monthlyRepaymentAmount: 0,
         finalNetValue: 0,
     });
+
+    // --- Load from cloud on mount ---
+    useEffect(() => {
+        const loadFromCloud = async () => {
+            setSyncStatus("syncing");
+            try {
+                const { data, error } = await supabase
+                    .from("calculator_settings")
+                    .select("*")
+                    .eq("id", SETTINGS_ID)
+                    .maybeSingle();
+
+                if (error) throw error;
+
+                if (data) {
+                    if (data.loan_amount != null) setLoanAmount(Number(data.loan_amount));
+                    if (data.loan_start_date) setLoanStartDate(data.loan_start_date);
+                    if (data.insurance_amount != null) setInsuranceAmount(Number(data.insurance_amount));
+                    if (data.investment_return_rate != null) setInvestmentReturnRate(Number(data.investment_return_rate));
+                    if (data.repayment_start_date) setRepaymentStartDate(data.repayment_start_date);
+                    if (data.custom_payments) setCustomPayments(data.custom_payments as unknown as CustomPayment[]);
+                    if (data.repayment_duration_years != null) setRepaymentDurationYears(Number(data.repayment_duration_years));
+                    if (data.loan_interest_rate_repayment != null) setLoanInterestRateRepayment(Number(data.loan_interest_rate_repayment));
+                }
+                setSyncStatus("synced");
+            } catch {
+                setSyncStatus("error");
+            }
+        };
+        loadFromCloud();
+    }, []);
+
+    // --- Save to cloud + localStorage (debounced) ---
+    const saveSettings = useCallback(async (settings: object) => {
+        // Always save to localStorage immediately
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch { /* ignore */ }
+
+        // Save to cloud
+        setSyncStatus("syncing");
+        try {
+            const { error } = await supabase
+                .from("calculator_settings")
+                .upsert({
+                    id: SETTINGS_ID,
+                    loan_amount: (settings as any).loanAmount,
+                    loan_start_date: (settings as any).loanStartDate,
+                    insurance_amount: (settings as any).insuranceAmount,
+                    investment_return_rate: (settings as any).investmentReturnRate,
+                    repayment_start_date: (settings as any).repaymentStartDate,
+                    custom_payments: (settings as any).customPayments,
+                    repayment_duration_years: (settings as any).repaymentDurationYears,
+                    loan_interest_rate_repayment: (settings as any).loanInterestRateRepayment,
+                    updated_at: new Date().toISOString(),
+                }, { onConflict: "id" });
+
+            if (error) throw error;
+            setSyncStatus("synced");
+        } catch {
+            setSyncStatus("error");
+        }
+    }, []);
+
+    // Debounce saves (wait 1s after last change)
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            saveSettings({
+                loanAmount, loanStartDate, insuranceAmount, investmentReturnRate,
+                repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment,
+            });
+        }, 1000);
+        return () => clearTimeout(timer);
+    }, [loanAmount, loanStartDate, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, saveSettings]);
 
     // --- Helpers ---
     const addPayment = () => {
@@ -80,8 +158,8 @@ const Calculator = () => {
     const calculateSimulation = () => {
         const rows: SimulationRow[] = [];
         let currentDate = parseISO(loanStartDate);
-        currentDate.setDate(1); // Normalize to 1st of month for simpler comparison
-        currentDate = addMonths(currentDate, 1); // Start next month
+        currentDate.setDate(1);
+        currentDate = addMonths(currentDate, 1);
 
         let currentCapital = loanAmount;
         let totalInterestEarned = 0;
@@ -91,19 +169,13 @@ const Calculator = () => {
         const repayStart = parseISO(repaymentStartDate);
         const monthlyInvestRate = Math.pow(1 + investmentReturnRate / 100, 1 / 12) - 1;
 
-        // --- Phase 1: Deferral (Epargne) ---
-        // Simulate until repayment start date
         while (currentDate < repayStart) {
-            // 1. Earn Interest
             const interest = currentCapital * monthlyInvestRate;
             currentCapital += interest;
             totalInterestEarned += interest;
-
-            // 2. Pay Insurance
             currentCapital -= insuranceAmount;
             totalInsurancePaid += insuranceAmount;
 
-            // 3. Pay Custom Payments
             let monthlyExpenses = 0;
             customPayments.forEach(p => {
                 const pDate = parseISO(p.date);
@@ -114,7 +186,6 @@ const Calculator = () => {
             currentCapital -= monthlyExpenses;
             totalExpenses += monthlyExpenses;
 
-            // Record Row
             rows.push({
                 date: new Date(currentDate),
                 phase: "Epargne",
@@ -123,30 +194,22 @@ const Calculator = () => {
                 expenses: monthlyExpenses,
                 insurancePaid: insuranceAmount,
                 monthlyRepayment: 0,
-                remainingDebt: loanAmount, // Assuming debt stays constant (deferred capital)
+                remainingDebt: loanAmount,
                 netValue: currentCapital - loanAmount
             });
 
             currentDate = addMonths(currentDate, 1);
         }
 
-        // --- Transition: Lump Sum Repayment ---
-        // At repayment start, we use available capital to pay back as much of the loan as possible.
-        // Logic: If Capital > Loan, we pay Loan and keep excess. If Capital < Loan, we pay Capital and owe the rest.
-        // The prompt says "je vais rendre tout l'argent restant aprés avoir payé les frais... et tu calculeras les mensualités selon le montant restant".
-        // This implies we use ALL current capital to pay down the debt.
-
         const lumpSumPaid = Math.min(currentCapital, loanAmount);
         let remainingDebtToAmortize = loanAmount - lumpSumPaid;
-        let capitalAfterLumpSum = currentCapital - lumpSumPaid; // Should be 0 if we owe money, or positive if we have surplus.
+        let capitalAfterLumpSum = currentCapital - lumpSumPaid;
 
-        // Calculate Monthly Payment for remaining debt
         let monthlyRepaymentAmount = 0;
         if (remainingDebtToAmortize > 0 && repaymentDurationYears > 0) {
             const annualRate = loanInterestRateRepayment / 100;
             const monthlyRate = annualRate / 12;
             const numberOfPayments = repaymentDurationYears * 12;
-
             if (annualRate === 0) {
                 monthlyRepaymentAmount = remainingDebtToAmortize / numberOfPayments;
             } else {
@@ -154,32 +217,19 @@ const Calculator = () => {
             }
         }
 
-        // --- Phase 2: Repayment (Remboursement) ---
-        const endRepaymentDate = addMonths(repayStart, repaymentDurationYears * 12);
-
-        // If we have remaining debt, simulate the repayment schedule
-        // If we have surplus capital, simulate its growth? The prompt focuses on calculating monthly payments for remaining debt.
-        // Let's verify: "tu calculeras les mensualités selon le montant restant"
-        // So if there is debt, we show the repayment schedule.
-
-        // We continue the timeline from repayStart
-        let currentDebt = remainingDebtToAmortize;
-
-        // Reset date to start exactly at repayStart for the phase 2 loop
         currentDate = new Date(repayStart);
-
+        let currentDebt = remainingDebtToAmortize;
         const repaymentMonths = repaymentDurationYears * 12;
-        for (let i = 0; i < repaymentMonths; i++) {
-            if (currentDebt <= 0.1 && capitalAfterLumpSum <= 0.1) break; // Stop if nothing happens
 
-            // If we have surplus capital, it continues to earn interest
+        for (let i = 0; i < repaymentMonths; i++) {
+            if (currentDebt <= 0.1 && capitalAfterLumpSum <= 0.1) break;
+
             if (capitalAfterLumpSum > 0) {
                 const interest = capitalAfterLumpSum * monthlyInvestRate;
                 capitalAfterLumpSum += interest;
                 totalInterestEarned += interest;
             }
 
-            // Debt Amortization
             let interestOnDebt = 0;
             let principalPayment = 0;
 
@@ -187,8 +237,6 @@ const Calculator = () => {
                 const monthlyRateLoan = (loanInterestRateRepayment / 100) / 12;
                 interestOnDebt = currentDebt * monthlyRateLoan;
                 principalPayment = monthlyRepaymentAmount - interestOnDebt;
-
-                // Adjust for final payment nuances if needed, but standard formula is usually fine
                 currentDebt -= principalPayment;
                 if (currentDebt < 0) currentDebt = 0;
             }
@@ -196,10 +244,10 @@ const Calculator = () => {
             rows.push({
                 date: new Date(currentDate),
                 phase: "Remboursement",
-                capital: capitalAfterLumpSum, // This is user's investment capital
+                capital: capitalAfterLumpSum,
                 interestEarned: (capitalAfterLumpSum > 0 ? capitalAfterLumpSum * monthlyInvestRate : 0),
                 expenses: 0,
-                insurancePaid: 0, // Assume insurance stops or is part of monthly payment? Usually separate. Let's assume 0 for now or user can add custom payment.
+                insurancePaid: 0,
                 monthlyRepayment: monthlyRepaymentAmount,
                 remainingDebt: currentDebt,
                 netValue: capitalAfterLumpSum - currentDebt
@@ -223,28 +271,31 @@ const Calculator = () => {
         calculateSimulation();
     }, [loanAmount, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, loanStartDate]);
 
-    // Persist inputs to localStorage
-    useEffect(() => {
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                loanAmount, loanStartDate, insuranceAmount, investmentReturnRate,
-                repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment,
-            }));
-        } catch { /* ignore */ }
-    }, [loanAmount, loanStartDate, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment]);
+    const fmt = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
+
+    const SyncIndicator = () => (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {syncStatus === "syncing" && <><Cloud className="w-3.5 h-3.5 animate-pulse text-blue-500" /><span>Synchronisation...</span></>}
+            {syncStatus === "synced" && <><Cloud className="w-3.5 h-3.5 text-emerald-500" /><span>Synchronisé</span></>}
+            {syncStatus === "error" && <><CloudOff className="w-3.5 h-3.5 text-destructive" /><span>Hors ligne</span></>}
+        </div>
+    );
 
     return (
         <div className="container mx-auto p-6 space-y-6 animate-in fade-in-50">
-            <div className="flex items-center gap-4 mb-6">
-                <div className="p-3 bg-primary/10 rounded-full">
-                    <CalculatorIcon className="w-8 h-8 text-primary" />
+            <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-4">
+                    <div className="p-3 bg-primary/10 rounded-full">
+                        <CalculatorIcon className="w-8 h-8 text-primary" />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight">Calculatrice Crédit</h1>
+                        <p className="text-muted-foreground">
+                            Simulez l'investissement de votre prêt, vos dépenses, et le plan de remboursement final.
+                        </p>
+                    </div>
                 </div>
-                <div>
-                    <h1 className="text-2xl font-bold tracking-tight">Calculatrice Crédit</h1>
-                    <p className="text-muted-foreground">
-                        Simulez l'investissement de votre prêt, vos dépenses, et le plan de remboursement final.
-                    </p>
-                </div>
+                <SyncIndicator />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -344,25 +395,19 @@ const Calculator = () => {
                         <Card className="bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200/50">
                             <CardContent className="pt-6">
                                 <div className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Total Intérêts Gagnés</div>
-                                <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">
-                                    {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(summary.totalInterestEarned)}
-                                </div>
+                                <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">{fmt(summary.totalInterestEarned)}</div>
                             </CardContent>
                         </Card>
                         <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200/50">
                             <CardContent className="pt-6">
                                 <div className="text-sm font-medium text-amber-600 dark:text-amber-400">Remboursement Anticipé</div>
-                                <div className="text-2xl font-bold text-amber-700 dark:text-amber-300">
-                                    {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(summary.lumpSumPaid)}
-                                </div>
+                                <div className="text-2xl font-bold text-amber-700 dark:text-amber-300">{fmt(summary.lumpSumPaid)}</div>
                             </CardContent>
                         </Card>
                         <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200/50">
                             <CardContent className="pt-6">
                                 <div className="text-sm font-medium text-blue-600 dark:text-blue-400">Mensualité Future</div>
-                                <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
-                                    {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(summary.monthlyRepaymentAmount)}
-                                </div>
+                                <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">{fmt(summary.monthlyRepaymentAmount)}</div>
                             </CardContent>
                         </Card>
                     </div>
@@ -399,7 +444,7 @@ const Calculator = () => {
                                                     {row.phase}
                                                 </span>
                                             </TableCell>
-                                            <TableCell>{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(row.capital)}</TableCell>
+                                            <TableCell>{fmt(row.capital)}</TableCell>
                                             <TableCell className="text-green-600 text-xs">
                                                 {row.interestEarned > 0 ? `+${row.interestEarned.toFixed(2)}` : "-"}
                                             </TableCell>
@@ -412,7 +457,7 @@ const Calculator = () => {
                                                 {row.monthlyRepayment > 0 ? `-${row.monthlyRepayment.toFixed(2)}` : "-"}
                                             </TableCell>
                                             <TableCell className="text-muted-foreground">
-                                                {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(row.remainingDebt)}
+                                                {fmt(row.remainingDebt)}
                                             </TableCell>
                                         </TableRow>
                                     ))}
