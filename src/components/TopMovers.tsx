@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 interface Props {
     positions: AssetPosition[];
     assetsCache: AssetCache[];
+    liveChangeMap?: Record<string, number>;
 }
 
 interface AssetVariation {
@@ -20,14 +21,22 @@ interface AssetVariation {
     currency: string;
 }
 
-export function TopMovers({ positions, assetsCache }: Props) {
+export function TopMovers({ positions, assetsCache, liveChangeMap = {} }: Props) {
     const variations: AssetVariation[] = positions
         .filter(p => p.quantity > 0)
         .map(p => {
             const asset = assetsCache.find(a => a.ticker === p.ticker);
             if (!asset || !asset.last_price || !asset.previous_close) return null;
 
-            const change = ((asset.last_price - asset.previous_close) / asset.previous_close) * 100;
+            // Priority: Live Change from Yahoo if available (most accurate)
+            // Fallback: Calculate from price/prevClose (which might be updated via effectiveAssetsCache)
+            let change = 0;
+            if (liveChangeMap[p.ticker] != null) {
+                change = liveChangeMap[p.ticker];
+            } else {
+                change = ((asset.last_price - asset.previous_close) / asset.previous_close) * 100;
+            }
+
             const valueVariation = asset.last_price - asset.previous_close;
 
             return {

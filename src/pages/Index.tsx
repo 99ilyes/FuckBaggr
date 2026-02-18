@@ -32,13 +32,14 @@ export default function Index() {
   const { data: allTransactions = [] } = useTransactions();
   const { data: assetsCache = [], refetch: refetchCache } = useAssetsCache();
 
-  // Create an effective cache that overrides DB values with live proxy values
+  // Create an effective cache that overrides DB values with live proxy values AND fetched previous close
   const effectiveAssetsCache = useMemo(() => {
     return assetsCache.map((a) => ({
       ...a,
-      last_price: livePriceMap[a.ticker] || a.last_price
+      last_price: livePriceMap[a.ticker] || a.last_price,
+      previous_close: previousCloseMap[a.ticker] || a.previous_close
     }));
-  }, [assetsCache, livePriceMap]);
+  }, [assetsCache, livePriceMap, previousCloseMap]);
 
   const lastUpdate = useMemo(() => {
     const candidates: number[] = [];
@@ -339,7 +340,8 @@ export default function Index() {
           <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
           <TopMovers
             positions={positions}
-            assetsCache={effectiveAssetsCache} />
+            assetsCache={effectiveAssetsCache}
+            liveChangeMap={liveChangeMap} />
 
         </div>
 
