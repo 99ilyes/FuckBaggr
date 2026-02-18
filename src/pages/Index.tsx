@@ -25,6 +25,7 @@ export default function Index() {
   const [refreshing, setRefreshing] = useState(false);
   const [previousCloseMap, setPreviousCloseMap] = useState<Record<string, number>>({});
   const [livePriceMap, setLivePriceMap] = useState<Record<string, number>>({});
+  const [liveChangeMap, setLiveChangeMap] = useState<Record<string, number>>({});
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
 
   const { data: portfolios = [] } = usePortfolios();
@@ -111,9 +112,11 @@ export default function Index() {
       const results = await fetchPricesClientSide(tickers);
       const prevMap: Record<string, number> = {};
       const liveMap: Record<string, number> = {};
+      const changeMap: Record<string, number> = {};
       let allFromCache = true;
       for (const [ticker, info] of Object.entries(results)) {
         if (info?.previousClose != null) prevMap[ticker] = info.previousClose;
+        if (info?.changePercent != null) changeMap[ticker] = info.changePercent;
         if (info?.price) {
           liveMap[ticker] = info.price;
           if (!info.fromCache) allFromCache = false;
@@ -122,6 +125,7 @@ export default function Index() {
       if (Object.keys(liveMap).length > 0) {
         setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
         setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
+        setLiveChangeMap((prev) => ({ ...prev, ...changeMap }));
         setLastRefreshTime(new Date());
         if (allFromCache) {
           toast({ title: "Prix depuis le cache", description: "Yahoo Finance indisponible — affichage des derniers prix enregistrés.", variant: "default" });
@@ -173,10 +177,12 @@ export default function Index() {
       const results = await fetchPricesClientSide(tickers);
       const prevMap: Record<string, number> = {};
       const liveMap: Record<string, number> = {};
+      const changeMap: Record<string, number> = {};
       let liveCount = 0;
       let cacheCount = 0;
       for (const [ticker, info] of Object.entries(results)) {
         if (info?.previousClose) prevMap[ticker] = info.previousClose;
+        if (info?.changePercent != null) changeMap[ticker] = info.changePercent;
         if (info?.price) {
           liveMap[ticker] = info.price;
           if (info.fromCache) cacheCount++;
@@ -187,6 +193,7 @@ export default function Index() {
       if (Object.keys(liveMap).length > 0) {
         setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
         setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
+        setLiveChangeMap((prev) => ({ ...prev, ...changeMap }));
         setLastRefreshTime(new Date());
 
         if (liveCount > 0) {
@@ -243,7 +250,8 @@ export default function Index() {
         effectiveAssetsCache,
         calculatePortfolioStats(pos, cash, effectiveAssetsCache, txs, pCurrency).totalValue,
         pCurrency, // Use portfolio currency for display consistency with totalValue
-        previousCloseMap
+        previousCloseMap,
+        liveChangeMap
       );
 
       const portfolioMarkets = getMarketStatusForPositions(pos);
@@ -261,7 +269,7 @@ export default function Index() {
         marketsInfo: portfolioMarkets,
       } as PortfolioPerformance;
     });
-  }, [selectedPortfolioId, portfolios, allTransactions, effectiveAssetsCache, baseCurrency, previousCloseMap]);
+  }, [selectedPortfolioId, portfolios, allTransactions, effectiveAssetsCache, baseCurrency, previousCloseMap, liveChangeMap]);
 
   return (
     <div className="min-h-screen bg-background">

@@ -59,14 +59,14 @@ serve(async (req) => {
         const p = JSON.parse(body);
         tickers = p.tickers;
         mode = p.mode;
-      } catch {}
+      } catch { }
     }
     if (!tickers && body.body) {
       let i = body.body;
       if (typeof i === "string") {
         try {
           i = JSON.parse(i);
-        } catch {}
+        } catch { }
       }
       if (i.tickers) {
         tickers = i.tickers;
@@ -92,7 +92,7 @@ serve(async (req) => {
       const results: Record<string, any> = {};
       try {
         yahooFinance.suppressNotices(["yahooSurvey"]);
-      } catch {}
+      } catch { }
 
       for (const t of uniqueTickers) {
         const q = await fetchQuoteWithRetry(t);
@@ -133,7 +133,7 @@ serve(async (req) => {
     const results: Record<string, any> = {};
     try {
       yahooFinance.suppressNotices(["yahooSurvey"]);
-    } catch {}
+    } catch { }
 
     for (const t of uniqueTickers) {
       const q = await fetchQuoteWithRetry(t);
@@ -144,6 +144,8 @@ serve(async (req) => {
           previousClose: q.regularMarketPreviousClose ?? null,
           name: q.longName ?? q.shortName ?? q.symbol ?? t,
           currency: q.currency ?? "USD",
+          change: q.regularMarketChange ?? 0,
+          changePercent: q.regularMarketChangePercent ?? 0,
           fromCache: false,
         };
         console.log(`Live price for ${t}: ${results[t].price}`);
@@ -154,11 +156,13 @@ serve(async (req) => {
           previousClose: cacheMap[t].previous_close ?? null,
           name: cacheMap[t].name ?? t,
           currency: cacheMap[t].currency ?? "USD",
+          change: 0, // Cache doesn't store daily change, so we default to 0
+          changePercent: 0,
           fromCache: true,
         };
         console.log(`Cache fallback for ${t}: ${results[t].price} (last updated: ${cacheMap[t].updated_at})`);
       } else {
-        results[t] = { price: null, previousClose: null, name: t, currency: "USD", fromCache: false };
+        results[t] = { price: null, previousClose: null, change: null, changePercent: null, name: t, currency: "USD", fromCache: false };
         console.warn(`No data available for ${t}`);
       }
 

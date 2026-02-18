@@ -307,7 +307,8 @@ export function calculateDailyPerformance(
   assetsCache: AssetCache[],
   totalValue: number,
   baseCurrency = "EUR",
-  previousCloseMap: Record<string, number> = {}
+  previousCloseMap: Record<string, number> = {},
+  liveChangeMap: Record<string, number> = {}
 ) {
   let change = 0;
 
@@ -319,10 +320,30 @@ export function calculateDailyPerformance(
     if (anyOpen && !hasMarketOpenedToday(pos.ticker)) continue;
 
     const cached = assetsCache.find(a => a.ticker === pos.ticker);
-    const prevClose = previousCloseMap[pos.ticker] ?? (cached as any)?.previous_close ?? pos.currentPrice;
-    const priceDiff = pos.currentPrice - prevClose;
-    const rate = getExchangeRate(pos.currency, baseCurrency, assetsCache);
-    change += pos.quantity * priceDiff * rate;
+
+    // Priority 1: Use direct change percent from Yahoo if available (most accurate)
+    if (liveChangeMap[pos.ticker] != null) {
+      // varied value = currentValue / (1 + changePercent/100) -> this is previous value
+      // change = currentValue - previousValue
+      // simplified: change = currentValue - (currentValue / (1 + changePct)) 
+      // Actually simpler: changeAmount = currentValue * (changePct / (1 + changePct)) if we assume current is the 'post-change' value.
+      // Wait, Yahoo gives changePercent = (Price - Prev) / Prev.
+      // So Price = Prev * (1 + Pct).
+      // Prev = Price / (1 + Pct).
+      // Diff = Price - Prev.
+
+      const pct = liveChangeMap[pos.ticker] / 100;
+      const prevCloseCalculated = pos.currentPrice / (1 + pct);
+      const priceDiff = pos.currentPrice - prevCloseCalculated;
+      const rate = getExchangeRate(pos.currency, baseCurrency, assetsCache);
+      change += pos.quantity * priceDiff * rate;
+    } else {
+      // Priority 2: Fallback to previous close calculation
+      const prevClose = previousCloseMap[pos.ticker] ?? (cached as any)?.previous_close ?? pos.currentPrice;
+      const priceDiff = pos.currentPrice - prevClose;
+      const rate = getExchangeRate(pos.currency, baseCurrency, assetsCache);
+      change += pos.quantity * priceDiff * rate;
+    }
   }
 
   // FX impact on cash balances (FX trades 24/5, always included)

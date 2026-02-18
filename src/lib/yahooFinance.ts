@@ -12,6 +12,8 @@ export interface YahooQuoteResult {
     previousClose: number | null;
     name: string;
     currency: string;
+    change?: number | null;
+    changePercent?: number | null;
     fromCache?: boolean;
 }
 
@@ -36,6 +38,8 @@ async function fetchViaProxy(ticker: string): Promise<YahooQuoteResult> {
         previousClose: meta.chartPreviousClose ?? meta.previousClose ?? null,
         name: meta.longName ?? meta.shortName ?? meta.symbol ?? ticker,
         currency: meta.currency ?? "USD",
+        change: meta.regularMarketChange ?? 0,
+        changePercent: meta.regularMarketChangePercent ?? 0,
     };
 }
 
@@ -61,6 +65,8 @@ async function fetchViaEdgeFunction(
             previousClose: info?.previousClose ?? null,
             name: info?.name ?? ticker,
             currency: info?.currency ?? "USD",
+            change: info?.change ?? 0,
+            changePercent: info?.changePercent ?? 0,
             fromCache: info?.fromCache ?? false,
         };
     }
@@ -120,7 +126,7 @@ export async function fetchPricesClientSide(
                         results[t] = await fetchViaProxy(t);
                     } catch (err) {
                         console.warn(`Proxy fetch failed for ${t}:`, err);
-                        results[t] = { price: null, previousClose: null, name: t, currency: "USD" };
+                        results[t] = { price: null, previousClose: null, change: null, changePercent: null, name: t, currency: "USD" };
                     }
                 })
             );
