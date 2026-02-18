@@ -1,61 +1,93 @@
 
-## Corriger le rafraîchissement des prix en production
+## Réparer complètement la récupération des prix via Yahoo Finance
 
-### Diagnostic précis
+### Problèmes identifiés
 
-Les logs analytics confirment le problème :
-- La edge function `fetch-prices` répond en **~10 secondes** avec **0 tickers mis à jour**
-- Yahoo Finance renvoie "Too Many Requests" dès le 2e appel car **les edge functions Supabase partagent la même IP publique** avec des milliers d'autres projets — le quota Yahoo est donc épuisé en permanence
+**Problème 1 — Erreur de build bloquante (`fetch-history`)**
 
-Le délai de 350ms entre les appels ne suffit pas car le rate limiting Yahoo est basé sur l'IP, pas sur la fréquence. L'IP des edge functions est déjà blacklistée.
+`yahooFinance.chart(ticker, { range, interval })` — le paramètre `range` n'existe pas dans l'API TypeScript de `yahoo-finance2@2.13.3`. Il faut remplacer `range` par `period1` (une date calculée à partir de la durée demandée : "5y" → date il y a 5 ans).
 
-### Solution : Architecture cache-first
+**Problème 2 — Mode "fundamentals" cassé (`fetch-prices`)**
 
-Au lieu de contourner le rate limiting (impossible sur une IP partagée), on change d'architecture :
+Le mode fundamentals retourne `{}` en dur. La Watchlist ne peut donc pas afficher le PER ni l'EPS. Il faut appeler l'API Yahoo Finance Chart ou Quote pour récupérer ces données.
 
-1. **La edge function ne fait plus de fetch Yahoo à la demande** — elle lit simplement le cache en base et le retourne instantanément
-2. **Un job de rafraîchissement asynchrone** appelle Yahoo avec retry et backoff exponentiel, et met à jour le cache
-3. **Côté UI**, le bouton "Actualiser" déclenche le job et affiche immédiatement les données du cache
+**Problème 3 — Rate limiting persistant (prix)**
 
-Cependant, cette architecture est complexe. La solution la plus simple et rapide est :
+`Promise.all` sur 5 tickers simultanément déclenche le blocage Yahoo. La solution est un traitement entièrement séquentiel avec 500ms de pause, sans aucun parallélisme.
 
-### Solution retenue : Utiliser directement le cache Supabase
+---
 
-**Le vrai problème côté frontend** : `fetchPricesClientSide` (via proxy ou edge function) retourne `{ price: null }` pour tous les tickers, ce qui fait que le `livePriceMap` ne se remplit jamais. La page affiche donc `null` partout.
+### Solution
 
-**Fix** : Afficher les prix du cache `assets_cache` directement (déjà présent dans le code via `effectiveAssetsCache`), et ne déclencher le refresh Yahoo que si le cache est vieux de plus de 30 minutes. Si Yahoo échoue, rester sur le cache.
+#### 1. `supabase/functions/fetch-history/index.ts`
 
-**Changements concrets :**
+Remplacer le paramètre `range` par la conversion en `period1` :
 
-#### 1. `supabase/functions/fetch-prices/index.ts`
+```typescript
+function rangeToDate(range: string): Date {
+  const now = new Date();
+  const map: Record<string, number> = { "1y": 1, "2y": 2, "5y": 5, "10y": 10 };
+  const years = map[range] ?? 5;
+  return new Date(now.getFullYear() - years, now.getMonth(), now.getDate());
+}
 
-Réécrire la logique de retry avec **backoff exponentiel** et **une seule tentative par ticker** :
-- Si Yahoo répond "Too Many Requests", attendre 2s et réessayer une fois
-- Si le 2e essai échoue, retourner le prix du cache `assets_cache` existant (fallback)
-- Cela garantit que même quand Yahoo rate-limite, la fonction retourne quand même des données valides depuis le cache
+// Puis :
+const result = await yahooFinance.chart(ticker, { 
+  period1: rangeToDate(range), 
+  interval 
+});
+```
 
-#### 2. `src/lib/yahooFinance.ts`
+Cela corrige l'erreur TypeScript et fait compiler le projet.
 
-Supprimer la détection du proxy (inutile en prod, ajoute un délai de 3s au démarrage) :
-- En production, aller directement à l'edge function sans tenter le proxy d'abord
+#### 2. `supabase/functions/fetch-prices/index.ts`
 
-#### 3. `src/pages/Index.tsx`
+Deux corrections majeures :
 
-Améliorer `handleRefreshPrices` :
-- Après l'appel à `fetchPricesClientSide`, si 0 prix sont retournés, **refetch le cache Supabase** et utiliser ses valeurs
-- Ajouter un toast informatif en cas d'échec Yahoo (au lieu de silencieusement ne rien afficher)
-- Ne pas bloquer l'UI — afficher toujours les dernières données disponibles (cache DB)
+**a) Mode "fundamentals" — implémentation réelle**
+
+Utiliser l'API Yahoo Finance v7 (quote summary) via fetch direct pour récupérer les fondamentaux :
+
+```
+GET https://query1.finance.yahoo.com/v7/finance/quote?symbols=AAPL&fields=trailingPE,forwardPE,trailingEps,regularMarketPrice,longName,currency,sector
+```
+
+Retourner un objet `{ trailingPE, trailingEps, forwardPE, price, name, currency, sector }` par ticker.
+
+**b) Mode prix — traitement entièrement séquentiel**
+
+Remplacer le `Promise.all` par une boucle `for...of` pure avec `await delay(500)` entre chaque ticker :
+
+```typescript
+for (const t of uniqueTickers) {
+  const data = await fetchTicker(t);
+  // traiter la réponse...
+  await delay(500);
+}
+```
+
+Supprimer toute logique de batch (`BATCH_SIZE`, `Promise.all`).
+
+#### 3. `src/lib/yahooFinance.ts`
+
+Aucun changement nécessaire — la logique de fallback cache est déjà en place et fonctionnelle.
+
+#### 4. `src/pages/Index.tsx`
+
+Aucun changement nécessaire.
+
+---
 
 ### Fichiers modifiés
 
-| Fichier | Changement |
-|---------|-----------|
-| `supabase/functions/fetch-prices/index.ts` | Ajouter fallback vers `assets_cache` si Yahoo échoue |
-| `src/lib/yahooFinance.ts` | Supprimer la détection proxy qui prend 3s pour rien en prod |
-| `src/pages/Index.tsx` | Utiliser le cache DB comme fallback si 0 prix reçus depuis Yahoo |
+| Fichier | Action |
+|---------|--------|
+| `supabase/functions/fetch-history/index.ts` | Remplacer `range` par `period1` calculé — corrige le build |
+| `supabase/functions/fetch-prices/index.ts` | Implémenter le mode fundamentals + séquentiel pur pour les prix |
 
-### Comportement attendu après le fix
+### Comportement attendu
 
-- **Bouton Actualiser** → tente Yahoo, si échec → affiche les prix du cache DB (avec date de dernière MAJ)
-- **Au chargement** → affiche immédiatement les prix depuis `assets_cache` (instantané, pas d'attente Yahoo)
-- **Si Yahoo fonctionne** → prix mis à jour, cache DB mis à jour, UI affichée avec les nouvelles valeurs
+- **Build** : plus d'erreur TypeScript, le projet compile
+- **Bouton Actualiser** : les prix se chargent séquentiellement (500ms entre chaque), le cache DB est mis à jour, l'UI affiche les prix live ou du cache selon disponibilité
+- **Watchlist** : le PER et l'EPS sont récupérés via le mode fundamentals
+- **Historique** : les graphiques de performance fonctionnent de nouveau
