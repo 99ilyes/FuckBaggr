@@ -111,19 +111,26 @@ export default function Index() {
       const results = await fetchPricesClientSide(tickers);
       const prevMap: Record<string, number> = {};
       const liveMap: Record<string, number> = {};
+      let allFromCache = true;
       for (const [ticker, info] of Object.entries(results)) {
         if (info?.previousClose) prevMap[ticker] = info.previousClose;
-        if (info?.price) liveMap[ticker] = info.price;
+        if (info?.price) {
+          liveMap[ticker] = info.price;
+          if (!info.fromCache) allFromCache = false;
+        }
       }
       if (Object.keys(liveMap).length > 0) {
         setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
         setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
         setLastRefreshTime(new Date());
+        if (allFromCache) {
+          toast({ title: "Prix depuis le cache", description: "Yahoo Finance indisponible — affichage des derniers prix enregistrés.", variant: "default" });
+        }
       }
     } catch (e) {
       console.warn("Price fetch failed:", e);
     }
-  }, []);
+  }, [toast]);
 
   // Track tickers to avoid infinite re-fetch loop
   const fetchedTickersRef = useRef<string>("");
@@ -149,9 +156,7 @@ export default function Index() {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      // Only fetch prices for tickers currently held in portfolio
       const tickers = [...new Set(positions.map((p) => p.ticker))];
-      // Add FX pairs for used currencies
       const currencies = new Set(positions.map((p) => p.currency));
       Object.keys(cashBalances).forEach((c) => currencies.add(c));
       currencies.delete(baseCurrency);
@@ -161,7 +166,6 @@ export default function Index() {
       });
 
       if (tickers.length === 0) {
-        // toast({ title: "Aucun ticker à rafraîchir" }); // Too noisy for auto-refresh
         setRefreshing(false);
         return;
       }
@@ -169,26 +173,38 @@ export default function Index() {
       const results = await fetchPricesClientSide(tickers);
       const prevMap: Record<string, number> = {};
       const liveMap: Record<string, number> = {};
+      let liveCount = 0;
+      let cacheCount = 0;
       for (const [ticker, info] of Object.entries(results)) {
         if (info?.previousClose) prevMap[ticker] = info.previousClose;
-        if (info?.price) liveMap[ticker] = info.price;
+        if (info?.price) {
+          liveMap[ticker] = info.price;
+          if (info.fromCache) cacheCount++;
+          else liveCount++;
+        }
       }
 
       if (Object.keys(liveMap).length > 0) {
         setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
         setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
+        setLastRefreshTime(new Date());
+
+        if (liveCount > 0) {
+          toast({ title: `${liveCount} prix mis à jour en temps réel` });
+        } else if (cacheCount > 0) {
+          toast({ title: "Prix depuis le cache", description: "Yahoo Finance indisponible — affichage des derniers prix enregistrés." });
+        }
+      } else {
+        toast({ title: "Impossible de récupérer les prix", description: "Yahoo Finance est actuellement indisponible.", variant: "destructive" });
       }
 
-      // Also update the DB cache
       refetchCache();
-
-      setLastRefreshTime(new Date());
-      // toast({ title: `Prix mis à jour` }); // Optional: remove noise
     } catch (e: any) {
-      console.error("Auto-refresh error:", e);
+      console.error("Refresh error:", e);
+      toast({ title: "Erreur de rafraîchissement", description: String(e), variant: "destructive" });
     }
     setRefreshing(false);
-  }, [positions, cashBalances, baseCurrency, refreshing, refetchCache]);
+  }, [positions, cashBalances, baseCurrency, refreshing, refetchCache, toast]);
 
   // Auto-refresh when window gains focus
   useEffect(() => {
