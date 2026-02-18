@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { usePortfolios, useTransactions, useAssetsCache, useHistoricalPrices } from "@/hooks/usePortfolios";
 import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats, formatCurrency, formatPercent, calculateDailyPerformance, getMarketStatusForPositions } from "@/lib/calculations";
-import { fetchPricesClientSide } from "@/lib/yahooFinance";
+import { fetchPricesClientSide, persistPricesToCache } from "@/lib/yahooFinance";
 import { KPICards, PortfolioPerformance } from "@/components/KPICards";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
 import { CreatePortfolioDialog } from "@/components/CreatePortfolioDialog";
@@ -130,6 +130,9 @@ export default function Index() {
         setLastRefreshTime(new Date());
         if (allFromCache) {
           toast({ title: "Prix depuis le cache", description: "Yahoo Finance indisponible — affichage des derniers prix enregistrés.", variant: "default" });
+        } else {
+          // Persist live prices to DB cache (fire-and-forget)
+          persistPricesToCache(results);
         }
       }
     } catch (e) {
@@ -199,14 +202,15 @@ export default function Index() {
 
         if (liveCount > 0) {
           toast({ title: `${liveCount} prix mis à jour en temps réel` });
+          // Persist live prices to DB cache (fire-and-forget)
+          persistPricesToCache(results);
+          refetchCache();
         } else if (cacheCount > 0) {
-          toast({ title: "Prix depuis le cache", description: "Yahoo Finance indisponible — affichage des derniers prix enregistrés." });
+          toast({ title: "Prix depuis le cache", description: "Affichage des derniers prix enregistrés." });
         }
       } else {
         toast({ title: "Impossible de récupérer les prix", description: "Yahoo Finance est actuellement indisponible.", variant: "destructive" });
       }
-
-      refetchCache();
     } catch (e: any) {
       console.error("Refresh error:", e);
       toast({ title: "Erreur de rafraîchissement", description: String(e), variant: "destructive" });

@@ -1,151 +1,153 @@
 /**
- * Unified price fetcher.
- * Always uses the Supabase edge function (fetch-prices).
- * The dev proxy is kept as an optional fast path when explicitly available,
- * but we no longer spend 3s probing it on every page load.
+ * Price fetcher — calls Yahoo Finance directly from the browser.
+ *
+ * Yahoo Finance's query2 endpoint does NOT enforce CORS, so browser requests
+ * work fine without a proxy. This avoids the shared-IP rate-limit that kills
+ * every Supabase edge function after a few requests.
+ *
+ * Flow:
+ *  1. Call Yahoo v8 chart API directly from the browser (per-user IP → no shared rate-limit)
+ *  2. Fall back to the DB cache (via edge function) for any tickers that failed
+ *  3. After a successful live fetch, persist the new prices to the DB cache
  */
 
 import { supabase } from "@/integrations/supabase/client";
 
 export interface YahooQuoteResult {
-    price: number | null;
-    previousClose: number | null;
-    name: string;
-    currency: string;
-    change?: number | null;
-    changePercent?: number | null;
-    fromCache?: boolean;
+  price: number | null;
+  previousClose: number | null;
+  name: string;
+  currency: string;
+  change?: number | null;
+  changePercent?: number | null;
+  fromCache?: boolean;
 }
 
-/**
- * Fetch a single ticker via the Vite dev proxy (only works in local dev).
- */
-async function fetchViaProxy(ticker: string): Promise<YahooQuoteResult> {
-    const url = `/api/yf/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(4000) });
+const YAHOO_TIMEOUT_MS = 5000;
 
-    if (!resp.ok) throw new Error(`Proxy HTTP ${resp.status}`);
+/** Fetch a single ticker directly from Yahoo Finance v8 (browser → unique IP). */
+async function fetchTickerBrowser(ticker: string): Promise<YahooQuoteResult | null> {
+  try {
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d&includePrePost=false`;
+    const resp = await fetch(url, {
+      signal: AbortSignal.timeout(YAHOO_TIMEOUT_MS),
+      headers: {
+        "Accept": "application/json",
+      },
+    });
 
-    const contentType = resp.headers.get("content-type") || "";
-    if (contentType.includes("text/html")) throw new Error("Proxy not available (got HTML)");
+    if (!resp.ok) return null;
 
     const data = await resp.json();
     const meta = data?.chart?.result?.[0]?.meta;
-    if (!meta) throw new Error(`No chart data for ${ticker}`);
+    if (!meta || meta.regularMarketPrice == null) return null;
+
+    const price = meta.regularMarketPrice as number;
+    const prevClose = (meta.chartPreviousClose ?? meta.previousClose ?? price) as number;
+    const change = (meta.regularMarketChange ?? (price - prevClose)) as number;
+    const changePercent = (meta.regularMarketChangePercent ?? (prevClose !== 0 ? (change / prevClose) * 100 : 0)) as number;
 
     return {
-        price: meta.regularMarketPrice ?? null,
-        previousClose: meta.chartPreviousClose ?? meta.previousClose ?? null,
-        name: meta.longName ?? meta.shortName ?? meta.symbol ?? ticker,
-        currency: meta.currency ?? "USD",
-        change: meta.regularMarketChange,
-        changePercent: meta.regularMarketChangePercent,
+      price,
+      previousClose: prevClose,
+      name: meta.longName ?? meta.shortName ?? meta.symbol ?? ticker,
+      currency: meta.currency ?? "USD",
+      change,
+      changePercent,
+      fromCache: false,
     };
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Fetch prices for multiple tickers via the Supabase edge function.
- * Works in both dev and production. The edge function returns cached prices
- * as a fallback when Yahoo Finance rate-limits, so the result is never empty.
+ * Read cached prices from DB via edge function (instant, no Yahoo call).
+ * Used as fallback when browser fetch fails.
  */
-async function fetchViaEdgeFunction(
-    tickers: string[]
+async function fetchFromDbCache(
+  tickers: string[]
 ): Promise<Record<string, YahooQuoteResult>> {
+  try {
     const { data, error } = await supabase.functions.invoke("fetch-prices", {
-        body: { tickers },
+      body: { tickers, mode: "cache-only" },
     });
-
-    if (error) throw new Error(`Edge function error: ${error.message}`);
-    if (!data?.results) throw new Error("Edge function returned no results");
-
+    if (error || !data?.results) return {};
     const results: Record<string, YahooQuoteResult> = {};
-    for (const [ticker, info] of Object.entries(data.results as Record<string, any>)) {
-        results[ticker] = {
-            price: info?.price ?? null,
-            previousClose: info?.previousClose ?? null,
-            name: info?.name ?? ticker,
-            currency: info?.currency ?? "USD",
-            change: info?.change,
-            changePercent: info?.changePercent,
-            fromCache: info?.fromCache ?? false,
+    for (const [t, info] of Object.entries(data.results as Record<string, any>)) {
+      if (info?.price != null) {
+        results[t] = {
+          price: info.price,
+          previousClose: info.previousClose ?? null,
+          name: info.name ?? t,
+          currency: info.currency ?? "USD",
+          change: 0,
+          changePercent: 0,
+          fromCache: true,
         };
+      }
     }
     return results;
-}
-
-// In dev, we do a single quick probe to see if the Vite proxy is available.
-// We cache the result so we only probe once per session.
-let _proxyAvailable: boolean | null = null;
-
-async function isDevProxyAvailable(): Promise<boolean> {
-    if (_proxyAvailable !== null) return _proxyAvailable;
-
-    // Only bother in dev (Vite serves on localhost)
-    if (!import.meta.env.DEV) {
-        _proxyAvailable = false;
-        return false;
-    }
-
-    try {
-        const resp = await fetch("/api/yf/v8/finance/chart/AAPL?interval=1d&range=1d", {
-            signal: AbortSignal.timeout(2000),
-        });
-        const contentType = resp.headers.get("content-type") || "";
-        _proxyAvailable = resp.ok && !contentType.includes("text/html");
-    } catch {
-        _proxyAvailable = false;
-    }
-
-    console.log(`[YahooFinance] Dev proxy available: ${_proxyAvailable}`);
-    return _proxyAvailable;
+  } catch {
+    return {};
+  }
 }
 
 /**
- * Unified price fetcher.
- * - In dev: tries the Vite proxy first (fast, no cold-start).
- * - In production: goes straight to the edge function.
- * The edge function falls back to DB cache if Yahoo rate-limits, so
- * the caller always gets prices rather than empty results.
+ * Persist newly-fetched live prices to the DB cache (fire-and-forget).
+ * We don't await this — the UI should not wait for the DB write.
+ */
+export function persistPricesToCache(
+  prices: Record<string, YahooQuoteResult>
+): void {
+  const liveEntries = Object.entries(prices).filter(([, v]) => v?.price != null && !v.fromCache);
+  if (liveEntries.length === 0) return;
+
+  supabase.functions
+    .invoke("fetch-prices", {
+      body: {
+        mode: "persist",
+        prices: Object.fromEntries(liveEntries),
+      },
+    })
+    .catch((e) => console.warn("Cache persist failed:", e));
+}
+
+/**
+ * Main public API.
+ *
+ * Fetches prices for all given tickers:
+ * - Live: direct browser → Yahoo Finance (no shared-IP rate limit)
+ * - Fallback: DB cache via edge function for tickers that failed
  */
 export async function fetchPricesClientSide(
-    tickers: string[]
+  tickers: string[]
 ): Promise<Record<string, YahooQuoteResult>> {
-    if (tickers.length === 0) return {};
+  if (tickers.length === 0) return {};
 
-    const useProxy = await isDevProxyAvailable();
+  const results: Record<string, YahooQuoteResult> = {};
+  const failed: string[] = [];
 
-    if (useProxy) {
-        const results: Record<string, YahooQuoteResult> = {};
-        const BATCH_SIZE = 5;
+  // Fetch all tickers in parallel from the browser — each user has their own IP.
+  // Yahoo allows several hundred requests/min per IP so this is fine.
+  await Promise.all(
+    tickers.map(async (ticker) => {
+      const r = await fetchTickerBrowser(ticker);
+      if (r) {
+        results[ticker] = r;
+      } else {
+        failed.push(ticker);
+      }
+    })
+  );
 
-        for (let i = 0; i < tickers.length; i += BATCH_SIZE) {
-            const batch = tickers.slice(i, i + BATCH_SIZE);
-            await Promise.all(
-                batch.map(async (t) => {
-                    try {
-                        results[t] = await fetchViaProxy(t);
-                    } catch (err) {
-                        console.warn(`Proxy fetch failed for ${t}:`, err);
-                        results[t] = { price: null, previousClose: null, change: null, changePercent: null, name: t, currency: "USD" };
-                    }
-                })
-            );
-            if (i + BATCH_SIZE < tickers.length) {
-                await new Promise((r) => setTimeout(r, 300));
-            }
-        }
-
-        // If nothing came back, fall through to edge function
-        const successCount = Object.values(results).filter((r) => r.price !== null).length;
-        if (successCount === 0 && tickers.length > 0) {
-            console.warn("[YahooFinance] Proxy returned no prices, falling back to edge function");
-            _proxyAvailable = false;
-            return fetchViaEdgeFunction(tickers);
-        }
-
-        return results;
+  // For any tickers that failed, fall back to the DB cache
+  if (failed.length > 0) {
+    const cached = await fetchFromDbCache(failed);
+    for (const [t, r] of Object.entries(cached)) {
+      results[t] = r;
     }
+  }
 
-    // Production (or dev proxy unavailable): use edge function directly
-    return fetchViaEdgeFunction(tickers);
+  return results;
 }
