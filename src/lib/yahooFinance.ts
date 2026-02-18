@@ -76,13 +76,19 @@ async function fetchFromDbCache(
     const results: Record<string, YahooQuoteResult> = {};
     for (const [t, info] of Object.entries(data.results as Record<string, any>)) {
       if (info?.price != null) {
+        const price = info.price as number;
+        const previousClose = (info.previousClose ?? null) as number | null;
+        const change = previousClose != null ? price - previousClose : 0;
+        const changePercent = previousClose != null && previousClose !== 0
+          ? (change / previousClose) * 100
+          : 0;
         results[t] = {
-          price: info.price,
-          previousClose: info.previousClose ?? null,
+          price,
+          previousClose,
           name: info.name ?? t,
           currency: info.currency ?? "USD",
-          change: 0,
-          changePercent: 0,
+          change,
+          changePercent,
           fromCache: true,
         };
       }
