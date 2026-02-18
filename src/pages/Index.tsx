@@ -106,7 +106,7 @@ export default function Index() {
   const totalGainLoss = totalValue - totalInvested;
   const totalGainLossPercent = totalInvested > 0 ? totalGainLoss / totalInvested * 100 : 0;
 
-  // Unified fetch: tries proxy in dev, edge function in production (handled inside fetchPricesClientSide)
+  // Silent fetch on load — no toast, just updates price maps
   const fetchMarketData = useCallback(async (tickers: string[]) => {
     if (tickers.length === 0) return;
     try {
@@ -114,13 +114,11 @@ export default function Index() {
       const prevMap: Record<string, number> = {};
       const liveMap: Record<string, number> = {};
       const changeMap: Record<string, number> = {};
-      let allFromCache = true;
       for (const [ticker, info] of Object.entries(results)) {
         if (info?.previousClose != null) prevMap[ticker] = info.previousClose;
         if (info?.changePercent != null) changeMap[ticker] = info.changePercent;
         if (info?.price) {
           liveMap[ticker] = info.price;
-          if (!info.fromCache) allFromCache = false;
         }
       }
       if (Object.keys(liveMap).length > 0) {
@@ -128,17 +126,13 @@ export default function Index() {
         setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
         setLiveChangeMap((prev) => ({ ...prev, ...changeMap }));
         setLastRefreshTime(new Date());
-        if (allFromCache) {
-          toast({ title: "Prix depuis le cache", description: "Yahoo Finance indisponible — affichage des derniers prix enregistrés.", variant: "default" });
-        } else {
-          // Persist live prices to DB cache (fire-and-forget)
-          persistPricesToCache(results);
-        }
+        // Persist live prices silently (fire-and-forget)
+        persistPricesToCache(results);
       }
     } catch (e) {
       console.warn("Price fetch failed:", e);
     }
-  }, [toast]);
+  }, []);
 
   // Track tickers to avoid infinite re-fetch loop
   const fetchedTickersRef = useRef<string>("");
