@@ -6,6 +6,13 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+function rangeToDate(range: string): Date {
+  const now = new Date();
+  const map: Record<string, number> = { "1y": 1, "2y": 2, "5y": 5, "10y": 10 };
+  const years = map[range] ?? 5;
+  return new Date(now.getFullYear() - years, now.getMonth(), now.getDate());
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -29,7 +36,10 @@ serve(async (req) => {
 
     for (const ticker of tickers) {
       try {
-        const result = await yahooFinance.chart(ticker, { range, interval });
+        const result = await yahooFinance.chart(ticker, {
+          period1: rangeToDate(range),
+          interval,
+        });
 
         if (!result || !result.quotes) {
           results[ticker] = { error: "No data" };
