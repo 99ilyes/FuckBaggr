@@ -4,11 +4,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Calculator as CalculatorIcon, Plus, Trash2, Cloud, CloudOff } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Calculator as CalculatorIcon, Plus, Trash2, Cloud, CloudOff, ChevronDown, ChevronUp } from "lucide-react";
 import { format, addMonths, isSameMonth, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+
+import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 interface CustomPayment {
     id: string;
@@ -56,15 +65,10 @@ const Calculator = () => {
     const [loanInterestRateRepayment, setLoanInterestRateRepayment] = useState<number>(() => getSaved().loanInterestRateRepayment ?? 1.0);
 
     // --- Results ---
-    const [simulation, setSimulation] = useState<SimulationRow[]>([]);
-    const [summary, setSummary] = useState({
-        totalInterestEarned: 0,
-        totalExpenses: 0,
-        totalInsurancePaid: 0,
-        lumpSumPaid: 0,
-        monthlyRepaymentAmount: 0,
-        finalNetValue: 0,
-    });
+    // --- Results ---
+    const [resultsA, setResultsA] = useState<{ rows: SimulationRow[], summary: any }>({ rows: [], summary: {} });
+    const [resultsB, setResultsB] = useState<{ rows: SimulationRow[], summary: any }>({ rows: [], summary: {} });
+    const [activeTab, setActiveTab] = useState<"scenarioA" | "scenarioB">("scenarioA");
 
     // --- Load from cloud on mount ---
     useEffect(() => {
@@ -155,16 +159,17 @@ const Calculator = () => {
     };
 
     // --- Calculation Logic ---
-    const calculateSimulation = () => {
-        const rows: SimulationRow[] = [];
+    const calculateSimulation = useCallback(() => {
+        // --- Common Phase 1: Deferral (Epargne) ---
+        const rowsCommon: SimulationRow[] = [];
         let currentDate = parseISO(loanStartDate);
         currentDate.setDate(1);
         currentDate = addMonths(currentDate, 1);
 
         let currentCapital = loanAmount;
-        let totalInterestEarned = 0;
-        let totalExpenses = 0;
-        let totalInsurancePaid = 0;
+        let totalInterestEarnedCommon = 0;
+        let totalExpensesCommon = 0;
+        let totalInsurancePaidCommon = 0;
 
         const repayStart = parseISO(repaymentStartDate);
         const monthlyInvestRate = Math.pow(1 + investmentReturnRate / 100, 1 / 12) - 1;
@@ -172,9 +177,9 @@ const Calculator = () => {
         while (currentDate < repayStart) {
             const interest = currentCapital * monthlyInvestRate;
             currentCapital += interest;
-            totalInterestEarned += interest;
+            totalInterestEarnedCommon += interest;
             currentCapital -= insuranceAmount;
-            totalInsurancePaid += insuranceAmount;
+            totalInsurancePaidCommon += insuranceAmount;
 
             let monthlyExpenses = 0;
             customPayments.forEach(p => {
@@ -184,9 +189,9 @@ const Calculator = () => {
                 }
             });
             currentCapital -= monthlyExpenses;
-            totalExpenses += monthlyExpenses;
+            totalExpensesCommon += monthlyExpenses;
 
-            rows.push({
+            rowsCommon.push({
                 date: new Date(currentDate),
                 phase: "Epargne",
                 capital: currentCapital,
@@ -201,75 +206,137 @@ const Calculator = () => {
             currentDate = addMonths(currentDate, 1);
         }
 
-        const lumpSumPaid = Math.min(currentCapital, loanAmount);
-        let remainingDebtToAmortize = loanAmount - lumpSumPaid;
-        let capitalAfterLumpSum = currentCapital - lumpSumPaid;
+        // --- Scenario A: Remboursement Anticipé (Existing Logic) ---
+        const rowsA = [...rowsCommon];
+        let capitalA = currentCapital;
+        let totalInterestA = totalInterestEarnedCommon;
+        const lumpSumPaid = Math.min(capitalA, loanAmount);
+        let debtA = loanAmount - lumpSumPaid;
+        capitalA -= lumpSumPaid;
 
-        let monthlyRepaymentAmount = 0;
-        if (remainingDebtToAmortize > 0 && repaymentDurationYears > 0) {
+        let monthlyRepaymentA = 0;
+        if (debtA > 0 && repaymentDurationYears > 0) {
             const annualRate = loanInterestRateRepayment / 100;
             const monthlyRate = annualRate / 12;
             const numberOfPayments = repaymentDurationYears * 12;
-            if (annualRate === 0) {
-                monthlyRepaymentAmount = remainingDebtToAmortize / numberOfPayments;
-            } else {
-                monthlyRepaymentAmount = (remainingDebtToAmortize * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -numberOfPayments));
-            }
+            if (annualRate === 0) monthlyRepaymentA = debtA / numberOfPayments;
+            else monthlyRepaymentA = (debtA * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -numberOfPayments));
         }
 
-        currentDate = new Date(repayStart);
-        let currentDebt = remainingDebtToAmortize;
+        let dateA = new Date(repayStart);
         const repaymentMonths = repaymentDurationYears * 12;
 
         for (let i = 0; i < repaymentMonths; i++) {
-            if (currentDebt <= 0.1 && capitalAfterLumpSum <= 0.1) break;
+            if (debtA <= 0.1 && capitalA <= 0.1) break;
 
-            if (capitalAfterLumpSum > 0) {
-                const interest = capitalAfterLumpSum * monthlyInvestRate;
-                capitalAfterLumpSum += interest;
-                totalInterestEarned += interest;
+            if (capitalA > 0) {
+                const interest = capitalA * monthlyInvestRate;
+                capitalA += interest;
+                totalInterestA += interest;
             }
 
-            let interestOnDebt = 0;
-            let principalPayment = 0;
-
-            if (currentDebt > 0) {
+            if (debtA > 0) {
                 const monthlyRateLoan = (loanInterestRateRepayment / 100) / 12;
-                interestOnDebt = currentDebt * monthlyRateLoan;
-                principalPayment = monthlyRepaymentAmount - interestOnDebt;
-                currentDebt -= principalPayment;
-                if (currentDebt < 0) currentDebt = 0;
+                const interestOnDebt = debtA * monthlyRateLoan;
+                const principalPayment = monthlyRepaymentA - interestOnDebt;
+                debtA -= principalPayment;
+                if (debtA < 0) debtA = 0;
             }
 
-            rows.push({
-                date: new Date(currentDate),
+            rowsA.push({
+                date: new Date(dateA),
                 phase: "Remboursement",
-                capital: capitalAfterLumpSum,
-                interestEarned: (capitalAfterLumpSum > 0 ? capitalAfterLumpSum * monthlyInvestRate : 0),
+                capital: capitalA,
+                interestEarned: capitalA > 0 ? capitalA * monthlyInvestRate : 0,
                 expenses: 0,
                 insurancePaid: 0,
-                monthlyRepayment: monthlyRepaymentAmount,
-                remainingDebt: currentDebt,
-                netValue: capitalAfterLumpSum - currentDebt
+                monthlyRepayment: monthlyRepaymentA,
+                remainingDebt: debtA,
+                netValue: capitalA - debtA
             });
-
-            currentDate = addMonths(currentDate, 1);
+            dateA = addMonths(dateA, 1);
         }
 
-        setSimulation(rows);
-        setSummary({
-            totalInterestEarned,
-            totalExpenses,
-            totalInsurancePaid,
-            lumpSumPaid,
-            monthlyRepaymentAmount: (remainingDebtToAmortize > 0 ? monthlyRepaymentAmount : 0),
-            finalNetValue: rows[rows.length - 1]?.netValue || 0,
+        setResultsA({
+            rows: rowsA,
+            summary: {
+                totalInterestEarned: totalInterestA,
+                totalExpenses: totalExpensesCommon,
+                totalInsurancePaid: totalInsurancePaidCommon,
+                lumpSumPaid,
+                monthlyRepaymentAmount: (loanAmount - lumpSumPaid > 0 ? monthlyRepaymentA : 0),
+                finalNetValue: rowsA[rowsA.length - 1]?.netValue || 0,
+            }
         });
-    };
+
+        // --- Scenario B: Capital Conservé (New Logic) ---
+        const rowsB = [...rowsCommon];
+        let capitalB = currentCapital;
+        let totalInterestB = totalInterestEarnedCommon;
+        let debtB = loanAmount; // Full loan amount is amortized
+
+        // Calculate standard monthly payment for the full loan
+        let monthlyRepaymentB = 0;
+        if (repaymentDurationYears > 0) {
+            const annualRate = loanInterestRateRepayment / 100;
+            const monthlyRate = annualRate / 12;
+            const numberOfPayments = repaymentDurationYears * 12;
+            if (annualRate === 0) monthlyRepaymentB = debtB / numberOfPayments;
+            else monthlyRepaymentB = (debtB * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -numberOfPayments));
+        }
+
+        let dateB = new Date(repayStart);
+
+        for (let i = 0; i < repaymentMonths; i++) {
+            // 1. Earn Interest on FULL capital (since we kept it)
+            if (capitalB > 0) {
+                const interest = capitalB * monthlyInvestRate;
+                capitalB += interest;
+                totalInterestB += interest;
+            }
+
+            // 2. Pay Monthly Installment from Capital
+            capitalB -= monthlyRepaymentB;
+
+            // 3. Amortize Debt
+            if (debtB > 0) {
+                const monthlyRateLoan = (loanInterestRateRepayment / 100) / 12;
+                const interestOnDebt = debtB * monthlyRateLoan;
+                const principalPayment = monthlyRepaymentB - interestOnDebt;
+                debtB -= principalPayment;
+                if (debtB < 0) debtB = 0;
+            }
+
+            rowsB.push({
+                date: new Date(dateB),
+                phase: "Remboursement",
+                capital: capitalB,
+                interestEarned: capitalB > 0 ? capitalB * monthlyInvestRate : 0,
+                expenses: 0,
+                insurancePaid: 0,
+                monthlyRepayment: monthlyRepaymentB, // WE PAY THIS FROM CAPITAL
+                remainingDebt: debtB,
+                netValue: capitalB - debtB
+            });
+            dateB = addMonths(dateB, 1);
+        }
+
+        setResultsB({
+            rows: rowsB,
+            summary: {
+                totalInterestEarned: totalInterestB,
+                totalExpenses: totalExpensesCommon,
+                totalInsurancePaid: totalInsurancePaidCommon,
+                lumpSumPaid: 0, // No lump sum in this scenario
+                monthlyRepaymentAmount: monthlyRepaymentB,
+                finalNetValue: rowsB[rowsB.length - 1]?.netValue || 0,
+            }
+        });
+    }, [loanAmount, loanStartDate, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment]);
 
     useEffect(() => {
         calculateSimulation();
-    }, [loanAmount, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, loanStartDate]);
+    }, [calculateSimulation]);
 
     const fmt = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
 
@@ -281,190 +348,308 @@ const Calculator = () => {
         </div>
     );
 
+    const [isCustomPaymentsOpen, setIsCustomPaymentsOpen] = useState(false);
+
     return (
-        <div className="container mx-auto p-6 space-y-6 animate-in fade-in-50">
-            <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-4">
-                    <div className="p-3 bg-primary/10 rounded-full">
-                        <CalculatorIcon className="w-8 h-8 text-primary" />
+        <div className="container mx-auto p-4 md:p-6 space-y-6 animate-in fade-in-50">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-2">
+                <div className="flex items-center gap-3">
+                    <SidebarTrigger className="-ml-1 md:hidden" />
+                    <div className="p-2.5 bg-primary/10 rounded-xl">
+                        <CalculatorIcon className="w-6 h-6 text-primary" />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-bold tracking-tight">Calculatrice Crédit</h1>
-                        <p className="text-muted-foreground">
-                            Simulez l'investissement de votre prêt, vos dépenses, et le plan de remboursement final.
+                        <h1 className="text-xl font-bold tracking-tight">Calculatrice Crédit</h1>
+                        <p className="text-sm text-muted-foreground hidden md:block">
+                            Optimisez votre stratégie financière
                         </p>
                     </div>
                 </div>
                 <SyncIndicator />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* Left Column: Settings (4 cols) */}
-                <div className="lg:col-span-4 space-y-6">
-                    {/* 1. Loan Initial Settings */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-lg">1. Prêt & Placement (Phase Épargne)</CardTitle>
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+                {/* Left Column: Settings (4 cols) - Sticky on Desktop */}
+                <div className="xl:col-span-4 space-y-4 xl:sticky xl:top-20">
+                    {/* 1. Global Settings */}
+                    <Card className="border-border/50 shadow-sm">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="text-base font-medium">Paramètres Généraux</CardTitle>
                         </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                                <Label>Date Début Prêt</Label>
-                                <Input type="date" value={loanStartDate} onChange={e => setLoanStartDate(e.target.value)} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Montant du Prêt (€)</Label>
-                                <Input type="number" value={loanAmount} onChange={e => setLoanAmount(Number(e.target.value))} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Rendement Placement Annuel (%)</Label>
-                                <Input type="number" step="0.1" value={investmentReturnRate} onChange={e => setInvestmentReturnRate(Number(e.target.value))} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Assurance Mensuelle (€)</Label>
-                                <Input type="number" value={insuranceAmount} onChange={e => setInsuranceAmount(Number(e.target.value))} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Date Début Remboursement</Label>
-                                <Input type="date" value={repaymentStartDate} onChange={e => setRepaymentStartDate(e.target.value)} />
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* 2. Custom Payments */}
-                    <Card>
-                        <CardHeader className="flex flex-row items-center justify-between">
-                            <CardTitle className="text-lg">2. Dépenses Prévues</CardTitle>
-                            <Button variant="outline" size="sm" onClick={addPayment}><Plus className="w-4 h-4 mr-2" /> Ajouter</Button>
-                        </CardHeader>
-                        <CardContent className="space-y-4 max-h-[300px] overflow-y-auto">
-                            {customPayments.map((payment) => (
-                                <div key={payment.id} className="flex gap-2 items-end border-b pb-2">
-                                    <div className="flex-1 space-y-1">
-                                        <Input
-                                            value={payment.label}
-                                            onChange={e => updatePayment(payment.id, "label", e.target.value)}
-                                            placeholder="Libellé"
-                                            className="h-8 text-sm"
-                                        />
-                                        <div className="flex gap-2">
-                                            <Input
-                                                type="date"
-                                                value={payment.date}
-                                                onChange={e => updatePayment(payment.id, "date", e.target.value)}
-                                                className="h-8 text-sm w-32"
-                                            />
-                                            <Input
-                                                type="number"
-                                                value={payment.amount}
-                                                onChange={e => updatePayment(payment.id, "amount", Number(e.target.value))}
-                                                className="h-8 text-sm flex-1"
-                                                placeholder="€"
-                                            />
-                                        </div>
-                                    </div>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removePayment(payment.id)}>
-                                        <Trash2 className="w-4 h-4" />
-                                    </Button>
+                        <CardContent className="space-y-5">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="text-xs text-muted-foreground">Début Prêt</Label>
+                                    <Input type="date" className="h-8 text-sm" value={loanStartDate} onChange={e => setLoanStartDate(e.target.value)} />
                                 </div>
-                            ))}
+                                <div className="space-y-2">
+                                    <Label className="text-xs text-muted-foreground">Début Remboursement</Label>
+                                    <Input type="date" className="h-8 text-sm" value={repaymentStartDate} onChange={e => setRepaymentStartDate(e.target.value)} />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium">Montant du Prêt (€)</Label>
+                                    <Input
+                                        type="number"
+                                        value={loanAmount}
+                                        onChange={e => setLoanAmount(Number(e.target.value))}
+                                        className="h-9"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium">Rendement Placement (%)</Label>
+                                    <Input
+                                        type="number"
+                                        step="0.1"
+                                        value={investmentReturnRate}
+                                        onChange={e => setInvestmentReturnRate(Number(e.target.value))}
+                                        className="h-9 text-emerald-600 font-medium"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium">Assurance Mensuelle (€)</Label>
+                                    <Input
+                                        type="number"
+                                        step="0.01"
+                                        value={insuranceAmount}
+                                        onChange={e => setInsuranceAmount(Number(e.target.value))}
+                                        className="h-9"
+                                    />
+                                </div>
+                            </div>
                         </CardContent>
                     </Card>
 
-                    {/* 3. Repayment Settings */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-lg">3. Remboursement (Phase 2)</CardTitle>
+                    {/* 2. Repayment Settings */}
+                    <Card className="border-border/50 shadow-sm">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="text-base font-medium">Phase de Remboursement</CardTitle>
                         </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                                <Label>Durée Remboursement (Années)</Label>
-                                <Input type="number" value={repaymentDurationYears} onChange={e => setRepaymentDurationYears(Number(e.target.value))} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Taux Intêt Prêt (Phase Remboursement %)</Label>
-                                <Input type="number" step="0.1" value={loanInterestRateRepayment} onChange={e => setLoanInterestRateRepayment(Number(e.target.value))} />
+                        <CardContent className="space-y-5">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium">Durée (Années)</Label>
+                                    <Input
+                                        type="number"
+                                        value={repaymentDurationYears}
+                                        onChange={e => setRepaymentDurationYears(Number(e.target.value))}
+                                        className="h-9"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium">Taux Intérêt Prêt (%)</Label>
+                                    <Input
+                                        type="number"
+                                        step="0.05"
+                                        value={loanInterestRateRepayment}
+                                        onChange={e => setLoanInterestRateRepayment(Number(e.target.value))}
+                                        className="h-9 text-red-600 font-medium"
+                                    />
+                                </div>
                             </div>
                         </CardContent>
+                    </Card>
+
+                    {/* 3. Custom Payments (Collapsible) */}
+                    <Card className="border-border/50 shadow-sm">
+                        <Collapsible open={isCustomPaymentsOpen} onOpenChange={setIsCustomPaymentsOpen}>
+                            <div className="flex items-center justify-between p-4">
+                                <CardTitle className="text-base font-medium">Dépenses Prévues ({customPayments.length})</CardTitle>
+                                <CollapsibleTrigger asChild>
+                                    <Button variant="ghost" size="sm" className="w-9 p-0">
+                                        {isCustomPaymentsOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                        <span className="sr-only">Toggle</span>
+                                    </Button>
+                                </CollapsibleTrigger>
+                            </div>
+                            <CollapsibleContent>
+                                <CardContent className="pt-0 space-y-3">
+                                    {customPayments.map((payment) => (
+                                        <div key={payment.id} className="grid grid-cols-12 gap-2 items-center border-b pb-2 last:border-0 last:pb-0">
+                                            <div className="col-span-5">
+                                                <Input
+                                                    value={payment.label}
+                                                    onChange={e => updatePayment(payment.id, "label", e.target.value)}
+                                                    placeholder="Libellé"
+                                                    className="h-7 text-xs"
+                                                />
+                                            </div>
+                                            <div className="col-span-4">
+                                                <Input
+                                                    type="date"
+                                                    value={payment.date}
+                                                    onChange={e => updatePayment(payment.id, "date", e.target.value)}
+                                                    className="h-7 text-xs px-1"
+                                                />
+                                            </div>
+                                            <div className="col-span-3 text-right">
+                                                <div className="relative">
+                                                    <Input
+                                                        type="number"
+                                                        value={payment.amount}
+                                                        onChange={e => updatePayment(payment.id, "amount", Number(e.target.value))}
+                                                        className="h-7 text-xs pr-6 text-right"
+                                                    />
+                                                    <button onClick={() => removePayment(payment.id)} className="absolute right-1 top-1.5 text-destructive hover:text-destructive/80">
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <Button variant="outline" size="sm" onClick={addPayment} className="w-full mt-2 h-8 text-xs">
+                                        <Plus className="w-3.5 h-3.5 mr-1.5" /> Ajouter une dépense
+                                    </Button>
+                                </CardContent>
+                            </CollapsibleContent>
+                        </Collapsible>
                     </Card>
                 </div>
 
                 {/* Right Column: Results (8 cols) */}
-                <div className="lg:col-span-8 space-y-6">
-                    {/* Summary Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <Card className="bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200/50">
-                            <CardContent className="pt-6">
-                                <div className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Total Intérêts Gagnés</div>
-                                <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">{fmt(summary.totalInterestEarned)}</div>
-                            </CardContent>
-                        </Card>
-                        <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200/50">
-                            <CardContent className="pt-6">
-                                <div className="text-sm font-medium text-amber-600 dark:text-amber-400">Remboursement Anticipé</div>
-                                <div className="text-2xl font-bold text-amber-700 dark:text-amber-300">{fmt(summary.lumpSumPaid)}</div>
-                            </CardContent>
-                        </Card>
-                        <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200/50">
-                            <CardContent className="pt-6">
-                                <div className="text-sm font-medium text-blue-600 dark:text-blue-400">Mensualité Future</div>
-                                <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">{fmt(summary.monthlyRepaymentAmount)}</div>
-                            </CardContent>
-                        </Card>
-                    </div>
+                <div className="xl:col-span-8 space-y-6">
+                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "scenarioA" | "scenarioB")} className="w-full">
+                        <TabsList className="grid w-full grid-cols-2 mb-6">
+                            <TabsTrigger value="scenarioA">Remboursement Anticipé</TabsTrigger>
+                            <TabsTrigger value="scenarioB">Capital Conservé</TabsTrigger>
+                        </TabsList>
 
-                    {/* Timeline Table */}
-                    <Card className="h-[600px] flex flex-col">
-                        <CardHeader>
-                            <CardTitle>Échéancier Détaillé</CardTitle>
-                        </CardHeader>
-                        <div className="flex-1 overflow-auto">
-                            <Table>
-                                <TableHeader className="sticky top-0 bg-background z-10">
-                                    <TableRow>
-                                        <TableHead>Date</TableHead>
-                                        <TableHead>Phase</TableHead>
-                                        <TableHead>Capital Dispo.</TableHead>
-                                        <TableHead className="text-green-600">Intérêts (+)</TableHead>
-                                        <TableHead className="text-red-600">Dépenses (-)</TableHead>
-                                        <TableHead className="text-orange-600">Remboursement (-)</TableHead>
-                                        <TableHead>Dette Restante</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {simulation.map((row, index) => (
-                                        <TableRow key={index} className={row.phase === "Remboursement" ? "bg-muted/30" : ""}>
-                                            <TableCell className="font-medium whitespace-nowrap">
-                                                {format(row.date, "MMM yyyy", { locale: fr })}
-                                            </TableCell>
-                                            <TableCell>
-                                                <span className={`px-2 py-1 rounded-full text-xs ${row.phase === "Epargne"
-                                                    ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                                                    : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300"
-                                                    }`}>
-                                                    {row.phase}
-                                                </span>
-                                            </TableCell>
-                                            <TableCell>{fmt(row.capital)}</TableCell>
-                                            <TableCell className="text-green-600 text-xs">
-                                                {row.interestEarned > 0 ? `+${row.interestEarned.toFixed(2)}` : "-"}
-                                            </TableCell>
-                                            <TableCell className="text-red-600 text-xs">
-                                                {(row.expenses + row.insurancePaid) > 0
-                                                    ? `-${(row.expenses + row.insurancePaid).toFixed(2)}`
-                                                    : "-"}
-                                            </TableCell>
-                                            <TableCell className="text-orange-600 font-medium">
-                                                {row.monthlyRepayment > 0 ? `-${row.monthlyRepayment.toFixed(2)}` : "-"}
-                                            </TableCell>
-                                            <TableCell className="text-muted-foreground">
-                                                {fmt(row.remainingDebt)}
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
+                        <div className="space-y-6">
+                            {/* Summary Cards */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <Card className="bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200/50 shadow-sm">
+                                    <CardContent className="pt-6">
+                                        <div className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Intérêts Gagnés</div>
+                                        <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 mt-1">
+                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.totalInterestEarned : resultsB.summary.totalInterestEarned)}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                                <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200/50 shadow-sm">
+                                    <CardContent className="pt-6">
+                                        <div className="text-xs font-medium uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                                            {activeTab === "scenarioA" ? "Remboursement Anticipé" : "Capital Final"}
+                                        </div>
+                                        <div className="text-2xl font-bold text-amber-700 dark:text-amber-300 mt-1">
+                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.lumpSumPaid : resultsB.rows[resultsB.rows.length - 1]?.capital || 0)}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                                <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200/50 shadow-sm">
+                                    <CardContent className="pt-6">
+                                        <div className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400">Mensualité Prêt</div>
+                                        <div className="text-2xl font-bold text-blue-700 dark:text-blue-300 mt-1">
+                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.monthlyRepaymentAmount : resultsB.summary.monthlyRepaymentAmount)}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+
+                            {/* Chart */}
+                            <Card className="border-border/50 shadow-sm">
+                                <CardHeader>
+                                    <CardTitle>Projection du Capital vs Dette</CardTitle>
+                                </CardHeader>
+                                <CardContent className="h-[300px] w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <AreaChart
+                                            data={(activeTab === "scenarioA" ? resultsA.rows : resultsB.rows).filter((_, i) => i % 6 === 0)} // Sample data to reduce density
+                                            margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                                        >
+                                            <defs>
+                                                <linearGradient id="colorCapital" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.8} />
+                                                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                                                </linearGradient>
+                                                <linearGradient id="colorDebt" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8} />
+                                                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                                                </linearGradient>
+                                            </defs>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                                            <XAxis
+                                                dataKey="date"
+                                                tickFormatter={(date) => format(date, "yyyy")}
+                                                minTickGap={30}
+                                                tick={{ fontSize: 12, fill: '#6B7280' }}
+                                                axisLine={false}
+                                                tickLine={false}
+                                            />
+                                            <YAxis
+                                                tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`}
+                                                tick={{ fontSize: 12, fill: '#6B7280' }}
+                                                axisLine={false}
+                                                tickLine={false}
+                                            />
+                                            <Tooltip
+                                                labelFormatter={(label) => format(label, "MMMM yyyy", { locale: fr })}
+                                                formatter={(value: number) => [fmt(value), ""]}
+                                                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                            />
+                                            <Legend verticalAlign="top" height={36} />
+                                            <Area type="monotone" dataKey="capital" name="Capital Investi" stroke="#10b981" fillOpacity={1} fill="url(#colorCapital)" strokeWidth={2} />
+                                            <Area type="monotone" dataKey="remainingDebt" name="Dette Restante" stroke="#ef4444" fillOpacity={1} fill="url(#colorDebt)" strokeWidth={2} />
+                                        </AreaChart>
+                                    </ResponsiveContainer>
+                                </CardContent>
+                            </Card>
+
+                            {/* Timeline Table */}
+                            <Card className="h-[500px] flex flex-col border-border/50 shadow-sm">
+                                <div className="flex-1 overflow-auto">
+                                    <Table>
+                                        <TableHeader className="sticky top-0 bg-background z-10 border-b">
+                                            <TableRow className="hover:bg-transparent">
+                                                <TableHead className="w-[100px]">Date</TableHead>
+                                                <TableHead>Phase</TableHead>
+                                                <TableHead className="text-right">Capital</TableHead>
+                                                <TableHead className="text-right text-green-600">Intérêts</TableHead>
+                                                <TableHead className="text-right text-red-600">Dépenses</TableHead>
+                                                <TableHead className="text-right text-orange-600">
+                                                    {activeTab === "scenarioA" ? "Remboursement" : "Mensualité"}
+                                                </TableHead>
+                                                <TableHead className="text-right">Dette</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {(activeTab === "scenarioA" ? resultsA.rows : resultsB.rows).map((row, index) => (
+                                                <TableRow key={index} className={row.phase === "Remboursement" ? "bg-muted/30 hover:bg-muted/50" : "hover:bg-muted/30"}>
+                                                    <TableCell className="font-medium whitespace-nowrap text-xs text-muted-foreground">
+                                                        {format(row.date, "MMM yyyy", { locale: fr })}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wide border ${row.phase === "Epargne"
+                                                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                            : "bg-blue-50 text-blue-700 border-blue-200"
+                                                            }`}>
+                                                            {row.phase}
+                                                        </span>
+                                                    </TableCell>
+                                                    <TableCell className="text-right font-medium">{fmt(row.capital)}</TableCell>
+                                                    <TableCell className="text-right text-emerald-600 text-xs">
+                                                        {row.interestEarned > 0 ? `+${row.interestEarned.toFixed(0)}` : "-"}
+                                                    </TableCell>
+                                                    <TableCell className="text-right text-red-600 text-xs">
+                                                        {(row.expenses + row.insurancePaid) > 0
+                                                            ? `-${(row.expenses + row.insurancePaid).toFixed(0)}`
+                                                            : "-"}
+                                                    </TableCell>
+                                                    <TableCell className="text-right text-orange-600 font-medium text-xs">
+                                                        {row.monthlyRepayment > 0 ? `-${row.monthlyRepayment.toFixed(0)}` : "-"}
+                                                    </TableCell>
+                                                    <TableCell className="text-right text-muted-foreground text-xs">
+                                                        {fmt(row.remainingDebt)}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
+                            </Card>
                         </div>
-                    </Card>
+                    </Tabs>
                 </div>
             </div>
         </div>

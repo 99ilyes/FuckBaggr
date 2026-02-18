@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, RefreshCw, Upload } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { toast } from "@/hooks/use-toast";
 
 export default function Index() {
@@ -276,6 +277,7 @@ export default function Index() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
+              <SidebarTrigger className="-ml-1" />
               <img src="/logo.png" alt="FuckBaggr" className="h-8 w-auto" />
               <span className="text-lg font-semibold tracking-tight">FuckBaggr</span>
             </div>

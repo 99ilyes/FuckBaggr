@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 const CURRENT_QUARTER_KEY = "earnings-current-quarter";
 
@@ -130,53 +131,57 @@ export default function EarningsTracker() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 md:px-6 space-y-6">
-      <Card className="border-border/50">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-lg font-semibold">Earnings Tracker</CardTitle>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground whitespace-nowrap">Trimestre actuel :</span>
-              <Select value={currentQuarter} onValueChange={setCurrentQuarter}>
-                <SelectTrigger className="w-[120px] h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {quarterOptions.map((q) => (
-                    <SelectItem key={q} value={q}>{q}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Select value={filterTicker} onValueChange={setFilterTicker}>
-              <SelectTrigger className="w-[140px] h-8 text-xs">
-                <SelectValue placeholder="Filtrer..." />
+    <div className="w-full px-4 py-6 md:px-6 space-y-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <SidebarTrigger className="-ml-1 md:hidden" />
+          <h1 className="text-2xl font-bold tracking-tight">Earnings Tracker</h1>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 bg-background border px-2 py-1 rounded-md">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">Trimestre actuel :</span>
+            <Select value={currentQuarter} onValueChange={setCurrentQuarter}>
+              <SelectTrigger className="w-[100px] h-7 text-xs border-0 shadow-none focus:ring-0">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Tous</SelectItem>
-                {portfolioTickers.map((t) => (
-                  <SelectItem key={t} value={t}>{t}</SelectItem>
+                {quarterOptions.map((q) => (
+                  <SelectItem key={q} value={q}>{q}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Button size="sm" onClick={() => { setEditData(null); setDialogOpen(true); }}>
-              <Plus className="h-4 w-4 mr-1" />
-              Ajouter
-            </Button>
           </div>
-        </CardHeader>
-        <CardContent>
-          <EarningsTable
-            earnings={filtered}
-            allEarnings={earnings}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-            onUpdateNote={handleUpdateNote}
-            currentQuarter={currentQuarter}
-            tickerPortfolioMap={tickerPortfolioMap}
-          />
-        </CardContent>
-      </Card>
+
+          <Select value={filterTicker} onValueChange={setFilterTicker}>
+            <SelectTrigger className="w-[140px] h-9 text-sm">
+              <SelectValue placeholder="Filtrer..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tous</SelectItem>
+              {portfolioTickers.map((t) => (
+                <SelectItem key={t} value={t}>{t}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Button size="sm" onClick={() => { setEditData(null); setDialogOpen(true); }}>
+            <Plus className="h-4 w-4 mr-1" />
+            Ajouter
+          </Button>
+        </div>
+      </div>
+
+      <div className="w-full">
+        <EarningsTable
+          earnings={filtered}
+          allEarnings={earnings}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onUpdateNote={handleUpdateNote}
+          currentQuarter={currentQuarter}
+          tickerPortfolioMap={tickerPortfolioMap}
+        />
+      </div>
 
       <AddEarningsDialog
         open={dialogOpen}
