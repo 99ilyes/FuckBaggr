@@ -30,21 +30,24 @@ interface SimulationRow {
 const Calculator = () => {
     // --- Inputs ---
     // Loan & Deferral Phase
-    const [loanAmount, setLoanAmount] = useState<number>(20000);
-    const [loanStartDate, setLoanStartDate] = useState<string>(format(new Date(), "yyyy-MM-dd"));
-    const [insuranceAmount, setInsuranceAmount] = useState<number>(4.26);
-    const [investmentReturnRate, setInvestmentReturnRate] = useState<number>(5.0);
-    const [repaymentStartDate, setRepaymentStartDate] = useState<string>("2028-10-28");
+    const STORAGE_KEY = "calculatrice-credit-data";
+    const getSaved = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; } };
+
+    const [loanAmount, setLoanAmount] = useState<number>(() => getSaved().loanAmount ?? 20000);
+    const [loanStartDate, setLoanStartDate] = useState<string>(() => getSaved().loanStartDate ?? format(new Date(), "yyyy-MM-dd"));
+    const [insuranceAmount, setInsuranceAmount] = useState<number>(() => getSaved().insuranceAmount ?? 4.26);
+    const [investmentReturnRate, setInvestmentReturnRate] = useState<number>(() => getSaved().investmentReturnRate ?? 5.0);
+    const [repaymentStartDate, setRepaymentStartDate] = useState<string>(() => getSaved().repaymentStartDate ?? "2028-10-28");
 
     // Custom Payments (e.g. Tuition)
-    const [customPayments, setCustomPayments] = useState<CustomPayment[]>([
+    const [customPayments, setCustomPayments] = useState<CustomPayment[]>(() => getSaved().customPayments ?? [
         { id: "1", date: "2026-09-01", amount: 5000, label: "Scolarité A1" },
         { id: "2", date: "2027-09-01", amount: 5000, label: "Scolarité A2" },
     ]);
 
     // Repayment Phase
-    const [repaymentDurationYears, setRepaymentDurationYears] = useState<number>(5);
-    const [loanInterestRateRepayment, setLoanInterestRateRepayment] = useState<number>(1.0); // Interest rate during repayment
+    const [repaymentDurationYears, setRepaymentDurationYears] = useState<number>(() => getSaved().repaymentDurationYears ?? 5);
+    const [loanInterestRateRepayment, setLoanInterestRateRepayment] = useState<number>(() => getSaved().loanInterestRateRepayment ?? 1.0);
 
     // --- Results ---
     const [simulation, setSimulation] = useState<SimulationRow[]>([]);
@@ -220,6 +223,16 @@ const Calculator = () => {
         calculateSimulation();
     }, [loanAmount, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, loanStartDate]);
 
+    // Persist inputs to localStorage
+    useEffect(() => {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                loanAmount, loanStartDate, insuranceAmount, investmentReturnRate,
+                repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment,
+            }));
+        } catch { /* ignore */ }
+    }, [loanAmount, loanStartDate, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment]);
+
     return (
         <div className="container mx-auto p-6 space-y-6 animate-in fade-in-50">
             <div className="flex items-center gap-4 mb-6">
@@ -227,7 +240,7 @@ const Calculator = () => {
                     <CalculatorIcon className="w-8 h-8 text-primary" />
                 </div>
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight">Calculatrice Financière (Avancée)</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">Calculatrice Crédit</h1>
                     <p className="text-muted-foreground">
                         Simulez l'investissement de votre prêt, vos dépenses, et le plan de remboursement final.
                     </p>
