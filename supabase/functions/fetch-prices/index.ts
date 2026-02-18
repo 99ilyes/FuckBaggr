@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import yahooFinance from "https://esm.sh/yahoo-finance2@2.13.3";
 
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -83,6 +85,7 @@ serve(async (req) => {
           console.error(`Fundamentals error for ${t}:`, err);
           results[t] = { error: String(err) };
         }
+        await delay(350);
       }
       return new Response(JSON.stringify({ results, debugMode: mode }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -99,7 +102,7 @@ serve(async (req) => {
       yahooFinance.suppressNotices(["yahooSurvey"]);
     } catch {}
 
-    const promises = uniqueTickers.map(async (t) => {
+    for (const t of uniqueTickers) {
       try {
         const q = await yahooFinance.quote(t);
         results[t] = {
@@ -108,13 +111,13 @@ serve(async (req) => {
           name: q.longName ?? q.shortName ?? q.symbol ?? t,
           currency: q.currency ?? "USD",
         };
+        console.log(`Fetched price for ${t}: ${results[t].price}`);
       } catch (err) {
         console.error(`Quote error for ${t}:`, err);
         results[t] = { price: null, previousClose: null, name: t, currency: "USD", error: String(err) };
       }
-    });
-
-    await Promise.all(promises);
+      await delay(350);
+    }
 
     // Upsert into assets_cache
     for (const [ticker, info] of Object.entries(results)) {
