@@ -73,7 +73,7 @@ const BRAND_COLORS: Record<string, string> = {
   // Latam
   MELI: "#FFE600",
   // Others
-  NBIS: "#F59E0B", // Yellow/Amber for Nebius
+  NBIS: "#CCF500", // Neon Lime for Nebius
   GEV: "#005F9E",
   // Portfolios (fallback)
   CTO: "#4285F4",

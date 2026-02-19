@@ -545,140 +545,75 @@ const Calculator = () => {
                         </TabsList>
 
                         <div className="space-y-6">
-                            {/* Strategy Comparison Block */}
+                            {/* KPI Block (Simple Metrics per Scenario) */}
                             {(() => {
                                 const months = repaymentDurationYears * 12;
+                                const isScenarioA = activeTab === "scenarioA";
+                                const results = isScenarioA ? resultsA : resultsB;
 
-                                // --- Strategy A (Remboursement Anticipé) ---
-                                // 1. Final Wealth
-                                const finalCapitalA = resultsA.rows[resultsA.rows.length - 1]?.capital || 0;
-                                const finalDebtA = resultsA.rows[resultsA.rows.length - 1]?.remainingDebt || 0;
-                                const finalWealthA = finalCapitalA - finalDebtA;
+                                // 1. Dette Restante
+                                const remainingDebt = results.summary.remainingDebtStart;
 
-                                // 2. Total Out of Pocket
-                                // Expenses + Insurance (Deferral) + Repayment (Monthly + Insurance)
-                                const pocketDeferral = resultsA.summary.totalExpenses + resultsA.summary.totalInsurancePaid;
-                                const pocketRepaymentA = (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * months;
-                                const totalPocketA = pocketDeferral + pocketRepaymentA;
+                                // 2. Interest Earned
+                                const interestEarned = results.summary.totalInterestEarned;
 
-                                // 3. Net Gain (The real value created by this strategy)
-                                const netGainA = finalWealthA - totalPocketA;
+                                // 3. Total Credit Cost (Interests + Insurance)
+                                let totalCost = results.summary.totalCreditCost;
+                                if (!isScenarioA) {
+                                    totalCost += (insuranceAmount * months);
+                                }
 
+                                // 4. Final Capital
+                                const finalCapital = results.rows[results.rows.length - 1]?.capital || 0;
 
-                                // --- Strategy B (Capital Conservé) ---
-                                // 1. Final Wealth
-                                const finalCapitalB = resultsB.rows[resultsB.rows.length - 1]?.capital || 0;
-                                const finalDebtB = resultsB.rows[resultsB.rows.length - 1]?.remainingDebt || 0; // Should be 0 if fully amortized
-                                const finalWealthB = finalCapitalB - finalDebtB;
-
-                                // 2. Total Out of Pocket
-                                // Expenses + Insurance (Deferral) + Repayment Phase
-                                // If PayFromCapital: Only Insurance is out of pocket (assuming insurance not paid by capital? Usually distinct). 
-                                // Let's simplify: User pays Insurance from pocket. Capital pays Loan.
-                                // If NOT PayFromCapital: User pays (Loan + Insurance) from pocket.
-                                const pocketRepaymentB = payFromCapital
-                                    ? (insuranceAmount * months)
-                                    : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * months;
-                                const totalPocketB = pocketDeferral + pocketRepaymentB;
-
-                                // 3. Net Gain
-                                const netGainB = finalWealthB - totalPocketB;
-
-                                // --- Comparison ---
-                                const diffGain = netGainB - netGainA; // Positive = B is better
-                                const winner = diffGain >= 0 ? "B" : "A";
-                                const winnerName = winner === "B" ? "Capital Conservé" : "Remboursement Anticipé";
-                                const winnerAmount = Math.abs(diffGain);
+                                // 5. Net Benefit (P/L)
+                                const netBenefit = interestEarned - totalCost;
 
                                 return (
-                                    <div className="space-y-6">
-                                        {/* Winner Banner */}
-                                        <div className={`p-4 rounded-xl border flex items-center justify-between shadow-sm ${winner === "B" ? "bg-emerald-50/50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800" : "bg-blue-50/50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-800"}`}>
-                                            <div>
-                                                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Stratégie Recommandée</div>
-                                                <div className="flex items-baseline gap-2">
-                                                    <span className={`text-xl font-bold ${winner === "B" ? "text-emerald-600 dark:text-emerald-400" : "text-blue-600 dark:text-blue-400"}`}>
-                                                        {winnerName}
-                                                    </span>
-                                                    <span className="text-sm font-medium text-foreground">
-                                                        gagne de <span className="font-bold">{fmt(winnerAmount)}</span>
-                                                    </span>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                                        {/* Card 1: Dette Restante */}
+                                        <Card className="bg-card border-border/50 shadow-sm">
+                                            <CardContent className="pt-6">
+                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Dette Restante</div>
+                                                <div className="text-2xl font-bold tabular-nums">{fmt(remainingDebt)}</div>
+                                            </CardContent>
+                                        </Card>
+
+                                        {/* Card 2: Coût Crédit */}
+                                        <Card className="bg-card border-border/50 shadow-sm">
+                                            <CardContent className="pt-6">
+                                                <div className="text-xs font-medium uppercase tracking-wider text-rose-600 dark:text-rose-400 mb-1">Coût Crédit (Total)</div>
+                                                <div className="text-2xl font-bold text-rose-700 dark:text-rose-300 tabular-nums">{fmt(totalCost)}</div>
+                                                <div className="text-[10px] text-muted-foreground mt-1">Intérêts + Assurance</div>
+                                            </CardContent>
+                                        </Card>
+
+                                        {/* Card 3: Intérêts Générés */}
+                                        <Card className="bg-card border-border/50 shadow-sm">
+                                            <CardContent className="pt-6">
+                                                <div className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-1">Intérêts Générés</div>
+                                                <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(interestEarned)}</div>
+                                            </CardContent>
+                                        </Card>
+
+                                        {/* Card 4: Solde Final */}
+                                        <Card className="bg-card border-border/50 shadow-sm">
+                                            <CardContent className="pt-6">
+                                                <div className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">Solde Final</div>
+                                                <div className="text-2xl font-bold text-blue-700 dark:text-blue-300 tabular-nums">{fmt(finalCapital)}</div>
+                                            </CardContent>
+                                        </Card>
+
+                                        {/* Card 5: Bénéfice Net (P/L) */}
+                                        <Card className={`border-border/50 shadow-sm ${netBenefit >= 0 ? "bg-emerald-50/10 border-emerald-200/50" : "bg-rose-50/10 border-rose-200/50"}`}>
+                                            <CardContent className="pt-6">
+                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Bénéfice Net (P/L)</div>
+                                                <div className={`text-2xl font-bold tabular-nums ${netBenefit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{fmt(netBenefit)}</div>
+                                                <div className="text-[10px] text-muted-foreground mt-1 truncate">
+                                                    (Gains - Coûts)
                                                 </div>
-                                            </div>
-                                            {/* Mini Chart or Icon could go here */}
-                                        </div>
-
-                                        {/* Comparison Grid */}
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                            {/* Card 1: Richesse Nette Finale */}
-                                            <Card className="bg-card border-border/50 shadow-sm relative overflow-hidden">
-                                                <div className={`absolute top-0 left-0 w-1 h-full ${activeTab === "scenarioA" ? "bg-blue-500" : "bg-emerald-500"}`} />
-                                                <CardContent className="pt-5">
-                                                    <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">Richesse Nette Finale</div>
-                                                    <div className="space-y-3">
-                                                        <div className="flex justify-between items-end">
-                                                            <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Remboursement</span>
-                                                            <span className="font-bold tabular-nums">{fmt(finalWealthA)}</span>
-                                                        </div>
-                                                        <div className="flex justify-between items-end">
-                                                            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Conservation</span>
-                                                            <span className="font-bold tabular-nums">{fmt(finalWealthB)}</span>
-                                                        </div>
-                                                        <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden flex">
-                                                            <div className="h-full bg-blue-500" style={{ width: `${(finalWealthA / Math.max(finalWealthA, finalWealthB)) * 100}%` }} />
-                                                        </div>
-                                                        <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden flex mt-1">
-                                                            <div className="h-full bg-emerald-500" style={{ width: `${(finalWealthB / Math.max(finalWealthA, finalWealthB)) * 100}%` }} />
-                                                        </div>
-                                                    </div>
-                                                </CardContent>
-                                            </Card>
-
-                                            {/* Card 2: Effort de Trésorerie (Out of Pocket) */}
-                                            <Card className="bg-card border-border/50 shadow-sm relative overflow-hidden">
-                                                <div className={`absolute top-0 left-0 w-1 h-full ${activeTab === "scenarioA" ? "bg-blue-500" : "bg-emerald-500"}`} />
-                                                <CardContent className="pt-5">
-                                                    <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">Effort de Trésorerie</div>
-                                                    <div className="space-y-3">
-                                                        <div className="flex justify-between items-end">
-                                                            <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Remboursement</span>
-                                                            <span className="font-bold tabular-nums">{fmt(totalPocketA)}</span>
-                                                        </div>
-                                                        <div className="flex justify-between items-end">
-                                                            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Conservation</span>
-                                                            <span className="font-bold tabular-nums">{fmt(totalPocketB)}</span>
-                                                        </div>
-                                                        {/* Inverse bar logic (lower is better) */}
-                                                        <div className="text-[10px] text-muted-foreground text-right mt-1">
-                                                            {totalPocketB > totalPocketA
-                                                                ? `+${fmt(totalPocketB - totalPocketA)} d'effort`
-                                                                : `-${fmt(totalPocketA - totalPocketB)} d'économie`}
-                                                        </div>
-                                                    </div>
-                                                </CardContent>
-                                            </Card>
-
-                                            {/* Card 3: Gain Net Réel (The Bottom Line) */}
-                                            <Card className="bg-card border-border/50 shadow-sm relative overflow-hidden">
-                                                <div className={`absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-primary/10 to-transparent rounded-bl-full -mr-4 -mt-4`} />
-                                                <CardContent className="pt-5 relative">
-                                                    <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">Gain Net Réel</div>
-                                                    <div className="text-3xl font-bold tracking-tight mt-2">
-                                                        {fmt(activeTab === "scenarioA" ? netGainA : netGainB)}
-                                                    </div>
-                                                    <div className="text-sm font-medium text-emerald-500 mt-1 flex items-center gap-1">
-                                                        {/* Dynamic Delta */}
-                                                        {activeTab === "scenarioB" && diffGain > 0 && `+${fmt(diffGain)} vs Remboursement`}
-                                                        {activeTab === "scenarioA" && diffGain < 0 && `+${fmt(Math.abs(diffGain))} vs Conservation`}
-                                                        {activeTab === "scenarioB" && diffGain < 0 && `Perte de ${fmt(Math.abs(diffGain))} vs Remboursement`}
-                                                        {activeTab === "scenarioA" && diffGain > 0 && `Perte de ${fmt(diffGain)} vs Conservation`}
-                                                    </div>
-                                                    <div className="text-[10px] text-muted-foreground mt-2">
-                                                        (Richesse Finale - Total Sorti Poche)
-                                                    </div>
-                                                </CardContent>
-                                            </Card>
-                                        </div>
+                                            </CardContent>
+                                        </Card>
                                     </div>
                                 );
                             })()}
