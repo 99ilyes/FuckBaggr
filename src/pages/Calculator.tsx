@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calculator as CalculatorIcon, Plus, Trash2, Cloud, CloudOff, ChevronDown, ChevronUp } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { format, addMonths, isSameMonth, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
@@ -63,6 +64,7 @@ const Calculator = () => {
     const [customPayments, setCustomPayments] = useState<CustomPayment[]>(() => getSaved().customPayments ?? DEFAULT_PAYMENTS);
     const [repaymentDurationYears, setRepaymentDurationYears] = useState<number>(() => getSaved().repaymentDurationYears ?? 5);
     const [loanInterestRateRepayment, setLoanInterestRateRepayment] = useState<number>(() => getSaved().loanInterestRateRepayment ?? 1.0);
+    const [payFromCapital, setPayFromCapital] = useState<boolean>(() => getSaved().payFromCapital ?? true);
 
     // --- Results ---
     // --- Results ---
@@ -92,6 +94,7 @@ const Calculator = () => {
                     if (data.custom_payments) setCustomPayments(data.custom_payments as unknown as CustomPayment[]);
                     if (data.repayment_duration_years != null) setRepaymentDurationYears(Number(data.repayment_duration_years));
                     if (data.loan_interest_rate_repayment != null) setLoanInterestRateRepayment(Number(data.loan_interest_rate_repayment));
+                    if ((data as any).pay_from_capital != null) setPayFromCapital(Boolean((data as any).pay_from_capital));
                 }
                 setSyncStatus("synced");
             } catch {
@@ -121,6 +124,7 @@ const Calculator = () => {
                     custom_payments: (settings as any).customPayments,
                     repayment_duration_years: (settings as any).repaymentDurationYears,
                     loan_interest_rate_repayment: (settings as any).loanInterestRateRepayment,
+                    pay_from_capital: (settings as any).payFromCapital,
                     updated_at: new Date().toISOString(),
                 }, { onConflict: "id" });
 
@@ -136,11 +140,11 @@ const Calculator = () => {
         const timer = setTimeout(() => {
             saveSettings({
                 loanAmount, loanStartDate, insuranceAmount, investmentReturnRate,
-                repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment,
+                repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, payFromCapital
             });
         }, 1000);
         return () => clearTimeout(timer);
-    }, [loanAmount, loanStartDate, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, saveSettings]);
+    }, [loanAmount, loanStartDate, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, payFromCapital, saveSettings]);
 
     // --- Helpers ---
     const addPayment = () => {
@@ -223,6 +227,7 @@ const Calculator = () => {
             else monthlyRepaymentA = (debtA * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -numberOfPayments));
         }
 
+        let totalLoanInterestA = 0;
         let dateA = new Date(repayStart);
         const repaymentMonths = repaymentDurationYears * 12;
 
@@ -238,6 +243,7 @@ const Calculator = () => {
             if (debtA > 0) {
                 const monthlyRateLoan = (loanInterestRateRepayment / 100) / 12;
                 const interestOnDebt = debtA * monthlyRateLoan;
+                totalLoanInterestA += interestOnDebt;
                 const principalPayment = monthlyRepaymentA - interestOnDebt;
                 debtA -= principalPayment;
                 if (debtA < 0) debtA = 0;
@@ -264,8 +270,10 @@ const Calculator = () => {
                 totalExpenses: totalExpensesCommon,
                 totalInsurancePaid: totalInsurancePaidCommon,
                 lumpSumPaid,
+                remainingDebtStart: loanAmount - lumpSumPaid,
                 monthlyRepaymentAmount: (loanAmount - lumpSumPaid > 0 ? monthlyRepaymentA : 0),
                 finalNetValue: rowsA[rowsA.length - 1]?.netValue || 0,
+                totalCreditCost: totalLoanInterestA + totalInsurancePaidCommon,
             }
         });
 
@@ -285,6 +293,7 @@ const Calculator = () => {
             else monthlyRepaymentB = (debtB * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -numberOfPayments));
         }
 
+        let totalLoanInterestB = 0;
         let dateB = new Date(repayStart);
 
         for (let i = 0; i < repaymentMonths; i++) {
@@ -295,13 +304,16 @@ const Calculator = () => {
                 totalInterestB += interest;
             }
 
-            // 2. Pay Monthly Installment from Capital
-            capitalB -= monthlyRepaymentB;
+            // 2. Pay Monthly Installment from Capital (if enabled)
+            if (payFromCapital) {
+                capitalB -= monthlyRepaymentB;
+            }
 
             // 3. Amortize Debt
             if (debtB > 0) {
                 const monthlyRateLoan = (loanInterestRateRepayment / 100) / 12;
                 const interestOnDebt = debtB * monthlyRateLoan;
+                totalLoanInterestB += interestOnDebt;
                 const principalPayment = monthlyRepaymentB - interestOnDebt;
                 debtB -= principalPayment;
                 if (debtB < 0) debtB = 0;
@@ -314,7 +326,7 @@ const Calculator = () => {
                 interestEarned: capitalB > 0 ? capitalB * monthlyInvestRate : 0,
                 expenses: 0,
                 insurancePaid: 0,
-                monthlyRepayment: monthlyRepaymentB, // WE PAY THIS FROM CAPITAL
+                monthlyRepayment: payFromCapital ? monthlyRepaymentB : 0, // Only show as expense from capital if paid from capital
                 remainingDebt: debtB,
                 netValue: capitalB - debtB
             });
@@ -328,11 +340,13 @@ const Calculator = () => {
                 totalExpenses: totalExpensesCommon,
                 totalInsurancePaid: totalInsurancePaidCommon,
                 lumpSumPaid: 0, // No lump sum in this scenario
-                monthlyRepaymentAmount: monthlyRepaymentB,
+                remainingDebtStart: loanAmount,
+                monthlyRepaymentAmount: monthlyRepaymentB, // Always show the required repayment amount in summary
                 finalNetValue: rowsB[rowsB.length - 1]?.netValue || 0,
+                totalCreditCost: totalLoanInterestB + totalInsurancePaidCommon,
             }
         });
-    }, [loanAmount, loanStartDate, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment]);
+    }, [loanAmount, loanStartDate, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, payFromCapital]);
 
     useEffect(() => {
         calculateSimulation();
@@ -449,6 +463,20 @@ const Calculator = () => {
                                     />
                                 </div>
                             </div>
+
+                            <div className="flex items-center justify-between border-t border-border/50 pt-4 mt-2">
+                                <Label className="flex flex-col gap-1 cursor-pointer" htmlFor="pay-capital">
+                                    <span className="text-sm font-medium">Payer mensualités avec capital ?</span>
+                                    <span className="text-xs text-muted-foreground font-normal">
+                                        Si désactivé, les mensualités sont payées de votre poche (hors capital).
+                                    </span>
+                                </Label>
+                                <Switch
+                                    id="pay-capital"
+                                    checked={payFromCapital}
+                                    onCheckedChange={setPayFromCapital}
+                                />
+                            </div>
                         </CardContent>
                     </Card>
 
@@ -518,7 +546,7 @@ const Calculator = () => {
 
                         <div className="space-y-6">
                             {/* Summary Cards */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                 <Card className="bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200/50 shadow-sm">
                                     <CardContent className="pt-6">
                                         <div className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Intérêts Gagnés</div>
@@ -542,6 +570,26 @@ const Calculator = () => {
                                         <div className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400">Mensualité Prêt</div>
                                         <div className="text-2xl font-bold text-blue-700 dark:text-blue-300 mt-1">
                                             {fmt(activeTab === "scenarioA" ? resultsA.summary.monthlyRepaymentAmount : resultsB.summary.monthlyRepaymentAmount)}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                <Card className="bg-red-50 dark:bg-red-950/20 border-red-200/50 shadow-sm">
+                                    <CardContent className="pt-6">
+                                        <div className="text-xs font-medium uppercase tracking-wider text-red-600 dark:text-red-400">Capital Restant Dû</div>
+                                        <div className="text-2xl font-bold text-red-700 dark:text-red-300 mt-1">
+                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.remainingDebtStart : resultsB.summary.remainingDebtStart)}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <Card className="bg-purple-50 dark:bg-purple-950/20 border-purple-200/50 shadow-sm col-span-1 md:col-span-2 lg:col-span-4">
+                                    <CardContent className="pt-6 flex flex-col items-center justify-center text-center">
+                                        <div className="text-xs font-medium uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">Coût Total du Crédit (Intérêts + Assurance)</div>
+                                        <div className="text-3xl font-bold text-purple-700 dark:text-purple-300">
+                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.totalCreditCost : resultsB.summary.totalCreditCost)}
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -651,8 +699,8 @@ const Calculator = () => {
                         </div>
                     </Tabs>
                 </div>
-            </div>
-        </div>
+            </div >
+        </div >
     );
 };
 
