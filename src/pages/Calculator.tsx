@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calculator as CalculatorIcon, Plus, Trash2, Cloud, CloudOff, ChevronDown, ChevronUp } from "lucide-react";
+import { Calculator as CalculatorIcon, Plus, Trash2, Cloud, CloudOff, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { format, addMonths, isSameMonth, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -53,6 +53,7 @@ const DEFAULT_PAYMENTS: CustomPayment[] = [
 
 const Calculator = () => {
     const { toast } = useToast();
+        const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
 
     // --- Inputs (initialized from localStorage for instant load) ---
@@ -382,9 +383,21 @@ const Calculator = () => {
                 <SyncIndicator />
             </div>
 
+                        <div className="flex justify-start mb-4">
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    className="flex items-center gap-2"
+                >
+                    {isSidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+                    {isSidebarOpen ? "Masquer les paramètres" : "Afficher les paramètres"}
+                </Button>
+            </div>
+            
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
                 {/* Left Column: Settings (4 cols) - Sticky on Desktop */}
-                <div className="xl:col-span-4 space-y-4 xl:sticky xl:top-20">
+                <div className={`${isSidebarOpen ? "xl:col-span-4" : "hidden nl:hidden"} space-y-4 xl:sticky xl:top-20`}>
                     {/* 1. Global Settings */}
                     <Card className="border-border/50 shadow-sm">
                         <CardHeader className="pb-3">
@@ -537,7 +550,7 @@ const Calculator = () => {
                 </div>
 
                 {/* Right Column: Results (8 cols) */}
-                <div className="xl:col-span-8 space-y-6">
+                <div className={`${isSidebarOpen ? "xl:col-span-8" : "xl:col-span-12"} space-y-6`}>
                     <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "scenarioA" | "scenarioB")} className="w-full">
                         <TabsList className="grid w-full grid-cols-2 mb-6">
                             <TabsTrigger value="scenarioA">Remboursement Anticipé</TabsTrigger>
@@ -545,104 +558,7 @@ const Calculator = () => {
                         </TabsList>
 
                         <div className="space-y-6">
-                            {/* KPI Block (Simple Metrics per Scenario) */}
-                            {(() => {
-                                const months = repaymentDurationYears * 12;
-                                const isScenarioA = activeTab === "scenarioA";
-                                const results = isScenarioA ? resultsA : resultsB;
-
-                                // 1. Dette Restante (Start of phase debt)
-                                const remainingDebt = results.summary.remainingDebtStart;
-
-                                // 2. Interest Earned
-                                const interestEarned = results.summary.totalInterestEarned;
-
-                                // 3. Total Monthly Payments Remaining (New KPI)
-                                // Scenario A: 0 (Assumes paid off).
-                                // Scenario B: (Monthly Repayment + Insurance) * Months.
-                                const monthlyPayment = results.summary.monthlyRepaymentAmount;
-                                const monthlyTotal = isScenarioA ? 0 : (monthlyPayment + insuranceAmount);
-                                const totalPaymentsRemaining = isScenarioA ? 0 : (monthlyTotal * months);
-
-                                // 4. Total Cost (Used for P/L calculation logic requested by user)
-                                // User requested: "Interets gagnés - capital - interets payés - assurance"
-                                // Interpreted as: Earnings - (Remaining Debt + Interest + Insurance for the period).
-                                // If Scenario A: You pay the Remaining Debt NOW + Interest/Insurance paid during deferral.
-                                // If Scenario B: You pay (Monthly + Insurance) over time.
-                                // Let's define "Total Cash Out" for the phase.
-                                // For A: Only Deferral outcome matters? No, user pays off the debt. 
-                                // So Cash Out = Remaining Debt at start of phase.
-                                // For B: Cash Out = Sum of Monthly Payments.
-                                const totalCashOut = isScenarioA ? remainingDebt : totalPaymentsRemaining;
-
-                                // 5. Net Benefit (P/L)
-                                // Formula: Interest Earned - Total Cash Out.
-                                // This shows if the interest covers the loan payments/payoff.
-                                const netBenefit = interestEarned - totalCashOut;
-
-                                // 6. Final Capital (Asset Value)
-                                const finalCapital = results.rows[results.rows.length - 1]?.capital || 0;
-
-
-                                return (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                                        {/* Card 1: Mensualité (New) */}
-                                        <Card className="bg-card border-border/50 shadow-sm">
-                                            <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1 truncate">Mensualité (après différé)</div>
-                                                <div className="text-xl sm:text-2xl font-bold tabular-nums truncate" title={isScenarioA ? "0.00 €" : fmt(monthlyTotal)}>
-                                                    {isScenarioA ? "0.00 €" : fmt(monthlyTotal)}
-                                                </div>
-                                                {!isScenarioA && (
-                                                    <div className="text-[10px] text-muted-foreground mt-1 truncate">
-                                                        pendant {months} mois
-                                                    </div>
-                                                )}
-                                                {isScenarioA && (
-                                                    <div className="text-[10px] text-muted-foreground mt-1 truncate">
-                                                        -
-                                                    </div>
-                                                )}
-                                            </CardContent>
-                                        </Card>
-
-                                        {/* Card 2: Dette Restante */}
-                                        <Card className="bg-card border-border/50 shadow-sm">
-                                            <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1 truncate">Dette Restante</div>
-                                                <div className="text-xl sm:text-2xl font-bold tabular-nums truncate" title={fmt(remainingDebt)}>{fmt(remainingDebt)}</div>
-                                            </CardContent>
-                                        </Card>
-
-                                        {/* Card 3: Intérêts Générés */}
-                                        <Card className="bg-card border-border/50 shadow-sm">
-                                            <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-1 truncate">Intérêts Générés</div>
-                                                <div className="text-xl sm:text-2xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums truncate" title={fmt(interestEarned)}>{fmt(interestEarned)}</div>
-                                            </CardContent>
-                                        </Card>
-
-                                        {/* Card 4: Solde Final */}
-                                        <Card className="bg-card border-border/50 shadow-sm">
-                                            <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1 truncate">Solde Final</div>
-                                                <div className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-300 tabular-nums truncate" title={fmt(finalCapital)}>{fmt(finalCapital)}</div>
-                                            </CardContent>
-                                        </Card>
-
-                                        {/* Card 5: Bénéfice P/L */}
-                                        <Card className={`border-border/50 shadow-sm ${netBenefit >= 0 ? "bg-emerald-50/10 border-emerald-200/50" : "bg-rose-50/10 border-rose-200/50"}`}>
-                                            <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1 truncate">Bénéfice P/L (Cashflow)</div>
-                                                <div className={`text-xl sm:text-2xl font-bold tabular-nums truncate ${netBenefit >= 0 ? "text-emerald-600" : "text-rose-600"}`} title={fmt(netBenefit)}>{fmt(netBenefit)}</div>
-                                                <div className="text-[10px] text-muted-foreground mt-1 truncate" title="(Intérêts - Total Versé)">
-                                                    (Intérêts - Total Versé)
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    </div>
-                                );
-                            })()}
+                            {/* KPI removed */}
 
                             {/* Chart */}
                             <Card className="border-border/50 shadow-sm">
