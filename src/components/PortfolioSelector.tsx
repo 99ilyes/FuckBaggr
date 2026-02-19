@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Portfolio, useDeletePortfolio } from "@/hooks/usePortfolios";
+import { EditPortfolioDialog } from "@/components/EditPortfolioDialog";
 import { Button } from "@/components/ui/button";
 import { SaxoLogo, IBKRLogo, getBrokerForPortfolio } from "@/components/BrokerLogos";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -35,6 +36,7 @@ export function PortfolioSelector({
 }: PortfolioSelectorProps) {
   const deletePortfolio = useDeletePortfolio();
   const [portfolioToDelete, setPortfolioToDelete] = useState<string | null>(null);
+  const [portfolioToEdit, setPortfolioToEdit] = useState<Portfolio | null>(null);
 
   const handleDelete = () => {
     if (portfolioToDelete) {
@@ -75,6 +77,10 @@ export function PortfolioSelector({
               </button>
             </ContextMenuTrigger>
             <ContextMenuContent>
+              <ContextMenuItem onClick={() => setPortfolioToEdit(p)}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Renommer
+              </ContextMenuItem>
               <ContextMenuItem
                 className="text-destructive focus:text-destructive"
                 onClick={() => setPortfolioToDelete(p.id)}
@@ -106,6 +112,13 @@ export function PortfolioSelector({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+
+      <EditPortfolioDialog
+        open={!!portfolioToEdit}
+        onOpenChange={(open) => !open && setPortfolioToEdit(null)}
+        portfolio={portfolioToEdit}
+      />
     </>
   );
 }

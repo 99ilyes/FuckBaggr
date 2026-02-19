@@ -1,0 +1,81 @@
+import { useEffect, useState } from "react";
+import { useUpdatePortfolio, Portfolio } from "@/hooks/usePortfolios";
+import { Button } from "@/components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "@/hooks/use-toast";
+
+interface Props {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    portfolio: Portfolio | null;
+}
+
+export function EditPortfolioDialog({ open, onOpenChange, portfolio }: Props) {
+    const [name, setName] = useState("");
+    const updatePortfolio = useUpdatePortfolio();
+
+    useEffect(() => {
+        if (portfolio) {
+            setName(portfolio.name);
+        }
+    }, [portfolio]);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!name.trim() || !portfolio) return;
+
+        updatePortfolio.mutate(
+            { id: portfolio.id, name: name.trim() },
+            {
+                onSuccess: () => {
+                    toast({ title: "Portefeuille mis à jour" });
+                    onOpenChange(false);
+                },
+                onError: (error) => {
+                    toast({
+                        title: "Erreur",
+                        description: error.message,
+                        variant: "destructive",
+                    });
+                },
+            }
+        );
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                    <DialogTitle>Modifier le portefeuille</DialogTitle>
+                </DialogHeader>
+                <form onSubmit={handleSubmit} className="grid gap-4 py-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="name" className="text-right">
+                            Nom
+                        </Label>
+                        <Input
+                            id="name"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="col-span-3"
+                            autoFocus
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button type="submit" disabled={!name.trim() || updatePortfolio.isPending}>
+                            {updatePortfolio.isPending ? "Modification..." : "Enregistrer"}
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    );
+}

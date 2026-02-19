@@ -26,6 +26,9 @@ const TYPE_LABELS: Record<string, { label: string; className: string }> = {
     sell: { label: "Vente", className: "text-rose-600 dark:text-rose-400 font-medium" },
     deposit: { label: "Dépôt", className: "text-sky-600 dark:text-sky-400 font-medium" },
     withdrawal: { label: "Retrait", className: "text-amber-600 dark:text-amber-400 font-medium" },
+    dividend: { label: "Dividende", className: "text-indigo-600 dark:text-indigo-400 font-medium" },
+    interest: { label: "Intérêts", className: "text-purple-600 dark:text-purple-400 font-medium" },
+    coupon: { label: "Coupon", className: "text-indigo-600 dark:text-indigo-400 font-medium" },
 };
 
 export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Props) {
@@ -69,8 +72,8 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
 
                 // Debug: log first row to check column names and types
                 if (rows.length > 0) {
-                  console.log("[XLSX] Headers found:", Object.keys(rows[0]));
-                  console.log("[XLSX] First row sample:", rows[0]);
+                    console.log("[XLSX] Headers found:", Object.keys(rows[0]));
+                    console.log("[XLSX] First row sample:", rows[0]);
                 }
 
                 // Parse with a placeholder portfolio id (will be set on import)
@@ -234,11 +237,10 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                                                     <TableCell className="text-xs text-right tabular-nums text-muted-foreground">
                                                         {tx.fees ? formatAmount(tx.fees) : "—"}
                                                     </TableCell>
-                                                    <TableCell className={`text-xs text-right tabular-nums font-medium ${
-                                                        (tx as ParsedTransaction)._totalEUR !== undefined
-                                                            ? ((tx as ParsedTransaction)._totalEUR! < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")
-                                                            : ""
-                                                    }`}>
+                                                    <TableCell className={`text-xs text-right tabular-nums font-medium ${(tx as ParsedTransaction)._totalEUR !== undefined
+                                                        ? ((tx as ParsedTransaction)._totalEUR! < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")
+                                                        : ""
+                                                        }`}>
                                                         {(tx as ParsedTransaction)._totalEUR !== undefined
                                                             ? formatAmount((tx as ParsedTransaction)._totalEUR)
                                                             : "—"}
@@ -264,7 +266,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                     <Button variant="ghost" onClick={() => { resetState(); onOpenChange(false); }}>Annuler</Button>
                     <Button
                         onClick={handleImport}
-                        disabled={!portfolioId || previewData.length === 0 || createBatchTransactions.isPending}
+                        disabled={!portfolioId || previewData.length === 0 || createBatchTransactions.isPending || negativeWarnings.length > 0}
                     >
                         {createBatchTransactions.isPending ? "Import en cours…" : `Importer ${previewData.length > 0 ? `(${previewData.length})` : ""}`}
                     </Button>

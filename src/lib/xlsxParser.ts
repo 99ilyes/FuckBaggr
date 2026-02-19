@@ -125,6 +125,9 @@ function parseDate(dateVal: any): string | null {
     return `${y}-${month}-${day}`;
   }
 
+  // Format: "2026-02-12 00:00:00" (SQL timestamp string)
+  if (/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}$/.test(dateStr)) return dateStr.substring(0, 10);
+
   return null;
 }
 
@@ -195,12 +198,20 @@ export function parseSaxoXLSX(rows: Record<string, any>[], portfolioId: string):
     // Date: can be a Date object (cellDates:true), a number (serial), or a string
     const dateVal = row["Date d'opération"];
 
-    // Skip rows with 0 or missing amount
-    if (montantRaw === "" || montantRaw === undefined || montantRaw === null) { skippedCount++; continue; }
-    if (isNaN(montant) || montant === 0) { skippedCount++; continue; }
+    // Skip rows with 0 or missing amount (unless it's a corporate action with 0 amount but relevant?)
+    // For cash flow, we need amount.
+    if (montantRaw === "" || montantRaw === undefined || montantRaw === null || isNaN(montant) || montant === 0) {
+      // console.log("Skipping row (empty/zero amount):", row);
+      skippedCount++;
+      continue;
+    }
 
     const date = parseDate(dateVal);
-    if (!date) { skippedCount++; continue; }
+    if (!date) {
+      console.warn("Skipping row (invalid date):", row);
+      skippedCount++;
+      continue;
+    }
 
     // --- DEPOSIT / WITHDRAWAL ---
     if (type === "Transfert d'espèces") {
@@ -219,6 +230,7 @@ export function parseSaxoXLSX(rows: Record<string, any>[], portfolioId: string):
           _instrument: "Dépôt",
           _totalEUR: amount,
         });
+        continue;
       } else if (event === "Retrait") {
         const amount = Math.abs(montant);
         transactions.push({
@@ -234,25 +246,74 @@ export function parseSaxoXLSX(rows: Record<string, any>[], portfolioId: string):
           _instrument: "Retrait",
           _totalEUR: -amount,
         });
-      } else {
-        skippedCount++;
+        continue;
       }
+    }
+
+    // --- DIVIDENDS / INTERESTS / COUPONS ---
+    // "Opération sur titres" -> "Dividendes en espèces"
+    // "Intérêts" -> "Intérêts débiteurs" or "Intérêts créditeurs" (amount sign tells us)
+    if (
+      (type === "Opération sur titres" && event.includes("Dividendes")) ||
+      type === "Intérêts" ||
+      event.includes("Coupons")
+    ) {
+      // Dividend/Interest adds to cash if positive, subtracts if negative (but usually positive for dividends)
+      // We act like it's a "deposit" (inflow) or "withdrawal" (outflow) regarding cash,
+      // but strict typing might require mapping to 'deposit'/'withdrawal' OR adding new types.
+      // For now, let's map to 'dividend' type if possible, or 'deposit' with a note.
+      // Since Transaction type is strict (check DB enum), we might need to cast or stick to known types.
+      // DB 'transactions.type' is text/varchar, so we can use "dividend".
+
+      const isDividend = event.includes("Dividendes") || event.includes("Coupons");
+      const txType = isDividend ? "dividend" : "interest"; // custom types, handle in UI
+
+      const tickerFromSymbol = toYahooTicker(symbol, instrumentCurrency);
+      const ticker = tickerFromSymbol || isin || null;
+
+      transactions.push({
+        portfolio_id: portfolioId,
+        date,
+        type: txType as any, // Cast to allow custom types if TS restricts
+        ticker,
+        quantity: Math.abs(montant), // Just for display
+        unit_price: 1,
+        fees: 0,
+        currency: "EUR", // Usually these are booked in EUR in the 'Montant comptabilisé' column
+        _isin: isin,
+        _instrument: event, // Use event description (e.g. "Dividendes en espèces")
+        _totalEUR: montant,
+      });
       continue;
     }
 
     // --- BUY / SELL ---
     if (type === "Opération") {
-      const isBuy = event.startsWith("Acheter");
-      const isSell = event.startsWith("Vendre");
-      if (!isBuy && !isSell) { skippedCount++; continue; }
+      const isBuy = event.startsWith("Acheter") || event.startsWith("Achat");
+      const isSell = event.startsWith("Vendre") || event.startsWith("Vente");
+
+      if (!isBuy && !isSell) {
+        console.log("Skipping Opération (unknown event):", event, row);
+        skippedCount++;
+        continue;
+      }
 
       const parsed = parseEvent(event);
-      if (!parsed) { skippedCount++; continue; }
+      if (!parsed) {
+        console.warn("Skipping Opération (parse error):", event, row);
+        skippedCount++;
+        continue;
+      }
 
       const { qty, price } = parsed;
-      if (qty <= 0 || price <= 0) { skippedCount++; continue; }
+      if (qty <= 0 || price <= 0) {
+        // console.warn("Skipping Opération (invalid qty/price):", row);
+        skippedCount++;
+        continue;
+      }
 
-      const ticker = toYahooTicker(symbol, instrumentCurrency);
+      const tickerFromSymbol = toYahooTicker(symbol, instrumentCurrency);
+      const ticker = tickerFromSymbol || isin || null;
       const txType: "buy" | "sell" = isBuy ? "buy" : "sell";
 
       // Exchange rate: for EUR instruments it's always 1
@@ -264,7 +325,7 @@ export function parseSaxoXLSX(rows: Record<string, any>[], portfolioId: string):
         portfolio_id: portfolioId,
         date,
         type: txType,
-        ticker: ticker || null,
+        ticker,
         quantity: qty,
         unit_price: price,
         fees,
@@ -276,27 +337,36 @@ export function parseSaxoXLSX(rows: Record<string, any>[], portfolioId: string):
       continue;
     }
 
-    // All other types (Montant de liquidités, Opération sur titres, etc.) → skip
+    // All other tags
+    console.log("Skipping row (unhandled type):", type, event, row);
     skippedCount++;
   }
 
   // Sort transactions chronologically (oldest first) for cash balance validation
   const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
 
-  // Cash balance simulation (deposits/withdrawals affect cash; buys reduce it; sells increase it)
+  // Cash balance simulation
   let cashBalance = 0;
   const negativeBalanceWarnings: Array<{ date: string; balance: number }> = [];
 
   for (const tx of sorted) {
-    if (tx.type === "deposit") {
-      cashBalance += tx.quantity ?? 0;
-    } else if (tx.type === "withdrawal") {
-      cashBalance -= tx.quantity ?? 0;
-    } else if (tx.type === "buy") {
-      cashBalance += tx._totalEUR ?? 0; // negative value reduces cash
-    } else if (tx.type === "sell") {
-      cashBalance += tx._totalEUR ?? 0; // positive value increases cash
-    }
+    // _totalEUR is the net impact on cash in EUR
+    // For deposits: +amount
+    // For withdrawals: -amount
+    // For buys: -amount (usually negative in file)
+    // For sells: +amount
+    // For dividends/interest: +amount
+
+    // We can simply trust _totalEUR if we set it correctly for all types.
+    // Let's verify:
+    // Deposit: _totalEUR = +amount. Correct.
+    // Withdrawal: _totalEUR = -amount. Correct.
+    // Buy: _totalEUR = montant (negative in file). Correct.
+    // Sell: _totalEUR = montant (positive in file). Correct.
+    // Dividend: _totalEUR = montant (positive). Correct.
+
+    cashBalance += tx._totalEUR ?? 0;
+
     if (cashBalance < -0.01) {
       negativeBalanceWarnings.push({ date: tx.date, balance: Math.round(cashBalance * 100) / 100 });
     }
