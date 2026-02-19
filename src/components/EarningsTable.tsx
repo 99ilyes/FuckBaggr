@@ -58,7 +58,7 @@ function TrendIndicator({ current, previous, inverse }: TrendProps) {
 
 function CriteriaCell({ value, threshold, inverse, previousValue }: { value: number | null; threshold: number; inverse?: boolean; previousValue?: number | null }) {
   if (value == null) return <TableCell className="text-center text-muted-foreground">—</TableCell>;
-  const pass = inverse ? value < threshold : value > threshold;
+  const pass = inverse ? value <= threshold : value >= threshold;
   return (
     <TableCell className="text-center">
       <span className={`inline-flex items-center gap-1 font-medium ${pass ? "text-emerald-500" : "text-rose-500"}`}>
@@ -100,6 +100,7 @@ function ScoreBadge({ score, previousScore }: { score: number; previousScore?: n
 function StatusBadge({ status }: { status: string }) {
   switch (status) {
     case "hold": return <Badge variant="secondary" className="bg-blue-600/20 text-blue-400 border-blue-600/30">Hold</Badge>;
+    case "renforcer": return <Badge variant="secondary" className="bg-emerald-600/20 text-emerald-500 border-emerald-600/30 whitespace-nowrap">À renforcer</Badge>;
     case "alleger": return <Badge variant="secondary" className="bg-amber-600/20 text-amber-400 border-amber-600/30">Alléger</Badge>;
     case "sell": return <Badge variant="destructive">Sell</Badge>;
     default: return <Badge variant="secondary">{status}</Badge>;
@@ -142,7 +143,7 @@ function NotePopover({ earning, onUpdateNote }: { earning: Earning; onUpdateNote
       <PopoverContent side="left" className="w-64 p-3">
         <div className="grid gap-2">
           <Textarea
-            className="text-xs min-h-[60px] resize-none"
+            className="text-sm min-h-[80px] resize-none"
             placeholder="Ajouter une note..."
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -154,7 +155,7 @@ function NotePopover({ earning, onUpdateNote }: { earning: Earning; onUpdateNote
   );
 }
 
-const statusOrder: Record<string, number> = { hold: 0, alleger: 1, sell: 2 };
+const statusOrder: Record<string, number> = { hold: 0, renforcer: 1, alleger: 2, sell: 3 };
 
 function EarningRow({
   earning,
@@ -189,7 +190,7 @@ function EarningRow({
 
   return (
     <TableRow
-      className={`${isOutdated && !isHistorical ? "bg-amber-500/8 border-l-2 border-l-amber-500" : ""} ${isHistorical ? "bg-muted/30" : ""}`}
+      className={`${isOutdated && !isHistorical ? "bg-amber-500/8 border-l-2 border-l-amber-500" : ""} ${isHistorical ? "bg-muted/30" : ""} hover:bg-muted/50 transition-colors`}
     >
       <TableCell>
         <div className="flex items-center gap-1.5">
@@ -231,6 +232,9 @@ function EarningRow({
         <ScoreBadge score={score} previousScore={!isHistorical ? previousScore : undefined} />
       </TableCell>
       <TableCell className="text-center"><StatusBadge status={earning.status} /></TableCell>
+      <TableCell className="max-w-[220px] truncate text-sm text-foreground leading-relaxed" title={earning.notes || ""}>
+        {earning.notes ? (earning.notes.length > 50 ? earning.notes.substring(0, 50) + "..." : earning.notes) : "—"}
+      </TableCell>
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1">
           <NotePopover earning={earning} onUpdateNote={onUpdateNote} />
@@ -311,13 +315,14 @@ export function EarningsTable({ earnings, allEarnings, onEdit, onDelete, onUpdat
             <SortableHead label="Ticker" sortKey="ticker" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
             <TableHead>Portefeuille(s)</TableHead>
             <SortableHead label="Trimestre" sortKey="quarter" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-            <SortableHead label="CA (>10%)" sortKey="revenue_growth" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
-            <SortableHead label="Marge OP (>20%)" sortKey="operating_margin" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
-            <SortableHead label="ROE (>30%)" sortKey="roe" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
-            <SortableHead label="Dette/EBITDA (<1.5)" sortKey="debt_ebitda" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+            <SortableHead label="CA (>=10%)" sortKey="revenue_growth" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+            <SortableHead label="Marge OP (>=20%)" sortKey="operating_margin" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+            <SortableHead label="ROE (>=30%)" sortKey="roe" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+            <SortableHead label="Dette/EBITDA (<=1.5)" sortKey="debt_ebitda" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
             <TableHead className="text-center">Moat</TableHead>
             <SortableHead label="Score" sortKey="score" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
             <SortableHead label="Statut" sortKey="status" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+            <TableHead className="w-[200px]">Notes</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>

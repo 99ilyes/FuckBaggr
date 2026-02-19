@@ -130,6 +130,7 @@ export function AddEarningsDialog({ open, onOpenChange, onSubmit, tickers, editD
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="hold">Hold</SelectItem>
+                <SelectItem value="renforcer">À renforcer</SelectItem>
                 <SelectItem value="alleger">Alléger</SelectItem>
                 <SelectItem value="sell">Sell</SelectItem>
               </SelectContent>

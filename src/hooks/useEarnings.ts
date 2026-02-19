@@ -80,10 +80,10 @@ export function useDeleteEarning() {
 
 export function calculateValidatedCriteria(e: Earning): number {
   let count = 0;
-  if (e.revenue_growth != null && e.revenue_growth > 10) count++;
-  if (e.operating_margin != null && e.operating_margin > 20) count++;
-  if (e.roe != null && e.roe > 30) count++;
-  if (e.debt_ebitda != null && e.debt_ebitda < 1.5) count++;
+  if (e.revenue_growth != null && e.revenue_growth >= 10) count++;
+  if (e.operating_margin != null && e.operating_margin >= 20) count++;
+  if (e.roe != null && e.roe >= 30) count++;
+  if (e.debt_ebitda != null && e.debt_ebitda <= 1.5) count++;
   if (e.moat) count++;
   return count;
 }

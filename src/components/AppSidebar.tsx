@@ -16,7 +16,6 @@ const items = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Earnings Tracker", url: "/earnings", icon: BarChart3 },
   { title: "Calculatrice Crédit", url: "/calculator", icon: Calculator },
-  { title: "Performance (beta)", url: "/performance", icon: TrendingUp },
 ];
 
 export function AppSidebar() {

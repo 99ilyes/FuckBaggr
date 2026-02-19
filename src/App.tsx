@@ -7,7 +7,6 @@ import { AppLayout } from "@/components/AppLayout";
 import Index from "./pages/Index";
 import EarningsTracker from "./pages/EarningsTracker";
 import Calculator from "./pages/Calculator";
-import Performance from "./pages/Performance";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -21,7 +20,6 @@ const App = () => (
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/" element={<Index />} />
-            <Route path="/performance" element={<Performance />} />
             <Route path="/earnings" element={<EarningsTracker />} />
             <Route path="/calculator" element={<Calculator />} />
           </Route>
