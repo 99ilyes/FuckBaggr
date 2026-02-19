@@ -547,6 +547,7 @@ const Calculator = () => {
                         <div className="space-y-6">
                             {/* Summary Cards */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                {/* Row 1: The P/L Story */}
                                 <Card className="bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200/50 shadow-sm">
                                     <CardContent className="pt-6">
                                         <div className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Intérêts Gagnés</div>
@@ -555,6 +556,29 @@ const Calculator = () => {
                                         </div>
                                     </CardContent>
                                 </Card>
+
+                                <Card className="bg-purple-50 dark:bg-purple-950/20 border-purple-200/50 shadow-sm">
+                                    <CardContent className="pt-6">
+                                        <div className="text-xs font-medium uppercase tracking-wider text-purple-600 dark:text-purple-400">Coût Crédit (Intérêts + Ass.)</div>
+                                        <div className="text-2xl font-bold text-purple-700 dark:text-purple-300 mt-1">
+                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.totalCreditCost : resultsB.summary.totalCreditCost)}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                <Card className="col-span-1 md:col-span-2 bg-blue-50 dark:bg-blue-950/20 border-blue-200/50 shadow-sm">
+                                    <CardContent className="pt-6 flex flex-col items-center justify-center text-center">
+                                        <div className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">Bénéfice Net (P/L)</div>
+                                        <div className={`text-3xl font-bold mt-1 ${(activeTab === "scenarioA" ? (resultsA.summary.totalInterestEarned - resultsA.summary.totalCreditCost) : (resultsB.summary.totalInterestEarned - resultsB.summary.totalCreditCost)) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                                            {fmt(activeTab === "scenarioA" ? (resultsA.summary.totalInterestEarned - resultsA.summary.totalCreditCost) : (resultsB.summary.totalInterestEarned - resultsB.summary.totalCreditCost))}
+                                        </div>
+                                        <div className="text-[10px] text-muted-foreground mt-1">
+                                            (Intérêts Gagnés - Coût Crédit)
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                {/* Row 2: The Details */}
                                 <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200/50 shadow-sm">
                                     <CardContent className="pt-6">
                                         <div className="text-xs font-medium uppercase tracking-wider text-amber-600 dark:text-amber-400">
@@ -565,31 +589,43 @@ const Calculator = () => {
                                         </div>
                                     </CardContent>
                                 </Card>
-                                <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200/50 shadow-sm">
-                                    <CardContent className="pt-6">
-                                        <div className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400">Mensualité Prêt</div>
-                                        <div className="text-2xl font-bold text-blue-700 dark:text-blue-300 mt-1">
-                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.monthlyRepaymentAmount : resultsB.summary.monthlyRepaymentAmount)}
-                                        </div>
-                                    </CardContent>
-                                </Card>
 
                                 <Card className="bg-red-50 dark:bg-red-950/20 border-red-200/50 shadow-sm">
                                     <CardContent className="pt-6">
-                                        <div className="text-xs font-medium uppercase tracking-wider text-red-600 dark:text-red-400">Capital Restant Dû</div>
+                                        <div className="text-xs font-medium uppercase tracking-wider text-red-600 dark:text-red-400">Dette Restante</div>
                                         <div className="text-2xl font-bold text-red-700 dark:text-red-300 mt-1">
                                             {fmt(activeTab === "scenarioA" ? resultsA.summary.remainingDebtStart : resultsB.summary.remainingDebtStart)}
                                         </div>
                                     </CardContent>
                                 </Card>
-                            </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                <Card className="bg-purple-50 dark:bg-purple-950/20 border-purple-200/50 shadow-sm col-span-1 md:col-span-2 lg:col-span-4">
-                                    <CardContent className="pt-6 flex flex-col items-center justify-center text-center">
-                                        <div className="text-xs font-medium uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">Coût Total du Crédit (Intérêts + Assurance)</div>
-                                        <div className="text-3xl font-bold text-purple-700 dark:text-purple-300">
-                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.totalCreditCost : resultsB.summary.totalCreditCost)}
+                                <Card className="bg-slate-50 dark:bg-slate-900/50 border-slate-200 shadow-sm">
+                                    <CardContent className="pt-6">
+                                        <div className="text-xs font-medium uppercase tracking-wider text-slate-600 dark:text-slate-400">Mensualité Prêt</div>
+                                        <div className="text-2xl font-bold text-slate-700 dark:text-slate-300 mt-1">
+                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.monthlyRepaymentAmount : resultsB.summary.monthlyRepaymentAmount)}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                <Card className="bg-slate-50 dark:bg-slate-900/50 border-slate-200 shadow-sm">
+                                    <CardContent className="pt-6">
+                                        <div className="text-xs font-medium uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                                            Total Sorti de Poche
+                                        </div>
+                                        <div className="text-xl font-bold text-slate-700 dark:text-slate-300 mt-1">
+                                            {fmt(
+                                                (activeTab === "scenarioB" && payFromCapital)
+                                                    ? (insuranceAmount * repaymentDurationYears * 12)
+                                                    : (activeTab === "scenarioA"
+                                                        ? (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12
+                                                        : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12)
+                                            )}
+                                        </div>
+                                        <div className="text-[10px] text-muted-foreground mt-1 truncate">
+                                            {activeTab === "scenarioB" && payFromCapital && "(Payé via Capital)"}
+                                            {activeTab === "scenarioB" && !payFromCapital && "(Mensualités + Ass.)"}
+                                            {activeTab === "scenarioA" && "(Mensualités + Ass.)"}
                                         </div>
                                     </CardContent>
                                 </Card>

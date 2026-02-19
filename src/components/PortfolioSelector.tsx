@@ -50,12 +50,12 @@ export function PortfolioSelector({
 
   return (
     <>
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-1 border-b border-white/5 w-full overflow-x-auto no-scrollbar mb-6">
         <button
           onClick={() => onSelect(null)}
-          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${selectedId === null
-            ? "bg-primary text-primary-foreground"
-            : "bg-secondary text-secondary-foreground hover:bg-accent"
+          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all duration-200 whitespace-nowrap ${selectedId === null
+              ? "border-emerald-500 text-white"
+              : "border-transparent text-muted-foreground hover:text-white"
             }`}
         >
           Vue globale
@@ -65,18 +65,21 @@ export function PortfolioSelector({
             <ContextMenuTrigger>
               <button
                 onClick={() => onSelect(p.id)}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${selectedId === p.id
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-secondary-foreground hover:bg-accent"
+                className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all duration-200 whitespace-nowrap flex items-center gap-2 ${selectedId === p.id
+                    ? "border-emerald-500 text-white"
+                    : "border-transparent text-muted-foreground hover:text-white"
                   }`}
               >
-                {getBrokerForPortfolio(p.name) === "saxo" && <SaxoLogo className="w-4 h-4 rounded-sm" />}
-                {getBrokerForPortfolio(p.name) === "ibkr" && <IBKRLogo className="w-4 h-4 rounded-sm" />}
+                {getBrokerForPortfolio(p.name) === "saxo" && (
+                  <SaxoLogo className={`w-4 h-4 rounded-sm ${selectedId === p.id ? "opacity-100" : "opacity-60"}`} />
+                )}
+                {getBrokerForPortfolio(p.name) === "ibkr" && (
+                  <IBKRLogo className={`w-4 h-4 rounded-sm ${selectedId === p.id ? "opacity-100" : "opacity-60"}`} />
+                )}
                 {p.name}
-                <span className="text-xs opacity-60">{(p as any).currency || "EUR"}</span>
               </button>
             </ContextMenuTrigger>
-            <ContextMenuContent>
+            <ContextMenuContent className="border-border bg-card">
               <ContextMenuItem onClick={() => setPortfolioToEdit(p)}>
                 <Pencil className="mr-2 h-4 w-4" />
                 Renommer
@@ -91,13 +94,18 @@ export function PortfolioSelector({
             </ContextMenuContent>
           </ContextMenu>
         ))}
-        <Button size="sm" variant="ghost" onClick={onCreateClick} className="text-muted-foreground">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onCreateClick}
+          className="ml-auto text-muted-foreground hover:text-white hover:bg-transparent"
+        >
           <Plus className="h-4 w-4" />
         </Button>
       </div>
 
       <AlertDialog open={!!portfolioToDelete} onOpenChange={(open) => !open && setPortfolioToDelete(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent className="border-border bg-card">
           <AlertDialogHeader>
             <AlertDialogTitle>Êtes-vous sûr ?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -105,14 +113,13 @@ export function PortfolioSelector({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogCancel className="bg-transparent border-white/10 text-white hover:bg-white/5 hover:text-white">Annuler</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Supprimer
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
 
       <EditPortfolioDialog
         open={!!portfolioToEdit}

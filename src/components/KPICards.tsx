@@ -31,6 +31,7 @@ interface KPICardsProps {
   previousCloseMap?: Record<string, number>;
   transactions?: Transaction[];
   portfolioPerformances?: PortfolioPerformance[];
+  onSelectPortfolio?: (id: string) => void;
 }
 
 export function KPICards({
@@ -47,6 +48,7 @@ export function KPICards({
   previousCloseMap = {},
   transactions = [],
   portfolioPerformances = [],
+  onSelectPortfolio,
 }: KPICardsProps) {
   const isPositive = totalGainLoss >= 0;
   const currencies = Object.entries(cashBalances || {}).filter(
@@ -74,107 +76,99 @@ export function KPICards({
   }, [positions, portfolioPerformances]);
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 lg:gap-4">
-      <Card className="border-border/50">
-        <CardContent className="p-4 flex flex-col items-center h-full text-center">
-          <div className="flex items-center justify-center gap-2 text-muted-foreground mb-2 w-full">
-            <Wallet className="h-4 w-4" />
-            <span className="text-xs font-medium uppercase tracking-wider">Valeur totale</span>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4 lg:gap-6">
+      <Card className="border-0 bg-transparent shadow-none">
+        <CardContent className="p-0 flex flex-col items-center justify-center h-full text-center">
+          <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Valeur Totale</span>
           </div>
           <div className="flex-1 flex flex-col justify-center w-full">
-            <p className="text-2xl font-bold tracking-tight">{formatCurrency(totalValue, baseCurrency)}</p>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-4xl sm:text-3xl md:text-4xl font-bold tracking-tighter text-foreground">
+              {formatCurrency(totalValue, baseCurrency)}
+            </p>
+            <p className="text-xs text-muted-foreground/50 mt-1 font-medium">
               Investi: {formatCurrency(totalInvested, baseCurrency)}
             </p>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="border-border/50">
-        <CardContent className="p-4 flex flex-col items-center h-full text-center">
-          <div className="flex items-center justify-center gap-2 text-muted-foreground mb-2 w-full">
-            {isPositive ? (
-              <TrendingUp className="h-4 w-4 text-emerald-500" />
-            ) : (
-              <TrendingDown className="h-4 w-4 text-rose-500" />
-            )}
-            <span className="text-xs font-medium uppercase tracking-wider">Performance</span>
+      <Card className="border-0 bg-transparent shadow-none">
+        <CardContent className="p-0 flex flex-col items-center justify-center h-full text-center">
+          <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Performance</span>
           </div>
           <div className="flex-1 flex flex-col justify-center w-full">
-            <p className={`text-2xl font-bold tracking-tight ${isPositive ? "text-emerald-500" : "text-rose-500"}`}>
-              {formatPercent(totalGainLossPercent)}
-            </p>
-            <p className={`text-sm mt-1 ${isPositive ? "text-emerald-500/70" : "text-rose-500/70"}`}>
-              {formatCurrency(totalGainLoss, baseCurrency)}
+            <div className="flex items-baseline justify-center gap-2">
+              <p className={`text-4xl sm:text-3xl md:text-4xl font-bold tracking-tighter ${isPositive ? "text-emerald-500" : "text-rose-500"}`}>
+                {formatPercent(totalGainLossPercent)}
+              </p>
+            </div>
+            <p className={`text-xs mt-1 font-medium ${isPositive ? "text-emerald-500/60" : "text-rose-500/60"}`}>
+              {isPositive ? "+" : ""}{formatCurrency(totalGainLoss, baseCurrency)}
             </p>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="border-border/50">
-        <CardContent className="p-4 flex flex-col items-center h-full text-center">
-          <div className="flex items-center justify-center gap-2 text-muted-foreground mb-2 w-full">
-            <CalendarClock className="h-4 w-4" />
-            <span className="text-xs font-medium uppercase tracking-wider">Perf du jour</span>
+      <Card className="border-0 bg-transparent shadow-none">
+        <CardContent className="p-0 flex flex-col items-center justify-center h-full text-center">
+          <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Jour</span>
           </div>
           <div className="flex-1 flex flex-col justify-center w-full">
-            <p className={`text-2xl font-bold tracking-tight ${isDayPositive ? "text-emerald-500" : "text-rose-500"}`}>
+            <p className={`text-4xl sm:text-3xl md:text-4xl font-bold tracking-tighter ${isDayPositive ? "text-emerald-500" : "text-rose-500"}`}>
               {formatPercent(dailyPerf.changePct)}
             </p>
-            <p className={`text-sm mt-1 ${isDayPositive ? "text-emerald-500/70" : "text-rose-500/70"}`}>
-              {formatCurrency(dailyPerf.change, baseCurrency)}
+            <p className={`text-xs mt-1 font-medium ${isDayPositive ? "text-emerald-500/60" : "text-rose-500/60"}`}>
+              {isDayPositive ? "+" : ""}{formatCurrency(dailyPerf.change, baseCurrency)}
             </p>
           </div>
-          {/* Portfolio view: show market open/closed status */}
+          {/* Market Status Indicators */}
           {marketsInfo.length > 0 && (
-            <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 pt-2 border-t border-border/30 w-full">
+            <div className="flex flex-wrap justify-center gap-2 mt-3 w-full">
               {marketsInfo.map((m) => (
-                <span key={m.name} className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                  <span className={`w-1.5 h-1.5 rounded-full ${m.isOpen ? "bg-emerald-500" : "bg-rose-500/60"}`} />
-                  {m.name}
-                </span>
-              ))}
-            </div>
-          )}
-          {/* Global view: show which portfolios are contributing */}
-          {portfolioPerformances && portfolioPerformances.length > 0 && (
-            <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 pt-2 border-t border-border/30 w-full">
-              {portfolioPerformances.map((p) => (
-                <span key={p.id} className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                  <span className={`w-1.5 h-1.5 rounded-full ${p.hasAnyOpenMarket ? "bg-emerald-500" : "bg-rose-500/60"}`} />
-                  {p.name}
-                </span>
+                <div key={m.name} className="flex items-center gap-1.5" title={`${m.name}: ${m.isOpen ? "Ouvert" : "Fermé"}`}>
+                  <span className={`relative flex h-1.5 w-1.5`}>
+                    {m.isOpen && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
+                    <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${m.isOpen ? "bg-emerald-500" : "bg-zinc-700"}`}></span>
+                  </span>
+                  <span className="text-[9px] font-medium text-muted-foreground uppercase">{m.name}</span>
+                </div>
               ))}
             </div>
           )}
         </CardContent>
       </Card>
 
-      <Card className="border-border/50">
-        <CardContent className="p-4 h-full flex flex-col items-center text-center">
+      <Card className="border-0 bg-transparent shadow-none">
+        <CardContent className="p-0 h-full flex flex-col items-center text-center justify-center">
           {portfolioPerformances && portfolioPerformances.length > 0 ? (
             <>
-              <div className="flex items-center justify-center gap-2 text-muted-foreground mb-2 w-full">
-                <TrendingUp className="h-4 w-4" />
-                <span className="text-xs font-medium uppercase tracking-wider">Détail par portefeuille</span>
+              <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Portefeuilles</span>
               </div>
-              <div className="flex-1 flex flex-col justify-center w-full divide-y divide-border/40">
+              <div className="w-full space-y-4">
                 {portfolioPerformances.map((perf) => (
-                  <div key={perf.id} className="flex items-center justify-between w-full min-w-0 gap-3 py-2 first:pt-0 last:pb-0">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      {getBrokerForPortfolio(perf.name) === "saxo" && <SaxoLogo className="w-4 h-4 rounded-sm flex-shrink-0" />}
-                      {getBrokerForPortfolio(perf.name) === "ibkr" && <IBKRLogo className="w-4 h-4 rounded-sm flex-shrink-0" />}
-                      <span className="text-sm font-semibold truncate" title={perf.name}>
+                  <div
+                    key={perf.id}
+                    className="flex items-center justify-between w-full min-w-0 gap-3 cursor-pointer hover:bg-zinc-900/50 rounded-md p-1 -mx-1 transition-colors"
+                    onClick={() => onSelectPortfolio?.(perf.id)}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      {getBrokerForPortfolio(perf.name) === "saxo" && <SaxoLogo className="w-5 h-5 rounded-[2px] opacity-80" />}
+                      {getBrokerForPortfolio(perf.name) === "ibkr" && <IBKRLogo className="w-5 h-5 rounded-[2px] opacity-80" />}
+                      <span className="text-sm font-semibold text-muted-foreground truncate" title={perf.name}>
                         {perf.name}
                       </span>
                     </div>
 
-                    <div className="flex flex-col items-end shrink-0 ml-auto">
-                      <span className="text-base font-bold tabular-nums leading-tight">
+                    <div className="flex items-center gap-3 ml-auto">
+                      <span className="text-lg font-bold text-foreground tabular-nums tracking-tight">
                         {formatCurrency(perf.totalValue, perf.currency)}
                       </span>
-                      <span className={`text-xs tabular-nums leading-tight ${perf.dailyChange >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
-                        {perf.dailyChange > 0 ? "+" : ""}{formatCurrency(perf.dailyChange, perf.currency)} ({formatPercent(perf.dailyChangePct)})
+                      <span className={`text-xs font-semibold tabular-nums ${perf.dailyChange >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                        {formatPercent(perf.dailyChangePct)}
                       </span>
                     </div>
                   </div>
@@ -183,34 +177,14 @@ export function KPICards({
             </>
           ) : (
             <>
-              <div className="flex items-center justify-center gap-2 text-muted-foreground mb-2 w-full">
-                <Coins className="h-4 w-4" />
-                <span className="text-xs font-medium uppercase tracking-wider">Cash</span>
+              <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Cash</span>
               </div>
               <div className="flex-1 flex flex-col justify-center w-full">
-                {currencies.length === 0 ? (
-                  <>
-                    <p className="text-2xl font-bold tracking-tight">
-                      {formatCurrency(0, baseCurrency)}
-                    </p>
-                    <p className="text-sm text-muted-foreground mt-1">Disponible</p>
-                  </>
-                ) : currencies.length === 1 ? (
-                  <>
-                    <p className="text-2xl font-bold tracking-tight">
-                      {formatCurrency(currencies[0][1], currencies[0][0])}
-                    </p>
-                    <p className="text-sm text-muted-foreground mt-1">Disponible</p>
-                  </>
-                ) : (
-                  <div className="space-y-0.5">
-                    {currencies.map(([cur, amount]) => (
-                      <p key={cur} className="text-sm font-bold tracking-tight">
-                        {formatCurrency(amount, cur)}
-                      </p>
-                    ))}
-                  </div>
-                )}
+                {/* Existing Cash Logic can remain simplified */}
+                <p className="text-2xl font-bold tracking-tight text-foreground">
+                  {formatCurrency(cashBalance, baseCurrency)}
+                </p>
               </div>
             </>
           )}

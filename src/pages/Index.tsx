@@ -333,7 +333,9 @@ export default function Index() {
           baseCurrency={baseCurrency}
           previousCloseMap={previousCloseMap}
           transactions={filteredTransactions}
-          portfolioPerformances={portfolioPerformances} />
+          portfolioPerformances={portfolioPerformances}
+          onSelectPortfolio={setSelectedPortfolioId}
+        />
 
 
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">

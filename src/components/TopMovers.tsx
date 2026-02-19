@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AssetPosition } from "@/lib/calculations";
 import { AssetCache } from "@/hooks/usePortfolios";
-import { formatPercent, formatCurrency } from "@/lib/calculations";
+import { formatPercent, formatCurrency, isMarketCurrentlyOpen } from "@/lib/calculations";
 import { ArrowUp, ArrowDown, TrendingUp } from "lucide-react";
 import { TickerLogo } from "@/components/TickerLogo";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -19,6 +19,7 @@ interface AssetVariation {
     currentPrice: number;
     valueVariation: number;
     currency: string;
+    isMarketOpen: boolean;
 }
 
 export function TopMovers({ positions, assetsCache, liveChangeMap = {} }: Props) {
@@ -45,32 +46,38 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {} }: Props)
                 changePercent: change,
                 currentPrice: asset.last_price,
                 valueVariation,
-                currency: p.currency
+                currency: p.currency,
+                isMarketOpen: isMarketCurrentlyOpen(p.ticker)
             };
         })
         .filter((v): v is AssetVariation => v !== null)
         .sort((a, b) => b.changePercent - a.changePercent);
 
     const MoverRow = ({ item }: { item: AssetVariation }) => (
-        <div className="flex items-center justify-between py-3 border-b border-border/40 last:border-0 hover:bg-muted/30 transition-colors px-2 rounded-sm">
+        <div className="flex items-center justify-between py-3 hover:bg-zinc-900/50 transition-colors px-2 rounded-md group">
             <div className="flex items-center gap-3">
-                <TickerLogo ticker={item.ticker} />
+                <div className="relative">
+                    <TickerLogo ticker={item.ticker} className="w-8 h-8 rounded-full" />
+                    <span className={`absolute -bottom-0.5 -right-0.5 block h-2.5 w-2.5 rounded-full ring-2 ring-background ${item.isMarketOpen ? "bg-emerald-500" : "bg-zinc-600"}`} title={item.isMarketOpen ? "Marché Ouvert" : "Marché Fermé"}>
+                        {item.isMarketOpen && <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping"></span>}
+                    </span>
+                </div>
                 <div className="flex flex-col min-w-0 pr-2">
-                    <span className="font-medium text-sm truncate max-w-[120px]">{item.name}</span>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="font-semibold text-sm truncate max-w-[140px] tracking-tight">{item.name}</span>
+                    <div className="flex items-baseline gap-2 text-[10px] text-muted-foreground uppercase tracking-wide font-medium">
                         <span>{item.ticker}</span>
-                        <span>•</span>
-                        <span>{formatCurrency(item.currentPrice, item.currency)}</span>
+                        <span className="text-zinc-600">•</span>
+                        <span className="text-xs font-semibold text-zinc-300">{formatCurrency(item.currentPrice, item.currency)}</span>
                     </div>
                 </div>
             </div>
 
             <div className="flex flex-col items-end gap-0.5">
-                <div className={`flex items-center gap-1 text-sm font-medium tabular-nums ${item.changePercent >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                <div className={`flex items-center gap-1 text-sm font-bold tabular-nums tracking-tight ${item.changePercent >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
                     {item.changePercent >= 0 ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
                     {formatPercent(item.changePercent)}
                 </div>
-                <div className={`text-xs tabular-nums ${item.changePercent >= 0 ? "text-emerald-500/80" : "text-rose-500/80"}`}>
+                <div className={`text-[10px] font-medium tabular-nums ${item.changePercent >= 0 ? "text-emerald-500/70" : "text-rose-500/70"}`}>
                     {item.valueVariation > 0 ? "+" : ""}{formatCurrency(item.valueVariation, item.currency)}
                 </div>
             </div>
@@ -78,20 +85,24 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {} }: Props)
     );
 
     return (
-        <Card className="border-border/50">
-            <CardHeader className="py-3 px-4">
-                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4" />
+        <Card className="border-0 bg-transparent shadow-none">
+            <CardHeader className="py-2 px-2 pb-4">
+                <CardTitle className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-[0.2em] flex items-center gap-2">
+                    <TrendingUp className="h-3 w-3" />
                     Variations du jour
                 </CardTitle>
             </CardHeader>
-            <CardContent className="py-0 px-2 pb-2">
+            <CardContent className="py-0 px-0">
                 {variations.length > 0 ? (
-                    <ScrollArea className="h-[400px]">
-                        {variations.map(v => <MoverRow key={v.ticker} item={v} />)}
+                    <ScrollArea className="h-[400px] pr-2">
+                        <div className="space-y-1">
+                            {variations.map(v => <MoverRow key={v.ticker} item={v} />)}
+                        </div>
                     </ScrollArea>
                 ) : (
-                    <div className="text-xs text-muted-foreground p-4 text-center">Aucune variation disponible</div>
+                    <div className="text-xs text-muted-foreground p-8 text-center bg-zinc-900/20 rounded-xl border border-white/5">
+                        Aucune variation disponible
+                    </div>
                 )}
             </CardContent>
         </Card>

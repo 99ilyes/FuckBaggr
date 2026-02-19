@@ -67,7 +67,7 @@ export function getLogoUrl(ticker: string): string | null {
     return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
 }
 
-export function TickerLogo({ ticker }: { ticker: string }) {
+export function TickerLogo({ ticker, className }: { ticker: string; className?: string }) {
     const [failed, setFailed] = useState(false);
     const logoUrl = getLogoUrl(ticker);
 
@@ -77,7 +77,7 @@ export function TickerLogo({ ticker }: { ticker: string }) {
         const hue = ticker.split("").reduce((h, c) => h + c.charCodeAt(0), 0) % 360;
         return (
             <div
-                className="w-7 h-7 rounded-md flex items-center justify-center text-[11px] font-bold text-white shrink-0"
+                className={`w-7 h-7 rounded-md flex items-center justify-center text-[11px] font-bold text-white shrink-0 ${className}`}
                 style={{ backgroundColor: `hsl(${hue}, 50%, 40%)` }}
             >
                 {letter}
@@ -89,7 +89,7 @@ export function TickerLogo({ ticker }: { ticker: string }) {
         <img
             src={logoUrl}
             alt={ticker}
-            className="w-7 h-7 rounded-md object-contain shrink-0 p-0.5 bg-white/90"
+            className={`w-7 h-7 rounded-md object-contain shrink-0 p-0.5 bg-white/90 ${className}`}
             onError={() => setFailed(true)}
             loading="lazy"
         />
