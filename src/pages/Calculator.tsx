@@ -580,11 +580,25 @@ const Calculator = () => {
                                     <Card className="col-span-1 md:col-span-2 bg-blue-50 dark:bg-blue-950/20 border-blue-200/50 shadow-sm">
                                         <CardContent className="py-6 flex flex-col items-center justify-center text-center">
                                             <div className="text-sm font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">Bénéfice Net (P/L)</div>
-                                            <div className={`text-4xl font-bold mt-2 tracking-tight ${(activeTab === "scenarioA" ? (resultsA.summary.totalInterestEarned - resultsA.summary.totalCreditCost) : (resultsB.summary.totalInterestEarned - resultsB.summary.totalCreditCost)) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                                                {fmt(activeTab === "scenarioA" ? (resultsA.summary.totalInterestEarned - resultsA.summary.totalCreditCost) : (resultsB.summary.totalInterestEarned - resultsB.summary.totalCreditCost))}
+                                            <div className={`text-4xl font-bold mt-2 tracking-tight ${(
+                                                (activeTab === "scenarioA" ? (resultsA.rows[resultsA.rows.length - 1]?.capital || 0) : (resultsB.rows[resultsB.rows.length - 1]?.capital || 0)) -
+                                                (activeTab === "scenarioA"
+                                                    ? (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12
+                                                    : (payFromCapital
+                                                        ? (insuranceAmount * repaymentDurationYears * 12)
+                                                        : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12))
+                                            ) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                                                {fmt(
+                                                    (activeTab === "scenarioA" ? (resultsA.rows[resultsA.rows.length - 1]?.capital || 0) : (resultsB.rows[resultsB.rows.length - 1]?.capital || 0)) -
+                                                    (activeTab === "scenarioA"
+                                                        ? (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12
+                                                        : (payFromCapital
+                                                            ? (insuranceAmount * repaymentDurationYears * 12)
+                                                            : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12))
+                                                )}
                                             </div>
                                             <div className="text-xs text-muted-foreground mt-2 font-medium bg-background/50 px-2 py-1 rounded-full border border-border/10">
-                                                Intérêts Gagnés - Coût Total du Crédit
+                                                Capital Final - Total Sorti de Poche
                                             </div>
                                         </CardContent>
                                     </Card>
