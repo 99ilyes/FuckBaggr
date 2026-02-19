@@ -548,87 +548,137 @@ const Calculator = () => {
                             {/* Summary Cards */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                 {/* Row 1: The P/L Story */}
-                                <Card className="bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200/50 shadow-sm">
-                                    <CardContent className="pt-6">
-                                        <div className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Intérêts Gagnés</div>
-                                        <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 mt-1">
-                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.totalInterestEarned : resultsB.summary.totalInterestEarned)}
-                                        </div>
-                                    </CardContent>
-                                </Card>
+                                {(() => {
+                                    // Helper Computations for Display
+                                    const months = repaymentDurationYears * 12;
 
-                                <Card className="bg-purple-50 dark:bg-purple-950/20 border-purple-200/50 shadow-sm">
-                                    <CardContent className="pt-6">
-                                        <div className="text-xs font-medium uppercase tracking-wider text-purple-600 dark:text-purple-400">Coût Crédit (Intérêts + Ass.)</div>
-                                        <div className="text-2xl font-bold text-purple-700 dark:text-purple-300 mt-1">
-                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.totalCreditCost : resultsB.summary.totalCreditCost)}
-                                        </div>
-                                    </CardContent>
-                                </Card>
+                                    // Total Out of Pocket Calculation
+                                    // Includes: Expenses (deferral) + Insurance (deferral) + Repayment Phase (Monthly + Insurance)
+                                    // Note: In Scenario B PayFromCap, monthly loan payment is not out of pocket, but insurance assumption depends on logic. 
+                                    // The user assumes "what comes out of my pocket".
 
-                                <Card className="col-span-1 md:col-span-2 bg-blue-50 dark:bg-blue-950/20 border-blue-200/50 shadow-sm">
-                                    <CardContent className="pt-6 flex flex-col items-center justify-center text-center">
-                                        <div className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">Bénéfice Net (P/L)</div>
-                                        <div className={`text-3xl font-bold mt-1 ${(activeTab === "scenarioA" ? (resultsA.summary.totalInterestEarned - resultsA.summary.totalCreditCost) : (resultsB.summary.totalInterestEarned - resultsB.summary.totalCreditCost)) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                                            {fmt(activeTab === "scenarioA" ? (resultsA.summary.totalInterestEarned - resultsA.summary.totalCreditCost) : (resultsB.summary.totalInterestEarned - resultsB.summary.totalCreditCost))}
-                                        </div>
-                                        <div className="text-[10px] text-muted-foreground mt-1">
-                                            (Intérêts Gagnés - Coût Crédit)
-                                        </div>
-                                    </CardContent>
-                                </Card>
+                                    const outOfPocketA =
+                                        resultsA.summary.totalExpenses +
+                                        resultsA.summary.totalInsurancePaid +
+                                        (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * months;
 
-                                {/* Row 2: The Details */}
-                                <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200/50 shadow-sm">
-                                    <CardContent className="pt-6">
-                                        <div className="text-xs font-medium uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                                            {activeTab === "scenarioA" ? "Remboursement Anticipé" : "Capital Final"}
-                                        </div>
-                                        <div className="text-2xl font-bold text-amber-700 dark:text-amber-300 mt-1">
-                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.lumpSumPaid : resultsB.rows[resultsB.rows.length - 1]?.capital || 0)}
-                                        </div>
-                                    </CardContent>
-                                </Card>
+                                    const outOfPocketB =
+                                        resultsB.summary.totalExpenses +
+                                        resultsB.summary.totalInsurancePaid +
+                                        (payFromCapital
+                                            ? (insuranceAmount * months) // Assuming insurance still paid from pocket if capital pays loan
+                                            : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * months
+                                        );
 
-                                <Card className="bg-red-50 dark:bg-red-950/20 border-red-200/50 shadow-sm">
-                                    <CardContent className="pt-6">
-                                        <div className="text-xs font-medium uppercase tracking-wider text-red-600 dark:text-red-400">Dette Restante</div>
-                                        <div className="text-2xl font-bold text-red-700 dark:text-red-300 mt-1">
-                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.remainingDebtStart : resultsB.summary.remainingDebtStart)}
-                                        </div>
-                                    </CardContent>
-                                </Card>
+                                    const currentMethod = activeTab === "scenarioA" ? "A" : "B";
+                                    const totalOutOfPocket = currentMethod === "A" ? outOfPocketA : outOfPocketB;
 
-                                <Card className="bg-slate-50 dark:bg-slate-900/50 border-slate-200 shadow-sm">
-                                    <CardContent className="pt-6">
-                                        <div className="text-xs font-medium uppercase tracking-wider text-slate-600 dark:text-slate-400">Mensualité Prêt</div>
-                                        <div className="text-2xl font-bold text-slate-700 dark:text-slate-300 mt-1">
-                                            {fmt(activeTab === "scenarioA" ? resultsA.summary.monthlyRepaymentAmount : resultsB.summary.monthlyRepaymentAmount)}
-                                        </div>
-                                    </CardContent>
-                                </Card>
+                                    // P/L Calculation
+                                    // Scenario A: Net Value (Capital - Debt) - Out of Pocket? 
+                                    // Or simplified: Interest Earned - Cost.
+                                    // Scenario B: Final Capital - Out of Pocket.
 
-                                <Card className="bg-slate-50 dark:bg-slate-900/50 border-slate-200 shadow-sm">
-                                    <CardContent className="pt-6">
-                                        <div className="text-xs font-medium uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                                            Total Sorti de Poche
-                                        </div>
-                                        <div className="text-xl font-bold text-slate-700 dark:text-slate-300 mt-1">
-                                            {fmt(
-                                                (activeTab === "scenarioB" && payFromCapital)
-                                                    ? (insuranceAmount * repaymentDurationYears * 12)
-                                                    : (activeTab === "scenarioA"
-                                                        ? (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12
-                                                        : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12)
-                                            )}
-                                        </div>
-                                        <div className="text-[10px] text-muted-foreground mt-1 truncate">
-                                            {activeTab === "scenarioB" && payFromCapital && "(Payé via Capital)"}
-                                            {activeTab === "scenarioB" && !payFromCapital && "(Mensualités + Ass.)"}
-                                            {activeTab === "scenarioA" && "(Mensualités + Ass.)"}
-                                        </div>
-                                    </CardContent>
-                                </Card>
+                                    const finalCapitalB = resultsB.rows[resultsB.rows.length - 1]?.capital || 0;
+
+                                    // For A: The "Net Value" at end is (Capital - Remaining Debt).
+                                    // P/L = Net Value - Total Invested from Pocket?
+                                    // This is tricky. Let's stick to the previous robust formula for A (Earned - Cost), which is roughly equivalent to (End - Start - Cost).
+                                    // But for B, we apply the User's requested formula.
+
+                                    const pnlA = resultsA.summary.totalInterestEarned - resultsA.summary.totalCreditCost - (activeTab === "scenarioA" ? 0 : 0);
+                                    // Wait, CreditCost misses Repayment Insurance in original logic? 
+                                    // resultsA.summary.totalCreditCost = totalLoanInterestA + totalInsurancePaidCommon. 
+                                    // It misses insurance during repayment. Let's correct P/L A too manually.
+                                    const correctedCostA = resultsA.summary.totalCreditCost + (insuranceAmount * months);
+                                    const pnlA_corrected = resultsA.summary.totalInterestEarned - correctedCostA;
+
+                                    const pnlB = finalCapitalB - outOfPocketB;
+
+                                    const displayPnL = currentMethod === "A" ? pnlA_corrected : pnlB;
+
+                                    return (
+                                        <>
+                                            <Card className="bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200/50 shadow-sm">
+                                                <CardContent className="pt-6">
+                                                    <div className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Intérêts Gagnés</div>
+                                                    <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 mt-1">
+                                                        {fmt(activeTab === "scenarioA" ? resultsA.summary.totalInterestEarned : resultsB.summary.totalInterestEarned)}
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            <Card className="bg-purple-50 dark:bg-purple-950/20 border-purple-200/50 shadow-sm">
+                                                <CardContent className="pt-6">
+                                                    <div className="text-xs font-medium uppercase tracking-wider text-purple-600 dark:text-purple-400">Coût Crédit (Intérêts + Ass.)</div>
+                                                    <div className="text-2xl font-bold text-purple-700 dark:text-purple-300 mt-1">
+                                                        {fmt(activeTab === "scenarioA" ? (resultsA.summary.totalCreditCost + insuranceAmount * months) : (resultsB.summary.totalCreditCost + insuranceAmount * months))}
+                                                    </div>
+                                                    <div className="text-[10px] text-muted-foreground mt-1">
+                                                        Note: Inclut assurance sur toute la durée
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            <Card className="col-span-1 md:col-span-2 bg-blue-50 dark:bg-blue-950/20 border-blue-200/50 shadow-sm">
+                                                <CardContent className="pt-6 flex flex-col items-center justify-center text-center">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <div className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400">Bénéfice Net (P/L)</div>
+                                                    </div>
+                                                    <div className={`text-3xl font-bold mt-1 ${displayPnL >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                                                        {fmt(displayPnL)}
+                                                    </div>
+                                                    <div className="text-[10px] text-muted-foreground mt-1">
+                                                        {currentMethod === "A" ? "(Intérêts Gagnés - Coût Crédit)" : "(Capital Final - Total Sorti de Poche)"}
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            {/* Row 2: The Details */}
+                                            <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200/50 shadow-sm">
+                                                <CardContent className="pt-6">
+                                                    <div className="text-xs font-medium uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                                                        {activeTab === "scenarioA" ? "Remboursement Anticipé" : "Capital Final"}
+                                                    </div>
+                                                    <div className="text-2xl font-bold text-amber-700 dark:text-amber-300 mt-1">
+                                                        {fmt(activeTab === "scenarioA" ? resultsA.summary.lumpSumPaid : resultsB.rows[resultsB.rows.length - 1]?.capital || 0)}
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            <Card className="bg-red-50 dark:bg-red-950/20 border-red-200/50 shadow-sm">
+                                                <CardContent className="pt-6">
+                                                    <div className="text-xs font-medium uppercase tracking-wider text-red-600 dark:text-red-400">Dette Restante</div>
+                                                    <div className="text-2xl font-bold text-red-700 dark:text-red-300 mt-1">
+                                                        {fmt(activeTab === "scenarioA" ? resultsA.summary.remainingDebtStart : resultsB.summary.remainingDebtStart)}
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            <Card className="bg-slate-50 dark:bg-slate-900/50 border-slate-200 shadow-sm">
+                                                <CardContent className="pt-6">
+                                                    <div className="text-xs font-medium uppercase tracking-wider text-slate-600 dark:text-slate-400">Mensualité Prêt</div>
+                                                    <div className="text-2xl font-bold text-slate-700 dark:text-slate-300 mt-1">
+                                                        {fmt(activeTab === "scenarioA" ? resultsA.summary.monthlyRepaymentAmount : resultsB.summary.monthlyRepaymentAmount)}
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            <Card className="bg-slate-50 dark:bg-slate-900/50 border-slate-200 shadow-sm">
+                                                <CardContent className="pt-6">
+                                                    <div className="text-xs font-medium uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                                                        Total Sorti de Poche
+                                                    </div>
+                                                    <div className="text-xl font-bold text-slate-700 dark:text-slate-300 mt-1">
+                                                        {fmt(totalOutOfPocket)}
+                                                    </div>
+                                                    <div className="text-[10px] text-muted-foreground mt-1 truncate">
+                                                        (Mensualités + Ass. + Dépenses)
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+                                        </>
+                                    );
+                                })()}
                             </div>
 
                             {/* Chart */}

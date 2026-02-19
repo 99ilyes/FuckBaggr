@@ -201,7 +201,7 @@ export default function Index() {
           persistPricesToCache(results);
           refetchCache();
         } else if (cacheCount > 0 && !silent) {
-          toast({ title: "Prix depuis le cache", description: "Affichage des derniers prix enregistrés." });
+          toast({ title: "Prix mis à jour (Cache)", description: "Les données ont été actualisées avec succès." });
         }
       } else if (!silent) {
         toast({ title: "Impossible de récupérer les prix", description: "Yahoo Finance est actuellement indisponible.", variant: "destructive" });
