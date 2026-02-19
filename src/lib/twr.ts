@@ -92,9 +92,11 @@ export function toEUR(
   const fxTicker = getFxTicker(currency);
   if (!fxTicker) return amount;
   const fxSeries = priceLookup[fxTicker];
-  if (!fxSeries) return amount;
+  // If no FX series available, return 0 instead of 1:1 fallback to avoid
+  // inflating portfolio value with unconverted foreign-currency cash
+  if (!fxSeries || fxSeries.length === 0) return 0;
   const rate = getPriceAt(fxSeries, timestamp);
-  if (rate === null || rate === 0) return amount; // fallback: no conversion
+  if (rate === null || rate === 0) return 0; // no conversion data → skip rather than inflate
   return amount * rate;
 }
 

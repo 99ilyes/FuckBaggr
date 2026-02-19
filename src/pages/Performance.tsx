@@ -215,19 +215,67 @@ export default function Performance() {
   }, [assetCurrencies, historyMap]);
 
   // ── Compute TWR per portfolio ─────────────────────────────────────────────
+
+  /**
+   * Build a filtered historyMap containing only the tickers relevant to a
+   * specific set of transactions (+ FX tickers needed for that portfolio's currencies).
+   */
+  const buildScopedHistory = useMemo(() => {
+    return (txs: typeof allTransactions) => {
+      const relevant = new Set<string>();
+      // Include only tickers that appear in these specific transactions
+      for (const tx of txs) {
+        if (tx.ticker && (tx.type === "buy" || tx.type === "sell")) {
+          relevant.add(tx.ticker);
+        }
+      }
+      // Include FX tickers for currencies used in this portfolio's transactions
+      const portfolioCurrencies = new Set<string>();
+      for (const tx of txs) {
+        if (tx.currency && tx.currency !== "EUR") portfolioCurrencies.add(tx.currency);
+        // conversion source currency
+        if (tx.type === "conversion" && tx.ticker && tx.ticker !== "EUR") portfolioCurrencies.add(tx.ticker);
+      }
+      // Also include FX for asset currencies of tickers in this portfolio
+      for (const t of relevant) {
+        const c = assetCurrencies[t] || historyMap[t]?.currency;
+        if (c && c !== "EUR") portfolioCurrencies.add(c);
+      }
+      for (const c of portfolioCurrencies) {
+        const fx = getFxTicker(c);
+        if (fx) relevant.add(fx);
+      }
+      const scoped: typeof historyMap = {};
+      for (const t of relevant) {
+        if (historyMap[t]) scoped[t] = historyMap[t];
+      }
+      return scoped;
+    };
+  }, [historyMap, assetCurrencies]);
+
   const portfolioResults = useMemo((): PortfolioTWRResult[] => {
     if (historyLoading || allTransactions.length === 0) return [];
-    return portfolios.map((p) =>
-      computeTWR({
-        transactions: allTransactions.filter((tx) => tx.portfolio_id === p.id),
-        historyMap,
-        assetCurrencies: enrichedCurrencies,
+    return portfolios.map((p) => {
+      const pTxs = allTransactions.filter((tx) => tx.portfolio_id === p.id);
+      const scopedHistory = buildScopedHistory(pTxs);
+      // Build assetCurrencies scoped to this portfolio only
+      const scopedCurrencies: Record<string, string> = {};
+      for (const a of assetsCache) {
+        if (a.ticker && a.currency) scopedCurrencies[a.ticker] = a.currency;
+      }
+      for (const [ticker, asset] of Object.entries(scopedHistory)) {
+        if (!scopedCurrencies[ticker] && asset.currency) scopedCurrencies[ticker] = asset.currency;
+      }
+      return computeTWR({
+        transactions: pTxs,
+        historyMap: scopedHistory,
+        assetCurrencies: scopedCurrencies,
         portfolioId: p.id,
         portfolioName: p.name,
         color: p.color,
-      })
-    );
-  }, [portfolios, allTransactions, historyMap, enrichedCurrencies, historyLoading]);
+      });
+    });
+  }, [portfolios, allTransactions, historyMap, assetsCache, buildScopedHistory, historyLoading]);
 
   // Total TWR (all portfolios combined)
   const totalResult = useMemo((): PortfolioTWRResult | null => {
