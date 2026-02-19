@@ -1,8 +1,9 @@
 /**
  * Time-Weighted Return (TWR) calculation library
  *
- * TWR neutralises the impact of cash flows (deposits/withdrawals) to measure
- * only the manager's investment performance. Sub-periods are chained:
+ * TWR divides the global period into sub-periods each time an external cash
+ * flow (deposit or withdrawal) occurs. Returns for each sub-period are then
+ * chained geometrically:
  *   TWR = (1 + R1) × (1 + R2) × ... × (1 + Rn) - 1
  *
  * All values are converted to EUR using historical FX rates.
@@ -14,16 +15,11 @@ import { AssetHistory } from "@/hooks/usePortfolios";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface TWRDataPoint {
-  /** Unix timestamp in seconds (start of week) */
-  time: number;
-  /** ISO date string for display */
-  date: string;
-  /** Portfolio value in EUR */
-  valueEUR: number;
-  /** Cumulative TWR as a decimal (0.15 = +15%) */
-  twr: number;
-  /** Net cash flows (deposits - withdrawals) in EUR for this period */
-  netFlow: number;
+  time: number;          // Unix timestamp in seconds
+  date: string;          // ISO date string
+  valueEUR: number;      // Portfolio value in EUR
+  twr: number;           // Cumulative TWR as decimal (0.15 = +15%)
+  netFlow: number;       // Net external flows during this period
 }
 
 export interface PortfolioTWRResult {
@@ -33,41 +29,19 @@ export interface PortfolioTWRResult {
   dataPoints: TWRDataPoint[];
   totalTWR: number;
   annualisedTWR: number;
-  currentValueEUR: number;
-  totalInvestedEUR: number;
 }
 
 // ─── FX helpers ───────────────────────────────────────────────────────────────
 
-/**
- * Returns the FX ticker needed to convert `currency` → EUR.
- * EUR is the base; if currency is already EUR, return null.
- */
 export function getFxTicker(currency: string): string | null {
   const upper = currency.toUpperCase();
   if (upper === "EUR") return null;
-  // Yahoo uses USDEUR=X to get how many EUR per 1 USD
+  // USDEUR=X: how many EUR per 1 USD
   return `${upper}EUR=X`;
-}
-
-/**
- * Given the historical prices map and a list of currencies, return the set of
- * FX tickers that must also be fetched.
- */
-export function getRequiredFxTickers(currencies: string[]): string[] {
-  const set = new Set<string>();
-  for (const c of currencies) {
-    const fx = getFxTicker(c);
-    if (fx) set.add(fx);
-  }
-  return Array.from(set);
 }
 
 // ─── Price lookup helpers ─────────────────────────────────────────────────────
 
-/**
- * Build a lookup map: ticker → sorted array of { time, price }.
- */
 export function buildPriceLookup(
   historyMap: Record<string, AssetHistory>
 ): Record<string, { time: number; price: number }[]> {
@@ -79,17 +53,23 @@ export function buildPriceLookup(
 }
 
 /**
- * Forward-fill lookup: returns the last known price at or before `timestamp`.
- * Returns null if no price is available before `timestamp`.
+ * Forward-fill lookup with ±5 day tolerance to handle timestamp misalignment
+ * between our weekly Monday-00:00-UTC timeline and Yahoo's market-open timestamps.
+ * Returns the last known price at or before (timestamp + 5 days).
  */
 export function getPriceAt(
   sorted: { time: number; price: number }[],
   timestamp: number
 ): number | null {
   if (!sorted || sorted.length === 0) return null;
+
+  // 5-day forward tolerance: a price stamped at Monday 14:30 UTC still counts for Monday 00:00 UTC
+  const FORWARD_TOLERANCE = 5 * 24 * 3600;
+  const cutoff = timestamp + FORWARD_TOLERANCE;
+
   let last: number | null = null;
   for (const p of sorted) {
-    if (p.time <= timestamp) {
+    if (p.time <= cutoff) {
       last = p.price;
     } else {
       break;
@@ -99,8 +79,8 @@ export function getPriceAt(
 }
 
 /**
- * Convert an amount in `currency` to EUR using historical FX rates.
- * Falls back to 1:1 if no FX data available.
+ * Convert amount in `currency` to EUR using historical FX data at `timestamp`.
+ * Falls back to 1:1 if no FX data is available.
  */
 export function toEUR(
   amount: number,
@@ -112,163 +92,154 @@ export function toEUR(
   const fxTicker = getFxTicker(currency);
   if (!fxTicker) return amount;
   const fxSeries = priceLookup[fxTicker];
-  if (!fxSeries) return amount; // fallback: no conversion
+  if (!fxSeries) return amount;
   const rate = getPriceAt(fxSeries, timestamp);
-  if (rate === null) return amount; // fallback
+  if (rate === null || rate === 0) return amount; // fallback: no conversion
   return amount * rate;
 }
 
-// ─── Portfolio state replay ───────────────────────────────────────────────────
-
-interface PositionState {
-  quantity: number;
-  currency: string;
-}
-
-interface PortfolioState {
-  positions: Record<string, PositionState>;
-  /** Cash balances per currency */
-  cash: Record<string, number>;
-}
+// ─── Position state replay ────────────────────────────────────────────────────
 
 /**
- * Replay all transactions up to (and including) `upToTimestamp` to get the
- * portfolio state at that point in time.
+ * Replay transactions up to `upToTimestamp` (seconds).
+ * Mirrors the logic of calculatePositions + calculateCashBalances from calculations.ts
+ * so that the replayed values are consistent with the dashboard.
  */
-function replayTransactions(
+function replayState(
   transactions: Transaction[],
-  upToTimestamp: number // seconds
-): PortfolioState {
-  const state: PortfolioState = { positions: {}, cash: {} };
+  upToTimestamp: number
+): {
+  positions: Record<string, { quantity: number; currency: string }>;
+  cash: Record<string, number>;
+} {
+  const positions: Record<string, { quantity: number; currency: string }> = {};
+  const cash: Record<string, number> = {};
 
-  const sorted = [...transactions].sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
+  const sorted = [...transactions].sort((a, b) => {
+    const diff = new Date(a.date).getTime() - new Date(b.date).getTime();
+    if (diff !== 0) return diff;
+    const typePriority: Record<string, number> = { deposit: 0, buy: 1, conversion: 2, sell: 3, withdrawal: 4 };
+    return (typePriority[a.type] ?? 99) - (typePriority[b.type] ?? 99);
+  });
 
   for (const tx of sorted) {
-    const txTime = new Date(tx.date).getTime() / 1000;
-    if (txTime > upToTimestamp) break;
+    const txSec = new Date(tx.date).getTime() / 1000;
+    if (txSec > upToTimestamp) break;
 
     const currency = tx.currency ?? "EUR";
-    const amount = (tx.quantity ?? 0) * (tx.unit_price ?? 0);
+    const qty = tx.quantity ?? 0;
+    const price = tx.unit_price ?? 0;
+    const fees = tx.fees ?? 0;
 
     switch (tx.type) {
       case "buy": {
-        const ticker = tx.ticker!;
-        if (!state.positions[ticker]) {
-          state.positions[ticker] = { quantity: 0, currency };
-        }
-        state.positions[ticker].quantity += tx.quantity ?? 0;
-        // Cash outflow
-        state.cash[currency] = (state.cash[currency] ?? 0) - amount - (tx.fees ?? 0);
+        if (!tx.ticker || qty === 0 || price === 0) break;
+        if (!positions[tx.ticker]) positions[tx.ticker] = { quantity: 0, currency };
+        positions[tx.ticker].quantity += qty;
+        cash[currency] = (cash[currency] ?? 0) - (qty * price + fees);
         break;
       }
       case "sell": {
-        const ticker = tx.ticker!;
-        if (state.positions[ticker]) {
-          state.positions[ticker].quantity -= tx.quantity ?? 0;
-          if (state.positions[ticker].quantity <= 0) {
-            delete state.positions[ticker];
-          }
+        if (!tx.ticker || qty === 0) break;
+        if (positions[tx.ticker]) {
+          positions[tx.ticker].quantity -= qty;
+          if (positions[tx.ticker].quantity <= 1e-9) delete positions[tx.ticker];
         }
-        // Cash inflow
-        state.cash[currency] = (state.cash[currency] ?? 0) + amount - (tx.fees ?? 0);
+        cash[currency] = (cash[currency] ?? 0) + (qty * price - fees);
         break;
       }
       case "deposit": {
-        state.cash[currency] = (state.cash[currency] ?? 0) + (tx.unit_price ?? 0);
+        // calculateCashBalances: amount = qty * price (qty defaults to 1 when null, price = amount)
+        const amount = qty !== 0 ? qty * price : price;
+        cash[currency] = (cash[currency] ?? 0) + amount;
         break;
       }
       case "withdrawal": {
-        state.cash[currency] = (state.cash[currency] ?? 0) - (tx.unit_price ?? 0);
+        const amount = qty !== 0 ? qty * price : price;
+        cash[currency] = (cash[currency] ?? 0) - amount;
         break;
       }
       case "conversion": {
-        // unit_price is the exchange rate, quantity is the from-amount
-        // Notes typically encode from/to; we treat it as a cash rebalancing
-        // Simplified: subtract source currency, add target currency
-        // For TWR purposes, conversions are not external flows, just internal.
-        // We skip them as they don't affect total portfolio value.
+        // source: ticker currency, amount = qty * price; target: currency, amount = qty
+        const sourceCurrency = tx.ticker ?? "EUR";
+        cash[sourceCurrency] = (cash[sourceCurrency] ?? 0) - (qty * price + fees);
+        cash[currency] = (cash[currency] ?? 0) + qty;
         break;
       }
     }
   }
 
-  return state;
+  return { positions, cash };
 }
 
 /**
- * Compute the total EUR value of a portfolio state at a given timestamp.
+ * Compute the total portfolio value in EUR at a given timestamp.
+ * Uses forward-fill (getPriceAt with tolerance) for missing weekly data.
  */
-function computePortfolioValueEUR(
-  state: PortfolioState,
+function computeValueEUR(
+  positions: Record<string, { quantity: number; currency: string }>,
+  cash: Record<string, number>,
   timestamp: number,
   priceLookup: Record<string, { time: number; price: number }[]>,
   assetCurrencies: Record<string, string>
 ): number {
   let total = 0;
 
-  // Position values
-  for (const [ticker, pos] of Object.entries(state.positions)) {
-    if (pos.quantity <= 0) continue;
+  for (const [ticker, pos] of Object.entries(positions)) {
+    if (pos.quantity <= 1e-9) continue;
     const priceSeries = priceLookup[ticker];
-    const price = priceSeries ? getPriceAt(priceSeries, timestamp) : null;
-    if (price === null) continue; // no history for this ticker yet
+    if (!priceSeries) continue;
+    const price = getPriceAt(priceSeries, timestamp);
+    if (price === null || price === 0) continue;
     const currency = assetCurrencies[ticker] ?? pos.currency ?? "EUR";
-    const valueInCurrency = pos.quantity * price;
-    total += toEUR(valueInCurrency, currency, timestamp, priceLookup);
+    total += toEUR(pos.quantity * price, currency, timestamp, priceLookup);
   }
 
-  // Cash values
-  for (const [currency, amount] of Object.entries(state.cash)) {
-    if (amount === 0) continue;
+  for (const [currency, amount] of Object.entries(cash)) {
+    if (Math.abs(amount) < 0.001) continue;
     total += toEUR(amount, currency, timestamp, priceLookup);
   }
 
   return total;
 }
 
-// ─── External flow detection ──────────────────────────────────────────────────
+// ─── External flows per week ──────────────────────────────────────────────────
 
 /**
- * Compute net external cash flows (deposits - withdrawals) between two timestamps
- * in EUR using historical FX rates at the flow timestamp.
+ * Returns net external EUR flows (deposits - withdrawals) strictly within
+ * (fromSec, toSec].
  */
 function getNetFlowsEUR(
   transactions: Transaction[],
-  fromTimestamp: number, // exclusive
-  toTimestamp: number, // inclusive
+  fromSec: number,
+  toSec: number,
   priceLookup: Record<string, { time: number; price: number }[]>
 ): number {
-  let netFlow = 0;
+  let net = 0;
   for (const tx of transactions) {
-    const txTime = new Date(tx.date).getTime() / 1000;
-    if (txTime <= fromTimestamp || txTime > toTimestamp) continue;
+    const txSec = new Date(tx.date).getTime() / 1000;
+    if (txSec <= fromSec || txSec > toSec) continue;
+    if (tx.type !== "deposit" && tx.type !== "withdrawal") continue;
     const currency = tx.currency ?? "EUR";
-    const amount = tx.unit_price ?? 0;
-    if (tx.type === "deposit") {
-      netFlow += toEUR(amount, currency, txTime, priceLookup);
-    } else if (tx.type === "withdrawal") {
-      netFlow -= toEUR(amount, currency, txTime, priceLookup);
-    }
+    const qty = tx.quantity ?? 0;
+    const price = tx.unit_price ?? 0;
+    const amount = qty !== 0 ? qty * price : price;
+    const amountEUR = toEUR(amount, currency, txSec, priceLookup);
+    if (tx.type === "deposit") net += amountEUR;
+    else net -= amountEUR;
   }
-  return netFlow;
+  return net;
 }
 
-// ─── Weekly timeline builder ──────────────────────────────────────────────────
+// ─── Weekly timeline ──────────────────────────────────────────────────────────
 
-/**
- * Generate weekly timestamps from `startDate` to now (Monday of each week).
- */
 function buildWeeklyTimeline(startDate: Date, endDate: Date): number[] {
   const times: number[] = [];
-  // Align to Monday
   const d = new Date(startDate);
   d.setUTCHours(0, 0, 0, 0);
-  // Roll back to previous Monday
+  // Snap to previous Monday
   const day = d.getUTCDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setUTCDate(d.getUTCDate() + diff);
+  d.setUTCDate(d.getUTCDate() - (day === 0 ? 6 : day - 1));
 
   const end = endDate.getTime();
   while (d.getTime() <= end) {
@@ -283,7 +254,6 @@ function buildWeeklyTimeline(startDate: Date, endDate: Date): number[] {
 export interface ComputeTWROptions {
   transactions: Transaction[];
   historyMap: Record<string, AssetHistory>;
-  /** Currency of each asset ticker (from assets_cache) */
   assetCurrencies: Record<string, string>;
   portfolioId: string;
   portfolioName: string;
@@ -293,144 +263,103 @@ export interface ComputeTWROptions {
 export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
   const { transactions, historyMap, assetCurrencies, portfolioId, portfolioName, color } = opts;
 
-  // Filter to only this portfolio's transactions, sorted ascending
   const txs = [...transactions].sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
   );
 
-  if (txs.length === 0) {
-    return {
-      portfolioId,
-      portfolioName,
-      color,
-      dataPoints: [],
-      totalTWR: 0,
-      annualisedTWR: 0,
-      currentValueEUR: 0,
-      totalInvestedEUR: 0,
-    };
-  }
+  const empty: PortfolioTWRResult = { portfolioId, portfolioName, color, dataPoints: [], totalTWR: 0, annualisedTWR: 0 };
+  if (txs.length === 0) return empty;
 
   const priceLookup = buildPriceLookup(historyMap);
 
   const firstTxDate = new Date(txs[0].date);
   const now = new Date();
   const weeklyTimes = buildWeeklyTimeline(firstTxDate, now);
-
-  if (weeklyTimes.length < 2) {
-    return {
-      portfolioId,
-      portfolioName,
-      color,
-      dataPoints: [],
-      totalTWR: 0,
-      annualisedTWR: 0,
-      currentValueEUR: 0,
-      totalInvestedEUR: 0,
-    };
-  }
+  if (weeklyTimes.length < 2) return empty;
 
   const dataPoints: TWRDataPoint[] = [];
-  let cumulativeTWR = 1; // starts at 1, multiply by (1 + R_i)
+
+  // TWR state
+  let cumulativeFactor = 1; // product of (1 + R_i)
   let prevValueEUR = 0;
+  let prevTime = weeklyTimes[0] - 7 * 24 * 3600;
 
   for (let i = 0; i < weeklyTimes.length; i++) {
     const t = weeklyTimes[i];
-    const prevT = i > 0 ? weeklyTimes[i - 1] : t - 7 * 24 * 3600;
 
-    // Portfolio state at time t
-    const state = replayTransactions(txs, t);
-    const valueEUR = computePortfolioValueEUR(state, t, priceLookup, assetCurrencies);
+    const state = replayState(txs, t);
+    const valueEUR = computeValueEUR(state.positions, state.cash, t, priceLookup, assetCurrencies);
 
-    // Net external flows during this period
-    const netFlow = getNetFlowsEUR(txs, prevT, t, priceLookup);
+    // Net external flows during this week
+    const netFlow = getNetFlowsEUR(txs, prevTime, t, priceLookup);
 
-    // TWR sub-period: only compute after first period with value
-    if (i > 0 && prevValueEUR > 0) {
+    // Compute sub-period return
+    // R_i = V_end / (V_start + external_flows_this_period) - 1
+    // We only chain when the denominator is meaningful
+    if (i > 0) {
       const denominator = prevValueEUR + netFlow;
-      if (denominator > 0 && valueEUR > 0) {
+      if (denominator > 1 && valueEUR > 0) {
         const subReturn = valueEUR / denominator - 1;
-        cumulativeTWR *= 1 + subReturn;
+        cumulativeFactor *= (1 + subReturn);
+      } else if (denominator <= 0 && netFlow > 0 && valueEUR > 0) {
+        // Fresh start after zero value (initial deposit)
+        cumulativeFactor = 1;
       }
-    } else if (i === 0) {
-      // First week: initialize
-      cumulativeTWR = 1;
     }
 
-    if (valueEUR > 0 || netFlow > 0) {
+    if (valueEUR > 0 || (i > 0 && dataPoints.length > 0)) {
       dataPoints.push({
         time: t,
         date: new Date(t * 1000).toISOString().split("T")[0],
         valueEUR: Math.max(0, valueEUR),
-        twr: cumulativeTWR - 1,
+        twr: cumulativeFactor - 1,
         netFlow,
       });
     }
 
     prevValueEUR = valueEUR;
+    prevTime = t;
   }
 
-  const totalTWR = cumulativeTWR - 1;
+  if (dataPoints.length === 0) return empty;
+
+  const totalTWR = cumulativeFactor - 1;
 
   // Annualised TWR
   let annualisedTWR = 0;
   if (dataPoints.length >= 2) {
-    const firstDate = new Date(dataPoints[0].date);
-    const lastDate = new Date(dataPoints[dataPoints.length - 1].date);
-    const years = (lastDate.getTime() - firstDate.getTime()) / (365.25 * 24 * 3600 * 1000);
+    const first = new Date(dataPoints[0].date);
+    const last = new Date(dataPoints[dataPoints.length - 1].date);
+    const years = (last.getTime() - first.getTime()) / (365.25 * 24 * 3600 * 1000);
     if (years > 0) {
-      annualisedTWR = Math.pow(1 + totalTWR, 1 / years) - 1;
+      annualisedTWR = Math.pow(Math.abs(1 + totalTWR), 1 / years) * Math.sign(1 + totalTWR) - 1;
     }
   }
 
-  // Total invested (cumulative deposits in EUR)
-  let totalInvestedEUR = 0;
-  for (const tx of txs) {
-    if (tx.type === "deposit") {
-      const currency = tx.currency ?? "EUR";
-      const txTime = new Date(tx.date).getTime() / 1000;
-      totalInvestedEUR += toEUR(tx.unit_price ?? 0, currency, txTime, priceLookup);
-    }
-  }
-
-  const currentValueEUR = dataPoints.length > 0 ? dataPoints[dataPoints.length - 1].valueEUR : 0;
-
-  return {
-    portfolioId,
-    portfolioName,
-    color,
-    dataPoints,
-    totalTWR,
-    annualisedTWR,
-    currentValueEUR,
-    totalInvestedEUR,
-  };
+  return { portfolioId, portfolioName, color, dataPoints, totalTWR, annualisedTWR };
 }
 
-/**
- * Filter data points to a specific time range.
- */
-export function filterByRange(
-  dataPoints: TWRDataPoint[],
-  range: "6M" | "1Y" | "2Y" | "5Y" | "MAX"
-): TWRDataPoint[] {
+// ─── Range filter & TWR rebase ────────────────────────────────────────────────
+
+export type TimeRange = "6M" | "1Y" | "2Y" | "5Y" | "MAX";
+
+export function filterByRange(dataPoints: TWRDataPoint[], range: TimeRange): TWRDataPoint[] {
   if (range === "MAX" || dataPoints.length === 0) return dataPoints;
   const now = Date.now() / 1000;
-  const monthsMap = { "6M": 6, "1Y": 12, "2Y": 24, "5Y": 60 };
-  const months = monthsMap[range];
-  const cutoff = now - months * 30.44 * 24 * 3600;
+  const monthsMap: Record<TimeRange, number> = { "6M": 6, "1Y": 12, "2Y": 24, "5Y": 60, "MAX": 9999 };
+  const cutoff = now - monthsMap[range] * 30.44 * 24 * 3600;
   const filtered = dataPoints.filter((d) => d.time >= cutoff);
-  // Always include at least a reference point for TWR rebasing
-  if (filtered.length === 0) return dataPoints.slice(-1);
-  return filtered;
+  return filtered.length === 0 ? dataPoints.slice(-1) : filtered;
 }
 
 /**
- * Rebase TWR data points so the first visible point is 0%.
+ * Rebase TWR so the first visible point starts at 0%.
+ * This allows comparing performance over the selected range regardless of past history.
  */
 export function rebaseTWR(dataPoints: TWRDataPoint[]): TWRDataPoint[] {
   if (dataPoints.length === 0) return [];
   const baseMultiplier = 1 + dataPoints[0].twr;
+  if (baseMultiplier === 0) return dataPoints;
   return dataPoints.map((d) => ({
     ...d,
     twr: (1 + d.twr) / baseMultiplier - 1,
