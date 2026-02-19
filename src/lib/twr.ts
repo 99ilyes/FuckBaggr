@@ -248,6 +248,11 @@ function computeValueEUR(
  *
  * Only EUR deposits/withdrawals are counted as external cash flows.
  * Non-EUR deposits and all conversions are internal broker operations.
+ *
+ * To avoid distortion from compensating intra-day broker movements
+ * (e.g. broker temporarily depositing and withdrawing the same amount),
+ * we compute the NET flow per calendar day and only count days where the
+ * net is non-zero. This neutralises same-day deposit/withdrawal pairs.
  */
 function getNetFlowsEUR(
   transactions: Transaction[],
@@ -255,7 +260,9 @@ function getNetFlowsEUR(
   toSec: number,
   _priceLookup: Record<string, { time: number; price: number }[]>
 ): number {
-  let net = 0;
+  // Aggregate flows by calendar day (UTC date string)
+  const byDay: Record<string, number> = {};
+
   for (const tx of transactions) {
     const txSec = new Date(tx.date).getTime() / 1000;
     if (txSec <= fromSec || txSec > toSec) continue;
@@ -266,10 +273,12 @@ function getNetFlowsEUR(
     const qty = tx.quantity ?? 0;
     const price = tx.unit_price ?? 0;
     const amount = qty !== 0 ? qty * price : price;
-    if (tx.type === "deposit") net += amount;
-    else net -= amount;
+    const day = new Date(tx.date).toISOString().split("T")[0];
+    byDay[day] = (byDay[day] ?? 0) + (tx.type === "deposit" ? amount : -amount);
   }
-  return net;
+
+  // Sum daily nets — days where deposit == withdrawal cancel out to ~0
+  return Object.values(byDay).reduce((sum, v) => sum + v, 0);
 }
 
 // ─── Weekly timeline ──────────────────────────────────────────────────────────
