@@ -626,10 +626,10 @@ const Calculator = () => {
                                                 <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1">
                                                     {fmt(
                                                         activeTab === "scenarioA"
-                                                            ? (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12 + resultsA.summary.totalExpenses
+                                                            ? (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12
                                                             : (payFromCapital
-                                                                ? (insuranceAmount * repaymentDurationYears * 12) + resultsB.summary.totalExpenses
-                                                                : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12 + resultsB.summary.totalExpenses)
+                                                                ? (insuranceAmount * repaymentDurationYears * 12)
+                                                                : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12)
                                                     )}
                                                 </div>
                                                 <div className="text-[10px] text-muted-foreground mt-1 truncate">
