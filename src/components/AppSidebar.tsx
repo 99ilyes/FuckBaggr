@@ -1,4 +1,4 @@
-import { LayoutDashboard, BarChart3, Calculator } from "lucide-react";
+import { LayoutDashboard, BarChart3, Calculator, TrendingUp } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import {
@@ -14,6 +14,7 @@ import {
 
 const items = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Performance", url: "/performance", icon: TrendingUp },
   { title: "Earnings Tracker", url: "/earnings", icon: BarChart3 },
   { title: "Calculatrice Crédit", url: "/calculator", icon: Calculator },
 ];
