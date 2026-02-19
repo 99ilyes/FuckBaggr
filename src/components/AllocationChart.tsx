@@ -73,7 +73,7 @@ const BRAND_COLORS: Record<string, string> = {
   // Latam
   MELI: "#FFE600",
   // Others
-  NBIS: "#33C481",
+  NBIS: "#E0FF4F",
   GEV: "#005F9E",
   // Portfolios (fallback)
   CTO: "#4285F4",
