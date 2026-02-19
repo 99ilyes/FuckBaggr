@@ -579,23 +579,28 @@ const Calculator = () => {
                                 // Formula: Interest Earned - Total Cash Out.
                                 // This shows if the interest covers the loan payments/payoff.
                                 const netBenefit = interestEarned - totalCashOut;
-                                
+
                                 // 6. Final Capital (Asset Value)
                                 const finalCapital = results.rows[results.rows.length - 1]?.capital || 0;
 
 
                                 return (
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                                        {/* Card 1: Mensualités Restantes (New) */}
+                                        {/* Card 1: Mensualité (New) */}
                                         <Card className="bg-card border-border/50 shadow-sm">
                                             <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1 truncate">Mensualités Restantes</div>
-                                                <div className="text-xl sm:text-2xl font-bold tabular-nums truncate" title={fmt(totalPaymentsRemaining)}>
-                                                    {isScenarioA ? "0.00 €" : fmt(totalPaymentsRemaining)}
+                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1 truncate">Mensualité (après différé)</div>
+                                                <div className="text-xl sm:text-2xl font-bold tabular-nums truncate" title={isScenarioA ? "0.00 €" : fmt(monthlyTotal)}>
+                                                    {isScenarioA ? "0.00 €" : fmt(monthlyTotal)}
                                                 </div>
                                                 {!isScenarioA && (
                                                     <div className="text-[10px] text-muted-foreground mt-1 truncate">
-                                                        {months} mois x {fmt(monthlyTotal)}
+                                                        pendant {months} mois
+                                                    </div>
+                                                )}
+                                                {isScenarioA && (
+                                                    <div className="text-[10px] text-muted-foreground mt-1 truncate">
+                                                        -
                                                     </div>
                                                 )}
                                             </CardContent>
