@@ -1,93 +1,112 @@
 
-## Réparer complètement la récupération des prix via Yahoo Finance
+# Nouvelle page "Performance" avec graphiques TWR
 
-### Problèmes identifiés
+## Objectif
 
-**Problème 1 — Erreur de build bloquante (`fetch-history`)**
-
-`yahooFinance.chart(ticker, { range, interval })` — le paramètre `range` n'existe pas dans l'API TypeScript de `yahoo-finance2@2.13.3`. Il faut remplacer `range` par `period1` (une date calculée à partir de la durée demandée : "5y" → date il y a 5 ans).
-
-**Problème 2 — Mode "fundamentals" cassé (`fetch-prices`)**
-
-Le mode fundamentals retourne `{}` en dur. La Watchlist ne peut donc pas afficher le PER ni l'EPS. Il faut appeler l'API Yahoo Finance Chart ou Quote pour récupérer ces données.
-
-**Problème 3 — Rate limiting persistant (prix)**
-
-`Promise.all` sur 5 tickers simultanément déclenche le blocage Yahoo. La solution est un traitement entièrement séquentiel avec 500ms de pause, sans aucun parallélisme.
+Créer une page dédiée `/performance` qui affiche l'évolution de la valeur du portefeuille dans le temps via la méthode **Time-Weighted Return (TWR)**, en gérant correctement les devises et en utilisant les cours historiques réels des titres.
 
 ---
 
-### Solution
+## Concept TWR appliqué
 
-#### 1. `supabase/functions/fetch-history/index.ts`
+La TWR neutralise l'impact des flux de trésorerie (dépôts, retraits) pour mesurer uniquement la performance du gérant. Le calcul se fait par sous-périodes délimitées par chaque flux entrant/sortant.
 
-Remplacer le paramètre `range` par la conversion en `period1` :
-
-```typescript
-function rangeToDate(range: string): Date {
-  const now = new Date();
-  const map: Record<string, number> = { "1y": 1, "2y": 2, "5y": 5, "10y": 10 };
-  const years = map[range] ?? 5;
-  return new Date(now.getFullYear() - years, now.getMonth(), now.getDate());
-}
-
-// Puis :
-const result = await yahooFinance.chart(ticker, { 
-  period1: rangeToDate(range), 
-  interval 
-});
+Pour chaque sous-période entre deux flux :
 ```
-
-Cela corrige l'erreur TypeScript et fait compiler le projet.
-
-#### 2. `supabase/functions/fetch-prices/index.ts`
-
-Deux corrections majeures :
-
-**a) Mode "fundamentals" — implémentation réelle**
-
-Utiliser l'API Yahoo Finance v7 (quote summary) via fetch direct pour récupérer les fondamentaux :
-
+R_i = (V_fin / V_début) - 1
 ```
-GET https://query1.finance.yahoo.com/v7/finance/quote?symbols=AAPL&fields=trailingPE,forwardPE,trailingEps,regularMarketPrice,longName,currency,sector
+Puis les périodes sont chaînées :
 ```
-
-Retourner un objet `{ trailingPE, trailingEps, forwardPE, price, name, currency, sector }` par ticker.
-
-**b) Mode prix — traitement entièrement séquentiel**
-
-Remplacer le `Promise.all` par une boucle `for...of` pure avec `await delay(500)` entre chaque ticker :
-
-```typescript
-for (const t of uniqueTickers) {
-  const data = await fetchTicker(t);
-  // traiter la réponse...
-  await delay(500);
-}
+TWR = (1 + R_1) × (1 + R_2) × ... × (1 + R_n) - 1
 ```
-
-Supprimer toute logique de batch (`BATCH_SIZE`, `Promise.all`).
-
-#### 3. `src/lib/yahooFinance.ts`
-
-Aucun changement nécessaire — la logique de fallback cache est déjà en place et fonctionnelle.
-
-#### 4. `src/pages/Index.tsx`
-
-Aucun changement nécessaire.
 
 ---
 
-### Fichiers modifiés
+## Architecture technique
 
-| Fichier | Action |
-|---------|--------|
-| `supabase/functions/fetch-history/index.ts` | Remplacer `range` par `period1` calculé — corrige le build |
-| `supabase/functions/fetch-prices/index.ts` | Implémenter le mode fundamentals + séquentiel pur pour les prix |
+### 1. Edge Function `fetch-history` — refactoring
 
-### Comportement attendu
+L'edge function existante (`supabase/functions/fetch-history/index.ts`) utilise `yahoo-finance2` qui **plante** en production (même problème CORS/library que `fetch-prices`). Elle sera réécrite pour utiliser des appels HTTP directs à Yahoo Finance (même approche que le correctif de `fetch-prices`) :
 
-- **Build** : plus d'erreur TypeScript, le projet compile
-- **Bouton Actualiser** : les prix se chargent séquentiellement (500ms entre chaque), le cache DB est mis à jour, l'UI affiche les prix live ou du cache selon disponibilité
-- **Watchlist** : le PER et l'EPS sont récupérés via le mode fundamentals
-- **Historique** : les graphiques de performance fonctionnent de nouveau
+- Endpoint Yahoo : `query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1wk&range=5y`
+- Retourne les prix hebdomadaires historiques par ticker
+- CORS configuré avec `OPTIONS` retournant `200 OK`
+
+### 2. Hook `useHistoricalPrices` — déjà existant
+
+Le hook dans `usePortfolios.ts` appelle déjà `fetch-history` via `fetch-prices` avec `mode: "history"`. Il faudra le faire pointer vers la nouvelle edge function `fetch-history` (refactorisée).
+
+En réalité l'appel actuel envoie `mode: "history"` à `fetch-prices` mais ce mode n'est pas géré → il tombe dans le default qui ne retourne rien d'utile. On corrigera cela en faisant appeler `fetch-history` directement.
+
+### 3. Calcul TWR côté frontend — nouveau fichier `src/lib/twr.ts`
+
+La logique TWR sera isolée dans un fichier dédié :
+
+```typescript
+// Collecte tous les tickers qui ont été ou sont détenus
+// Pour chaque tick de temps (hebdomadaire), reconstitue :
+//   - La valeur du portefeuille en EUR (positions × cours historique × taux de change)
+//   - Les flux nets du jour (dépôts - retraits)
+// Calcule TWR par chaînage de sous-périodes
+```
+
+**Gestion des devises :**
+- Les cours historiques EUR/USD, USD/EUR, etc. seront aussi récupérés
+- Chaque position est valorisée dans sa devise native puis convertie en EUR via le cours historique de la paire FX au même timestamp
+- On prend `EURUSD=X` (ou autre paire pertinente) en historique hebdomadaire
+
+### 4. Nouvelle page `src/pages/Performance.tsx`
+
+Composants visuels :
+- **Sélecteur de portefeuille** (réutilise `PortfolioSelector`) + bouton "Total"
+- **Sélecteur de plage temporelle** : 6M | 1A | 2A | 5A | Max
+- **Graphique principal (AreaChart Recharts)** : évolution de la valeur du portefeuille en EUR + courbe TWR en %
+- **KPIs en haut** : TWR total, annualisé, valeur actuelle vs investissements
+- **Graphique par portefeuille** (quand "Total" est sélectionné) : courbes superposées
+
+### 5. Ajout dans la sidebar et le routeur
+
+- Nouvelle entrée dans `AppSidebar.tsx` avec l'icône `TrendingUp`
+- Nouvelle `Route` dans `App.tsx` : `path="/performance"`
+
+---
+
+## Détail des fichiers à créer/modifier
+
+| Fichier | Action | Description |
+|---|---|---|
+| `supabase/functions/fetch-history/index.ts` | Réécriture | HTTP direct Yahoo, CORS fix, intervalles hebdo |
+| `src/lib/twr.ts` | Création | Logique TWR + reconstitution historique portfolio |
+| `src/pages/Performance.tsx` | Création | Page complète avec graphiques |
+| `src/hooks/usePortfolios.ts` | Modification | `useHistoricalPrices` pointe vers `fetch-history` |
+| `src/components/AppSidebar.tsx` | Modification | Ajout lien "Performance" |
+| `src/App.tsx` | Modification | Ajout route `/performance` |
+
+---
+
+## Algorithme TWR détaillé
+
+```
+1. Récupérer tous les tickers uniques des transactions (buy + sell)
+2. Récupérer l'historique hebdomadaire Yahoo pour chaque ticker (+ paires FX nécessaires)
+3. Créer une timeline hebdomadaire de t=première_transaction à t=aujourd'hui
+4. Pour chaque semaine t :
+   a. Calculer les positions détenues à t (replay des transactions jusqu'à t)
+   b. Calculer la valeur V(t) = Σ (quantité_i × cours_historique_i(t) × taux_fx(t)) + cash(t)
+   c. Identifier les flux nets F(t) de la semaine (dépôts - retraits)
+5. Calculer TWR :
+   - Avant chaque flux : R_i = V(t_flux) / (V(t_flux-1) + F(t_flux-1)) - 1
+   - TWR = Π(1 + R_i) - 1
+6. Construire la série temporelle : valeur en EUR + TWR cumulé
+```
+
+**Gestion des tickers sans historique** : si un ticker n'a pas de cours pour une semaine donnée (weekend, données manquantes), on utilise le dernier cours connu (forward-fill).
+
+---
+
+## Points de vigilance
+
+- **Devises** : chaque ticker a sa devise native (EUR, USD, etc.). On récupère les historiques FX (ex : `EURUSD=X`) pour convertir en EUR semaine par semaine, pas juste avec le taux actuel.
+- **Tickers fermés** : les titres vendus doivent quand même avoir leur historique récupéré jusqu'à la date de vente.
+- **Performance par portefeuille** : le TWR est calculé indépendamment par portefeuille, chacun dans sa devise, puis converti en EUR pour comparaison.
+- **Données manquantes** : la `fetch-history` edge function sera robuste (timeout 5s par ticker, forward-fill des données).
