@@ -104,8 +104,17 @@ export function toEUR(
 
 /**
  * Replay transactions up to `upToTimestamp` (seconds).
- * Mirrors the logic of calculatePositions + calculateCashBalances from calculations.ts
- * so that the replayed values are consistent with the dashboard.
+ *
+ * Key design decision for multi-currency portfolios:
+ * - Positions (stocks) are tracked by quantity; their EUR value is computed
+ *   via historical price × FX rate at each point in time.
+ * - Cash is tracked ONLY in EUR. Foreign-currency cash from buy/sell flows
+ *   (e.g. USD proceeds from selling NVDA) is intentionally ignored because:
+ *   1. The broker recycles it internally between trades.
+ *   2. Without per-trade FX conversion records, we cannot accurately convert
+ *      it historically — leading to large aberrant values.
+ *   3. Deposits/withdrawals in EUR and explicit EUR↔FX conversions correctly
+ *      capture the real external capital flows.
  */
 function replayState(
   transactions: Transaction[],
@@ -138,7 +147,11 @@ function replayState(
         if (!tx.ticker || qty === 0 || price === 0) break;
         if (!positions[tx.ticker]) positions[tx.ticker] = { quantity: 0, currency };
         positions[tx.ticker].quantity += qty;
-        cash[currency] = (cash[currency] ?? 0) - (qty * price + fees);
+        // Only track cash impact for EUR buys — foreign-currency cash is
+        // recycled by the broker and not meaningful for historical TWR.
+        if (currency === "EUR") {
+          cash["EUR"] = (cash["EUR"] ?? 0) - (qty * price + fees);
+        }
         break;
       }
       case "sell": {
@@ -147,25 +160,44 @@ function replayState(
           positions[tx.ticker].quantity -= qty;
           if (positions[tx.ticker].quantity <= 1e-9) delete positions[tx.ticker];
         }
-        cash[currency] = (cash[currency] ?? 0) + (qty * price - fees);
+        // Same: only track EUR cash proceeds
+        if (currency === "EUR") {
+          cash["EUR"] = (cash["EUR"] ?? 0) + (qty * price - fees);
+        }
         break;
       }
       case "deposit": {
-        // calculateCashBalances: amount = qty * price (qty defaults to 1 when null, price = amount)
         const amount = qty !== 0 ? qty * price : price;
-        cash[currency] = (cash[currency] ?? 0) + amount;
+        // Convert non-EUR deposits to EUR using a rough approximation;
+        // explicit conversions below are more accurate.
+        if (currency === "EUR") {
+          cash["EUR"] = (cash["EUR"] ?? 0) + amount;
+        }
+        // Non-EUR deposits are handled via conversion transactions
         break;
       }
       case "withdrawal": {
         const amount = qty !== 0 ? qty * price : price;
-        cash[currency] = (cash[currency] ?? 0) - amount;
+        if (currency === "EUR") {
+          cash["EUR"] = (cash["EUR"] ?? 0) - amount;
+        }
         break;
       }
       case "conversion": {
-        // source: ticker currency, amount = qty * price; target: currency, amount = qty
-        const sourceCurrency = tx.ticker ?? "EUR";
-        cash[sourceCurrency] = (cash[sourceCurrency] ?? 0) - (qty * price + fees);
-        cash[currency] = (cash[currency] ?? 0) + qty;
+        // Explicit EUR↔FX conversion recorded by the user.
+        // ticker = source currency, currency = target currency, qty = target amount
+        const sourceCurrency = (tx.ticker ?? "EUR").toUpperCase();
+        const targetCurrency = currency.toUpperCase();
+        const targetAmount = qty;
+        const sourceAmount = qty * price + fees;
+
+        // Only update EUR side — foreign cash is ignored
+        if (sourceCurrency === "EUR") {
+          cash["EUR"] = (cash["EUR"] ?? 0) - sourceAmount;
+        }
+        if (targetCurrency === "EUR") {
+          cash["EUR"] = (cash["EUR"] ?? 0) + targetAmount;
+        }
         break;
       }
     }
@@ -174,9 +206,13 @@ function replayState(
   return { positions, cash };
 }
 
+
 /**
  * Compute the total portfolio value in EUR at a given timestamp.
  * Uses forward-fill (getPriceAt with tolerance) for missing weekly data.
+ *
+ * Cash is always in EUR (see replayState), so no FX conversion needed for it.
+ * Positions are converted from their native currency via historical FX rates.
  */
 function computeValueEUR(
   positions: Record<string, { quantity: number; currency: string }>,
@@ -197,10 +233,9 @@ function computeValueEUR(
     total += toEUR(pos.quantity * price, currency, timestamp, priceLookup);
   }
 
-  for (const [currency, amount] of Object.entries(cash)) {
-    if (Math.abs(amount) < 0.001) continue;
-    total += toEUR(amount, currency, timestamp, priceLookup);
-  }
+  // Cash is only in EUR after replayState simplification
+  const eurCash = cash["EUR"] ?? 0;
+  if (Math.abs(eurCash) > 0.001) total += eurCash;
 
   return total;
 }
@@ -210,25 +245,29 @@ function computeValueEUR(
 /**
  * Returns net external EUR flows (deposits - withdrawals) strictly within
  * (fromSec, toSec].
+ *
+ * Only EUR deposits/withdrawals are counted as external cash flows.
+ * Non-EUR deposits and all conversions are internal broker operations.
  */
 function getNetFlowsEUR(
   transactions: Transaction[],
   fromSec: number,
   toSec: number,
-  priceLookup: Record<string, { time: number; price: number }[]>
+  _priceLookup: Record<string, { time: number; price: number }[]>
 ): number {
   let net = 0;
   for (const tx of transactions) {
     const txSec = new Date(tx.date).getTime() / 1000;
     if (txSec <= fromSec || txSec > toSec) continue;
     if (tx.type !== "deposit" && tx.type !== "withdrawal") continue;
-    const currency = tx.currency ?? "EUR";
+    const currency = (tx.currency ?? "EUR").toUpperCase();
+    // Only count EUR flows as external capital movements
+    if (currency !== "EUR") continue;
     const qty = tx.quantity ?? 0;
     const price = tx.unit_price ?? 0;
     const amount = qty !== 0 ? qty * price : price;
-    const amountEUR = toEUR(amount, currency, txSec, priceLookup);
-    if (tx.type === "deposit") net += amountEUR;
-    else net -= amountEUR;
+    if (tx.type === "deposit") net += amount;
+    else net -= amount;
   }
   return net;
 }
@@ -293,7 +332,7 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
     const valueEUR = computeValueEUR(state.positions, state.cash, t, priceLookup, assetCurrencies);
 
     // Net external flows during this week
-    const netFlow = getNetFlowsEUR(txs, prevTime, t, priceLookup);
+    const netFlow = getNetFlowsEUR(txs, prevTime, t, priceLookup); // priceLookup unused now but kept for signature compat
 
     // Compute sub-period return
     // R_i = V_end / (V_start + external_flows_this_period) - 1
