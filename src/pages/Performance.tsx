@@ -1,7 +1,12 @@
 import { useState, useMemo } from "react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { usePortfolios, useTransactions, useAssetsCache, useHistoricalPrices } from "@/hooks/usePortfolios";
+import {
+  usePortfolios,
+  useTransactions,
+  useAssetsCache,
+  useHistoricalPrices,
+} from "@/hooks/usePortfolios";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
 import { CreatePortfolioDialog } from "@/components/CreatePortfolioDialog";
 import {
@@ -17,15 +22,27 @@ import {
   Legend,
 } from "recharts";
 import { TrendingUp, TrendingDown, Wallet, BarChart3, Loader2 } from "lucide-react";
-import { computeTWR, filterByRange, rebaseTWR, getFxTicker, PortfolioTWRResult } from "@/lib/twr";
-import { formatCurrency, formatPercent } from "@/lib/calculations";
+import {
+  computeTWR,
+  filterByRange,
+  rebaseTWR,
+  getFxTicker,
+  TimeRange,
+  PortfolioTWRResult,
+} from "@/lib/twr";
+import {
+  calculatePositions,
+  calculateCashBalances,
+  calculatePortfolioStats,
+  formatCurrency,
+  formatPercent,
+} from "@/lib/calculations";
 
 // ─── Range selector ────────────────────────────────────────────────────────────
 
-type Range = "6M" | "1Y" | "2Y" | "5Y" | "MAX";
-const RANGES: Range[] = ["6M", "1Y", "2Y", "5Y", "MAX"];
+const RANGES: TimeRange[] = ["6M", "1Y", "2Y", "5Y", "MAX"];
 
-function RangeSelector({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
+function RangeSelector({ value, onChange }: { value: TimeRange; onChange: (r: TimeRange) => void }) {
   return (
     <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
       {RANGES.map((r) => (
@@ -101,7 +118,7 @@ function CustomTooltip({ active, payload, label }: any) {
           />
           <span className="text-foreground font-medium">{entry.name}:</span>
           <span className="text-foreground">
-            {entry.name.includes("TWR") || entry.name.includes("%")
+            {entry.name === "TWR" || String(entry.name).includes("%")
               ? `${(entry.value * 100).toFixed(2)}%`
               : formatCurrency(entry.value, "EUR")}
           </span>
@@ -115,14 +132,36 @@ function CustomTooltip({ active, payload, label }: any) {
 
 export default function Performance() {
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
-  const [range, setRange] = useState<Range>("1Y");
+  const [range, setRange] = useState<TimeRange>("1Y");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   const { data: portfolios = [] } = usePortfolios();
   const { data: allTransactions = [] } = useTransactions();
   const { data: assetsCache = [] } = useAssetsCache();
 
-  // Build currency map from assets cache
+  // Transactions filtered to selected portfolio (or all)
+  const activeTx = useMemo(
+    () =>
+      selectedPortfolioId
+        ? allTransactions.filter((tx) => tx.portfolio_id === selectedPortfolioId)
+        : allTransactions,
+    [allTransactions, selectedPortfolioId]
+  );
+
+  // ── Live KPIs (match dashboard exactly) ──────────────────────────────────
+  const livePositions = useMemo(
+    () => calculatePositions(activeTx, assetsCache),
+    [activeTx, assetsCache]
+  );
+  const liveCashBalances = useMemo(() => calculateCashBalances(activeTx), [activeTx]);
+  const { totalValue: currentValueEUR, totalInvested: totalInvestedEUR } = useMemo(
+    () => calculatePortfolioStats(livePositions, liveCashBalances, assetsCache, activeTx),
+    [livePositions, liveCashBalances, assetsCache, activeTx]
+  );
+
+  // ── Historical data for TWR chart ─────────────────────────────────────────
+
+  // Build asset currencies from assets cache
   const assetCurrencies = useMemo(() => {
     const map: Record<string, string> = {};
     for (const a of assetsCache) {
@@ -131,45 +170,42 @@ export default function Performance() {
     return map;
   }, [assetsCache]);
 
-  // Collect all unique tickers from transactions + FX tickers needed
+  // Unique tickers from buy/sell transactions
   const allTickers = useMemo(() => {
-    const tickers = new Set<string>();
+    const s = new Set<string>();
     for (const tx of allTransactions) {
-      if (tx.ticker && (tx.type === "buy" || tx.type === "sell")) {
-        tickers.add(tx.ticker);
-      }
+      if (tx.ticker && (tx.type === "buy" || tx.type === "sell")) s.add(tx.ticker);
     }
-    return Array.from(tickers);
+    return Array.from(s);
   }, [allTransactions]);
 
-  // Determine which FX tickers we need
+  // FX tickers needed to convert non-EUR currencies to EUR historically
   const fxTickers = useMemo(() => {
     const currencies = new Set<string>();
     for (const tx of allTransactions) {
       if (tx.currency && tx.currency !== "EUR") currencies.add(tx.currency);
     }
     for (const ticker of allTickers) {
-      const currency = assetCurrencies[ticker];
-      if (currency && currency !== "EUR") currencies.add(currency);
+      const c = assetCurrencies[ticker];
+      if (c && c !== "EUR") currencies.add(c);
     }
     return Array.from(currencies)
-      .map((c) => getFxTicker(c))
+      .map(getFxTicker)
       .filter(Boolean) as string[];
   }, [allTransactions, allTickers, assetCurrencies]);
 
-  const allTickersToFetch = useMemo(
+  const tickersToFetch = useMemo(
     () => [...new Set([...allTickers, ...fxTickers])],
     [allTickers, fxTickers]
   );
 
-  // Fetch historical prices (includes FX)
   const { data: historyMap = {}, isLoading: historyLoading } = useHistoricalPrices(
-    allTickersToFetch,
+    tickersToFetch,
     "5y",
     "1wk"
   );
 
-  // Merge asset currencies from historyMap
+  // Enrich assetCurrencies from history (Yahoo tells us the currency)
   const enrichedCurrencies = useMemo(() => {
     const map = { ...assetCurrencies };
     for (const [ticker, asset] of Object.entries(historyMap)) {
@@ -178,33 +214,25 @@ export default function Performance() {
     return map;
   }, [assetCurrencies, historyMap]);
 
-  // Compute TWR per portfolio
+  // ── Compute TWR per portfolio ─────────────────────────────────────────────
   const portfolioResults = useMemo((): PortfolioTWRResult[] => {
     if (historyLoading || allTransactions.length === 0) return [];
-
-    return portfolios.map((p) => {
-      const txs = allTransactions.filter((tx) => tx.portfolio_id === p.id);
-      return computeTWR({
-        transactions: txs,
+    return portfolios.map((p) =>
+      computeTWR({
+        transactions: allTransactions.filter((tx) => tx.portfolio_id === p.id),
         historyMap,
         assetCurrencies: enrichedCurrencies,
         portfolioId: p.id,
         portfolioName: p.name,
         color: p.color,
-      });
-    });
+      })
+    );
   }, [portfolios, allTransactions, historyMap, enrichedCurrencies, historyLoading]);
 
-  // Aggregate "Total" result by merging all portfolios' datapoints
+  // Total TWR (all portfolios combined)
   const totalResult = useMemo((): PortfolioTWRResult | null => {
-    if (portfolioResults.length === 0) return null;
-
-    // If single portfolio, just use it
-    if (portfolioResults.length === 1) return portfolioResults[0];
-
-    // Compute TWR on ALL transactions together
     if (historyLoading || allTransactions.length === 0) return null;
-
+    if (portfolios.length === 1) return portfolioResults[0] ?? null;
     return computeTWR({
       transactions: allTransactions,
       historyMap,
@@ -213,15 +241,14 @@ export default function Performance() {
       portfolioName: "Total",
       color: "hsl(var(--primary))",
     });
-  }, [portfolioResults, allTransactions, historyMap, enrichedCurrencies, historyLoading]);
+  }, [portfolios, portfolioResults, allTransactions, historyMap, enrichedCurrencies, historyLoading]);
 
-  // Active result: either selected portfolio or total
   const activeResult = useMemo(() => {
     if (selectedPortfolioId === null) return totalResult;
     return portfolioResults.find((r) => r.portfolioId === selectedPortfolioId) ?? null;
   }, [selectedPortfolioId, totalResult, portfolioResults]);
 
-  // Filter + rebase data for chart
+  // ── Chart data: filter range + rebase TWR ────────────────────────────────
   const chartData = useMemo(() => {
     if (!activeResult) return [];
     const filtered = filterByRange(activeResult.dataPoints, range);
@@ -233,14 +260,33 @@ export default function Performance() {
     }));
   }, [activeResult, range]);
 
-  // Multi-portfolio comparison data (for Total view)
+  // ── Displayed TWR for the selected range (rebased) ───────────────────────
+  const displayedTWR = useMemo(() => {
+    if (!activeResult || activeResult.dataPoints.length === 0) return 0;
+    const filtered = filterByRange(activeResult.dataPoints, range);
+    const rebased = rebaseTWR(filtered);
+    return rebased.length > 0 ? rebased[rebased.length - 1].twr : 0;
+  }, [activeResult, range]);
+
+  // Annualised TWR for selected range
+  const annualisedTWR = useMemo(() => {
+    if (!activeResult) return 0;
+    const filtered = filterByRange(activeResult.dataPoints, range);
+    if (filtered.length < 2) return 0;
+    const rebased = rebaseTWR(filtered);
+    const first = new Date(rebased[0].date).getTime();
+    const last = new Date(rebased[rebased.length - 1].date).getTime();
+    const years = (last - first) / (365.25 * 24 * 3600 * 1000);
+    if (years <= 0) return 0;
+    const twr = rebased[rebased.length - 1].twr;
+    return Math.pow(1 + twr, 1 / years) - 1;
+  }, [activeResult, range]);
+
+  // ── Multi-portfolio comparison ───────────────────────────────────────────
   const comparisonChartData = useMemo(() => {
     if (selectedPortfolioId !== null || portfolioResults.length <= 1) return [];
-
-    // Build a unified timeline
     const allDates = new Set<string>();
     const rebasedByPortfolio: Record<string, Record<string, number>> = {};
-
     for (const result of portfolioResults) {
       const filtered = filterByRange(result.dataPoints, range);
       const rebased = rebaseTWR(filtered);
@@ -250,7 +296,6 @@ export default function Performance() {
         rebasedByPortfolio[result.portfolioId][d.date] = d.twr;
       }
     }
-
     return Array.from(allDates)
       .sort()
       .map((date) => {
@@ -263,46 +308,15 @@ export default function Performance() {
   }, [selectedPortfolioId, portfolioResults, range]);
 
   const showComparison = selectedPortfolioId === null && portfolioResults.length > 1;
-
-  // KPI values
-  const displayedTWR = useMemo(() => {
-    if (!activeResult || activeResult.dataPoints.length === 0) return 0;
-    const filtered = filterByRange(activeResult.dataPoints, range);
-    const rebased = rebaseTWR(filtered);
-    return rebased.length > 0 ? rebased[rebased.length - 1].twr : 0;
-  }, [activeResult, range]);
-
   const twrPositive = displayedTWR >= 0;
-
-  const totalInvestedEUR = useMemo(() => {
-    if (selectedPortfolioId === null) {
-      return portfolioResults.reduce((sum, r) => sum + r.totalInvestedEUR, 0);
-    }
-    return activeResult?.totalInvestedEUR ?? 0;
-  }, [selectedPortfolioId, portfolioResults, activeResult]);
-
-  const currentValueEUR = useMemo(() => {
-    if (selectedPortfolioId === null) {
-      return portfolioResults.reduce((sum, r) => sum + r.currentValueEUR, 0);
-    }
-    return activeResult?.currentValueEUR ?? 0;
-  }, [selectedPortfolioId, portfolioResults, activeResult]);
-
-  // Annualised TWR for display range
-  const annualisedTWR = useMemo(() => {
-    if (!activeResult || activeResult.dataPoints.length < 2) return 0;
-    const filtered = filterByRange(activeResult.dataPoints, range);
-    if (filtered.length < 2) return 0;
-    const rebased = rebaseTWR(filtered);
-    const first = new Date(rebased[0].date);
-    const last = new Date(rebased[rebased.length - 1].date);
-    const years = (last.getTime() - first.getTime()) / (365.25 * 24 * 3600 * 1000);
-    if (years <= 0) return 0;
-    const twr = rebased[rebased.length - 1].twr;
-    return Math.pow(1 + twr, 1 / years) - 1;
-  }, [activeResult, range]);
-
+  const latentGain = currentValueEUR - totalInvestedEUR;
   const isLoading = historyLoading;
+
+  // ── Date formatter ──────────────────────────────────────────────────────
+  const fmtDate = (v: string) => {
+    const d = new Date(v);
+    return `${d.toLocaleString("fr", { month: "short" })} ${d.getFullYear().toString().slice(2)}`;
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -327,73 +341,74 @@ export default function Performance() {
           onCreateClick={() => setCreateDialogOpen(true)}
         />
 
+        {/* KPI Cards — always visible, use live prices (matches dashboard) */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <KPICard
+            label="TWR (période)"
+            value={`${displayedTWR >= 0 ? "+" : ""}${(displayedTWR * 100).toFixed(2)}%`}
+            sub={`Annualisé : ${annualisedTWR >= 0 ? "+" : ""}${(annualisedTWR * 100).toFixed(2)}%`}
+            positive={twrPositive}
+            icon={
+              twrPositive ? (
+                <TrendingUp className="h-5 w-5 text-green-600 dark:text-green-400" />
+              ) : (
+                <TrendingDown className="h-5 w-5 text-red-500" />
+              )
+            }
+          />
+          <KPICard
+            label="Valeur actuelle"
+            value={formatCurrency(currentValueEUR, "EUR")}
+            positive={undefined}
+            icon={<Wallet className="h-5 w-5" />}
+          />
+          <KPICard
+            label="Capital investi"
+            value={formatCurrency(totalInvestedEUR, "EUR")}
+            positive={undefined}
+            icon={<BarChart3 className="h-5 w-5" />}
+          />
+          <KPICard
+            label="Plus-value latente"
+            value={formatCurrency(latentGain, "EUR")}
+            sub={
+              totalInvestedEUR > 0
+                ? formatPercent((latentGain / totalInvestedEUR) * 100)
+                : undefined
+            }
+            positive={latentGain >= 0}
+            icon={
+              latentGain >= 0 ? (
+                <TrendingUp className="h-5 w-5 text-green-600 dark:text-green-400" />
+              ) : (
+                <TrendingDown className="h-5 w-5 text-red-500" />
+              )
+            }
+          />
+        </div>
+
         {isLoading ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
-            <Loader2 className="h-8 w-8 animate-spin" />
+          <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+            <Loader2 className="h-7 w-7 animate-spin" />
             <p className="text-sm">Chargement des cours historiques…</p>
           </div>
         ) : chartData.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+          <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
             <BarChart3 className="h-8 w-8 opacity-40" />
             <p className="text-sm">Aucune donnée disponible. Ajoutez des transactions pour commencer.</p>
           </div>
         ) : (
           <>
-            {/* KPI Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <KPICard
-                label="TWR (période)"
-                value={formatPercent(displayedTWR)}
-                sub={`Annualisé: ${formatPercent(annualisedTWR)}`}
-                positive={twrPositive}
-                icon={
-                  twrPositive ? (
-                    <TrendingUp className="h-5 w-5 text-green-500" />
-                  ) : (
-                    <TrendingDown className="h-5 w-5 text-red-500" />
-                  )
-                }
-              />
-              <KPICard
-                label="Valeur actuelle"
-                value={formatCurrency(currentValueEUR, "EUR")}
-                positive={undefined}
-                icon={<Wallet className="h-5 w-5" />}
-              />
-              <KPICard
-                label="Capital investi"
-                value={formatCurrency(totalInvestedEUR, "EUR")}
-                positive={undefined}
-                icon={<BarChart3 className="h-5 w-5" />}
-              />
-              <KPICard
-                label="Plus-value latente"
-                value={formatCurrency(currentValueEUR - totalInvestedEUR, "EUR")}
-                sub={
-                  totalInvestedEUR > 0
-                    ? formatPercent((currentValueEUR - totalInvestedEUR) / totalInvestedEUR)
-                    : undefined
-                }
-                positive={currentValueEUR >= totalInvestedEUR}
-                icon={
-                  currentValueEUR >= totalInvestedEUR ? (
-                    <TrendingUp className="h-5 w-5 text-green-500" />
-                  ) : (
-                    <TrendingDown className="h-5 w-5 text-red-500" />
-                  )
-                }
-              />
-            </div>
-
-            {/* Main chart: Portfolio value in EUR */}
+            {/* Value chart */}
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base font-semibold">
                   Valeur du portefeuille (EUR)
+                  <span className="text-xs text-muted-foreground font-normal ml-2">cours hebdomadaires historiques</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
-                <ResponsiveContainer width="100%" height={260}>
+                <ResponsiveContainer width="100%" height={250}>
                   <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="valueGradient" x1="0" y1="0" x2="0" y2="1">
@@ -407,10 +422,7 @@ export default function Performance() {
                       tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
                       tickLine={false}
                       axisLine={false}
-                      tickFormatter={(v) => {
-                        const d = new Date(v);
-                        return `${d.toLocaleString("fr", { month: "short" })} ${d.getFullYear().toString().slice(2)}`;
-                      }}
+                      tickFormatter={fmtDate}
                       interval="preserveStartEnd"
                     />
                     <YAxis
@@ -420,7 +432,7 @@ export default function Performance() {
                       tickFormatter={(v) =>
                         v >= 1000 ? `${(v / 1000).toFixed(0)}k€` : `${v.toFixed(0)}€`
                       }
-                      width={56}
+                      width={58}
                     />
                     <Tooltip content={<CustomTooltip />} />
                     <Area
@@ -438,29 +450,29 @@ export default function Performance() {
               </CardContent>
             </Card>
 
-            {/* TWR Chart */}
+            {/* TWR chart */}
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base font-semibold">
-                  Performance TWR (%){" "}
-                  <span className="text-xs text-muted-foreground font-normal ml-1">
-                    — hors flux de trésorerie
+                  Performance TWR (%)
+                  <span className="text-xs text-muted-foreground font-normal ml-2">
+                    — hors flux de trésorerie, rebasé sur la période
                   </span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
-                <ResponsiveContainer width="100%" height={220}>
+                <ResponsiveContainer width="100%" height={210}>
                   <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="twrGradient" x1="0" y1="0" x2="0" y2="1">
                         <stop
                           offset="5%"
-                          stopColor={twrPositive ? "hsl(142 72% 29%)" : "hsl(0 84% 60%)"}
+                          stopColor={twrPositive ? "hsl(142 72% 29%)" : "hsl(0 72% 51%)"}
                           stopOpacity={0.2}
                         />
                         <stop
                           offset="95%"
-                          stopColor={twrPositive ? "hsl(142 72% 29%)" : "hsl(0 84% 60%)"}
+                          stopColor={twrPositive ? "hsl(142 72% 29%)" : "hsl(0 72% 51%)"}
                           stopOpacity={0}
                         />
                       </linearGradient>
@@ -471,10 +483,7 @@ export default function Performance() {
                       tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
                       tickLine={false}
                       axisLine={false}
-                      tickFormatter={(v) => {
-                        const d = new Date(v);
-                        return `${d.toLocaleString("fr", { month: "short" })} ${d.getFullYear().toString().slice(2)}`;
-                      }}
+                      tickFormatter={fmtDate}
                       interval="preserveStartEnd"
                     />
                     <YAxis
@@ -482,14 +491,14 @@ export default function Performance() {
                       tickLine={false}
                       axisLine={false}
                       tickFormatter={(v) => `${(v * 100).toFixed(1)}%`}
-                      width={56}
+                      width={58}
                     />
                     <Tooltip content={<CustomTooltip />} />
                     <Area
                       type="monotone"
                       dataKey="twr"
                       name="TWR"
-                      stroke={twrPositive ? "hsl(142,72%,29%)" : "hsl(0,84%,60%)"}
+                      stroke={twrPositive ? "hsl(142 72% 29%)" : "hsl(0 72% 51%)"}
                       strokeWidth={2}
                       fill="url(#twrGradient)"
                       dot={false}
@@ -500,7 +509,7 @@ export default function Performance() {
               </CardContent>
             </Card>
 
-            {/* Comparison chart: multiple portfolios TWR */}
+            {/* Comparison chart */}
             {showComparison && comparisonChartData.length > 0 && (
               <Card>
                 <CardHeader className="pb-2">
@@ -509,7 +518,7 @@ export default function Performance() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0">
-                  <ResponsiveContainer width="100%" height={240}>
+                  <ResponsiveContainer width="100%" height={230}>
                     <LineChart
                       data={comparisonChartData}
                       margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
@@ -520,10 +529,7 @@ export default function Performance() {
                         tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
                         tickLine={false}
                         axisLine={false}
-                        tickFormatter={(v) => {
-                          const d = new Date(v);
-                          return `${d.toLocaleString("fr", { month: "short" })} ${d.getFullYear().toString().slice(2)}`;
-                        }}
+                        tickFormatter={fmtDate}
                         interval="preserveStartEnd"
                       />
                       <YAxis
@@ -531,13 +537,12 @@ export default function Performance() {
                         tickLine={false}
                         axisLine={false}
                         tickFormatter={(v) => `${(v * 100).toFixed(1)}%`}
-                        width={56}
+                        width={58}
                       />
                       <Tooltip content={<CustomTooltip />} />
                       <Legend
                         formatter={(value) =>
-                          portfolioResults.find((r) => r.portfolioId === value)?.portfolioName ??
-                          value
+                          portfolioResults.find((r) => r.portfolioId === value)?.portfolioName ?? value
                         }
                       />
                       {portfolioResults.map((result) => (
