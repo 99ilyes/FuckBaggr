@@ -148,7 +148,7 @@ export function KPICards({
               <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
                 <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Portefeuilles</span>
               </div>
-              <div className="w-full space-y-4">
+              <div className="w-full space-y-1">
                 {portfolioPerformances.map((perf) => (
                   <div
                     key={perf.id}

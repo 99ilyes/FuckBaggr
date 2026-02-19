@@ -339,12 +339,15 @@ export default function Index() {
 
 
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-          <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
-          <TopMovers
-            positions={positions}
-            assetsCache={effectiveAssetsCache}
-            liveChangeMap={liveChangeMap} />
-
+          <div className="order-2 lg:order-1">
+            <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
+          </div>
+          <div className="order-1 lg:order-2">
+            <TopMovers
+              positions={positions}
+              assetsCache={effectiveAssetsCache}
+              liveChangeMap={liveChangeMap} />
+          </div>
         </div>
 
         <Tabs defaultValue="positions" className="space-y-4">
