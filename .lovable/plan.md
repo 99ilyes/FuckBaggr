@@ -1,112 +1,140 @@
 
-# Nouvelle page "Performance" avec graphiques TWR
+## Plan: Import de relevés Saxon/Saxo Bank (format XLSX)
 
-## Objectif
-
-Créer une page dédiée `/performance` qui affiche l'évolution de la valeur du portefeuille dans le temps via la méthode **Time-Weighted Return (TWR)**, en gérant correctement les devises et en utilisant les cours historiques réels des titres.
-
----
-
-## Concept TWR appliqué
-
-La TWR neutralise l'impact des flux de trésorerie (dépôts, retraits) pour mesurer uniquement la performance du gérant. Le calcul se fait par sous-périodes délimitées par chaque flux entrant/sortant.
-
-Pour chaque sous-période entre deux flux :
-```
-R_i = (V_fin / V_début) - 1
-```
-Puis les périodes sont chaînées :
-```
-TWR = (1 + R_1) × (1 + R_2) × ... × (1 + R_n) - 1
-```
+### Objectif
+Remplacer l'import CSV générique par un parseur dédié au format d'export Saxon/Saxo Bank (fichier `.xlsx`), capable de lire les colonnes natives du relevé, d'extraire les bons tickers Yahoo Finance depuis le champ `Symbole`, de calculer les frais automatiquement et d'ignorer les lignes non pertinentes (dividendes, intérêts, frais de service).
 
 ---
 
-## Architecture technique
+### Analyse du format
 
-### 1. Edge Function `fetch-history` — refactoring
+#### Colonnes du fichier
+| Colonne | Usage |
+|---|---|
+| `Date d'opération` | Date de la transaction |
+| `Type` | Filtre principal (`Opération`, `Transfert d'espèces`, `Montant de liquidités`, etc.) |
+| `Événement` | Détail de l'action (`Acheter N @ PRICE CUR`, `Vendre -N @ PRICE CUR`, `Dépôts`, `Retrait`) |
+| `Symbole` | Ticker Yahoo + exchange (ex: `PLTR:xnas` → `PLTR`, `SP5C:xpar` → `SP5C`) |
+| `Code ISIN de l'instrument` | ISIN pour identification (fallback si ticker absent) |
+| `Devise de l'instrument` | Devise native de l'actif (USD, EUR, JPY…) |
+| `Montant comptabilisé` | Montant net en EUR effectivement débité/crédité |
+| `Taux de change` | Taux EUR/devise de l'actif |
 
-L'edge function existante (`supabase/functions/fetch-history/index.ts`) utilise `yahoo-finance2` qui **plante** en production (même problème CORS/library que `fetch-prices`). Elle sera réécrite pour utiliser des appels HTTP directs à Yahoo Finance (même approche que le correctif de `fetch-prices`) :
+#### Règles de classification
 
-- Endpoint Yahoo : `query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1wk&range=5y`
-- Retourne les prix hebdomadaires historiques par ticker
-- CORS configuré avec `OPTIONS` retournant `200 OK`
-
-### 2. Hook `useHistoricalPrices` — déjà existant
-
-Le hook dans `usePortfolios.ts` appelle déjà `fetch-history` via `fetch-prices` avec `mode: "history"`. Il faudra le faire pointer vers la nouvelle edge function `fetch-history` (refactorisée).
-
-En réalité l'appel actuel envoie `mode: "history"` à `fetch-prices` mais ce mode n'est pas géré → il tombe dans le default qui ne retourne rien d'utile. On corrigera cela en faisant appeler `fetch-history` directement.
-
-### 3. Calcul TWR côté frontend — nouveau fichier `src/lib/twr.ts`
-
-La logique TWR sera isolée dans un fichier dédié :
-
-```typescript
-// Collecte tous les tickers qui ont été ou sont détenus
-// Pour chaque tick de temps (hebdomadaire), reconstitue :
-//   - La valeur du portefeuille en EUR (positions × cours historique × taux de change)
-//   - Les flux nets du jour (dépôts - retraits)
-// Calcule TWR par chaînage de sous-périodes
+```text
+Type = "Opération" AND Événement contient "Acheter"  → buy
+Type = "Opération" AND Événement contient "Vendre"   → sell
+Type = "Transfert d'espèces" AND Événement = "Dépôts" → deposit
+Type = "Transfert d'espèces" AND Événement = "Retrait" → withdrawal
+Tout le reste (dividendes, intérêts, frais, Opération sur titres) → IGNORER
 ```
 
-**Gestion des devises :**
-- Les cours historiques EUR/USD, USD/EUR, etc. seront aussi récupérés
-- Chaque position est valorisée dans sa devise native puis convertie en EUR via le cours historique de la paire FX au même timestamp
-- On prend `EURUSD=X` (ou autre paire pertinente) en historique hebdomadaire
+#### Extraction du ticker Yahoo
+Le champ `Symbole` est au format `BASE:exchange` (ex: `PLTR:xnas`). On prend uniquement la partie avant le `:` et on la met en majuscules → `PLTR`.
 
-### 4. Nouvelle page `src/pages/Performance.tsx`
+Cas particulier : `500:xpar` (Amundi S&P 500 Swap) dont le ticker Yahoo est `500.PA`. Le mapping suffix exchange → suffixe Yahoo est :
+- `:xpar` → `.PA`
+- `:xnas` → (rien, NASDAQ)
+- `:xnys` → (rien, NYSE)
+- `:xtks` → `.T`
+- `:xetr` → `.DE`
+- etc.
 
-Composants visuels :
-- **Sélecteur de portefeuille** (réutilise `PortfolioSelector`) + bouton "Total"
-- **Sélecteur de plage temporelle** : 6M | 1A | 2A | 5A | Max
-- **Graphique principal (AreaChart Recharts)** : évolution de la valeur du portefeuille en EUR + courbe TWR en %
-- **KPIs en haut** : TWR total, annualisé, valeur actuelle vs investissements
-- **Graphique par portefeuille** (quand "Total" est sélectionné) : courbes superposées
+Pour les ETF EUR sur Euronext, on construira le ticker Yahoo en ajoutant le suffixe marché si la devise est EUR.
 
-### 5. Ajout dans la sidebar et le routeur
+#### Calcul des frais
+```text
+Pour les achats USD : frais = |Montant comptabilisé| - (qty × price_devise × taux_de_change)
+Pour les ventes USD  : frais = (qty × price_devise × taux_de_change) - Montant comptabilisé
+Pour EUR            : frais = |Montant comptabilisé| - (qty × price_EUR)
+```
+Si le résultat est négatif ou > 50€ (anormal), on met 0.
 
-- Nouvelle entrée dans `AppSidebar.tsx` avec l'icône `TrendingUp`
-- Nouvelle `Route` dans `App.tsx` : `path="/performance"`
+#### Lignes à ignorer
+- `Type = "Montant de liquidités"` → intérêts, frais de service
+- `Type = "Opération sur titres"` → dividendes
+- `Transfert d'espèces` avec `Événement` autre que `Dépôts`/`Retrait`
+- Lignes avec montant = 0 ou vide
 
 ---
 
-## Détail des fichiers à créer/modifier
+### Fichiers à modifier
 
-| Fichier | Action | Description |
-|---|---|---|
-| `supabase/functions/fetch-history/index.ts` | Réécriture | HTTP direct Yahoo, CORS fix, intervalles hebdo |
-| `src/lib/twr.ts` | Création | Logique TWR + reconstitution historique portfolio |
-| `src/pages/Performance.tsx` | Création | Page complète avec graphiques |
-| `src/hooks/usePortfolios.ts` | Modification | `useHistoricalPrices` pointe vers `fetch-history` |
-| `src/components/AppSidebar.tsx` | Modification | Ajout lien "Performance" |
-| `src/App.tsx` | Modification | Ajout route `/performance` |
+#### 1. `src/lib/xlsxParser.ts` — Nouveau fichier
+Parseur dédié au format Saxo/Saxon :
+- Fonction `parseSaxoXLSX(rows: any[][], portfolioId: string)` qui accepte les lignes brutes du fichier Excel (déjà parsées côté navigateur via la lib `xlsx` ou en lisant le fichier comme ArrayBuffer)
+- Retourne `Omit<Transaction, "id" | "created_at" | "notes">[]`
 
----
+**Note technique** : La lib `xlsx` (SheetJS) n'est pas encore installée. Elle sera ajoutée. Alternativement, l'import sera géré via `document--parse_document` côté edge function — mais pour rester 100% client-side et cohérent avec l'architecture existante, on utilisera `SheetJS` (`xlsx` npm package).
 
-## Algorithme TWR détaillé
+#### 2. `src/components/ImportTransactionsDialog.tsx` — Mise à jour
+- Accepter `.xlsx` en plus de `.csv`
+- Détecter automatiquement le format selon l'extension
+- Appeler `parseSaxoXLSX` pour les fichiers `.xlsx`
+- Garder `parseCSV` pour les `.csv`
+- Afficher dans la preview les colonnes pertinentes : Date, Type, Ticker, ISIN, Quantité, Prix unitaire, Devise, Frais, Total EUR
+- Ajouter le `Label "Fichier CSV ou XLSX"`
 
-```
-1. Récupérer tous les tickers uniques des transactions (buy + sell)
-2. Récupérer l'historique hebdomadaire Yahoo pour chaque ticker (+ paires FX nécessaires)
-3. Créer une timeline hebdomadaire de t=première_transaction à t=aujourd'hui
-4. Pour chaque semaine t :
-   a. Calculer les positions détenues à t (replay des transactions jusqu'à t)
-   b. Calculer la valeur V(t) = Σ (quantité_i × cours_historique_i(t) × taux_fx(t)) + cash(t)
-   c. Identifier les flux nets F(t) de la semaine (dépôts - retraits)
-5. Calculer TWR :
-   - Avant chaque flux : R_i = V(t_flux) / (V(t_flux-1) + F(t_flux-1)) - 1
-   - TWR = Π(1 + R_i) - 1
-6. Construire la série temporelle : valeur en EUR + TWR cumulé
-```
-
-**Gestion des tickers sans historique** : si un ticker n'a pas de cours pour une semaine donnée (weekend, données manquantes), on utilise le dernier cours connu (forward-fill).
+#### 3. `package.json` — Ajout dépendance
+Ajouter `xlsx` (SheetJS) pour lire les fichiers Excel en pur JavaScript côté navigateur, sans backend.
 
 ---
 
-## Points de vigilance
+### Logique détaillée du parseur
 
-- **Devises** : chaque ticker a sa devise native (EUR, USD, etc.). On récupère les historiques FX (ex : `EURUSD=X`) pour convertir en EUR semaine par semaine, pas juste avec le taux actuel.
-- **Tickers fermés** : les titres vendus doivent quand même avoir leur historique récupéré jusqu'à la date de vente.
-- **Performance par portefeuille** : le TWR est calculé indépendamment par portefeuille, chacun dans sa devise, puis converti en EUR pour comparaison.
-- **Données manquantes** : la `fetch-history` edge function sera robuste (timeout 5s par ticker, forward-fill des données).
+```text
+Pour chaque ligne du fichier Excel (hors en-tête) :
+
+1. Lire le "Type" de la ligne
+2. Si Type = "Transfert d'espèces" :
+   - Si Événement = "Dépôts" → type = "deposit", ticker = null, qty = |Montant|, unit_price = |Montant|, currency = "EUR"
+   - Si Événement = "Retrait" → type = "withdrawal", ticker = null, qty = |Montant|, unit_price = |Montant|, currency = "EUR"
+   - Sinon → ignorer
+3. Si Type = "Opération" :
+   - Parser Événement : "Acheter 19 @ 149.00 USD" ou "Vendre -884 @ 5.67 EUR"
+   - Extraire qty (valeur absolue), price, devise_event
+   - type = "buy" si "Acheter", "sell" si "Vendre"
+   - Extraire ticker depuis Symbole (avant ":")
+   - Appliquer suffixe marché selon exchange suffix et Devise instrument
+   - Calculer fees = |Montant comptabilisé| - |qty × price × taux_de_change| (si > 0 et < 50)
+   - currency = Devise de l'instrument
+4. Sinon → ignorer
+
+Validation finale :
+- qty > 0, price > 0 (sauf deposit/withdrawal), date valide
+- Ignorer si qty ou price = NaN
+```
+
+---
+
+### Mapping exchange suffix → suffixe Yahoo
+
+| Symbole exchange | Suffixe Yahoo |
+|---|---|
+| `:xpar` | `.PA` |
+| `:xetr` | `.DE` |
+| `:xtks` | `.T` |
+| `:xlon` | `.L` |
+| `:xams` | `.AS` |
+| `:xbru` | `.BR` |
+| `:xmil` | `.MI` |
+| `:xnas`, `:xnys`, `:arcx`, `:bats` | (aucun) |
+
+---
+
+### Comportement du solde cash
+L'utilisateur précise qu'il est impossible d'avoir un solde cash négatif. Le parseur inclura une validation qui, en mode preview, affichera une alerte si les transactions importées créeraient un solde négatif à un moment donné. Ce sera un avertissement informatif seulement (pas un blocage) pour que l'utilisateur puisse identifier d'éventuelles lignes manquantes.
+
+---
+
+### Résumé des modifications
+
+| Fichier | Action |
+|---|---|
+| `src/lib/xlsxParser.ts` | Créer — parseur format Saxo/Saxon |
+| `src/components/ImportTransactionsDialog.tsx` | Modifier — accepter XLSX, détecter format, améliorer preview |
+| `package.json` | Modifier — ajouter `xlsx` (SheetJS) |
+
+### Aucune modification base de données requise
+Le schéma de la table `transactions` est inchangé. Les données sont mappées aux colonnes existantes.
