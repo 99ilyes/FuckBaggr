@@ -56,14 +56,15 @@ const Calculator = () => {
     const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
 
     // --- Inputs (initialized from localStorage for instant load) ---
-    const [loanAmount, setLoanAmount] = useState<number>(() => getSaved().loanAmount ?? 20000);
+    const [loanAmount, setLoanAmount] = useState<number>(() => getSaved().loanAmount ?? 75000);
     const [loanStartDate, setLoanStartDate] = useState<string>(() => getSaved().loanStartDate ?? format(new Date(), "yyyy-MM-dd"));
-    const [insuranceAmount, setInsuranceAmount] = useState<number>(() => getSaved().insuranceAmount ?? 4.26);
+    const [insuranceAmountDeferral, setInsuranceAmountDeferral] = useState<number>(() => getSaved().insuranceAmountDeferral ?? getSaved().insuranceAmount ?? 11.25);
+    const [insuranceAmountRepayment, setInsuranceAmountRepayment] = useState<number>(() => getSaved().insuranceAmountRepayment ?? getSaved().insuranceAmount ?? 22.50);
     const [investmentReturnRate, setInvestmentReturnRate] = useState<number>(() => getSaved().investmentReturnRate ?? 5.0);
-    const [repaymentStartDate, setRepaymentStartDate] = useState<string>(() => getSaved().repaymentStartDate ?? "2028-10-28");
-    const [customPayments, setCustomPayments] = useState<CustomPayment[]>(() => getSaved().customPayments ?? DEFAULT_PAYMENTS);
-    const [repaymentDurationYears, setRepaymentDurationYears] = useState<number>(() => getSaved().repaymentDurationYears ?? 5);
-    const [loanInterestRateRepayment, setLoanInterestRateRepayment] = useState<number>(() => getSaved().loanInterestRateRepayment ?? 1.0);
+    const [repaymentStartDate, setRepaymentStartDate] = useState<string>(() => getSaved().repaymentStartDate ?? addMonths(new Date(), 36).toISOString().split('T')[0]);
+    const [customPayments, setCustomPayments] = useState<CustomPayment[]>(() => getSaved().customPayments ?? []);
+    const [repaymentDurationYears, setRepaymentDurationYears] = useState<number>(() => getSaved().repaymentDurationYears ?? 9);
+    const [loanInterestRateRepayment, setLoanInterestRateRepayment] = useState<number>(() => getSaved().loanInterestRateRepayment ?? 0.99);
     const [payFromCapital, setPayFromCapital] = useState<boolean>(() => getSaved().payFromCapital ?? true);
 
     // --- Results ---
@@ -88,7 +89,8 @@ const Calculator = () => {
                 if (data) {
                     if (data.loan_amount != null) setLoanAmount(Number(data.loan_amount));
                     if (data.loan_start_date) setLoanStartDate(data.loan_start_date);
-                    if (data.insurance_amount != null) setInsuranceAmount(Number(data.insurance_amount));
+                    if (data.insurance_amount != null) setInsuranceAmountDeferral(Number(data.insurance_amount));
+                    if ((data as any).insurance_amount_repayment != null) setInsuranceAmountRepayment(Number((data as any).insurance_amount_repayment));
                     if (data.investment_return_rate != null) setInvestmentReturnRate(Number(data.investment_return_rate));
                     if (data.repayment_start_date) setRepaymentStartDate(data.repayment_start_date);
                     if (data.custom_payments) setCustomPayments(data.custom_payments as unknown as CustomPayment[]);
@@ -118,7 +120,8 @@ const Calculator = () => {
                     id: SETTINGS_ID,
                     loan_amount: (settings as any).loanAmount,
                     loan_start_date: (settings as any).loanStartDate,
-                    insurance_amount: (settings as any).insuranceAmount,
+                    insurance_amount: (settings as any).insuranceAmountDeferral,
+                    insurance_amount_repayment: (settings as any).insuranceAmountRepayment,
                     investment_return_rate: (settings as any).investmentReturnRate,
                     repayment_start_date: (settings as any).repaymentStartDate,
                     custom_payments: (settings as any).customPayments,
@@ -139,12 +142,12 @@ const Calculator = () => {
     useEffect(() => {
         const timer = setTimeout(() => {
             saveSettings({
-                loanAmount, loanStartDate, insuranceAmount, investmentReturnRate,
+                loanAmount, loanStartDate, insuranceAmountDeferral, insuranceAmountRepayment, investmentReturnRate,
                 repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, payFromCapital
             });
         }, 1000);
         return () => clearTimeout(timer);
-    }, [loanAmount, loanStartDate, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, payFromCapital, saveSettings]);
+    }, [loanAmount, loanStartDate, insuranceAmountDeferral, insuranceAmountRepayment, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, payFromCapital, saveSettings]);
 
     // --- Helpers ---
     const addPayment = () => {
@@ -171,19 +174,41 @@ const Calculator = () => {
         currentDate = addMonths(currentDate, 1);
 
         let currentCapital = loanAmount;
+        let currentDebt = loanAmount; // Debt starts at loan amount and grows with capitalized interest
         let totalInterestEarnedCommon = 0;
         let totalExpensesCommon = 0;
         let totalInsurancePaidCommon = 0;
+        let totalInsurancePaidScenarioB = 0; // Initialize for Scenario B
 
         const repayStart = parseISO(repaymentStartDate);
         const monthlyInvestRate = Math.pow(1 + investmentReturnRate / 100, 1 / 12) - 1;
+        // Keep annual compounding in mind for loan interest capitalization during deferral
+        const monthlyLoanRate = (loanInterestRateRepayment / 100) / 12;
+
+        let deferralMonthCount = 0;
+        let pendingCapitalization = 0;
 
         while (currentDate < repayStart) {
+            deferralMonthCount++;
+            // Investment Growth
             const interest = currentCapital * monthlyInvestRate;
             currentCapital += interest;
             totalInterestEarnedCommon += interest;
-            currentCapital -= insuranceAmount;
-            totalInsurancePaidCommon += insuranceAmount;
+
+            if (payFromCapital) {
+                currentCapital -= insuranceAmountDeferral;
+            }
+            totalInsurancePaidCommon += insuranceAmountDeferral;
+
+            // Debt Growth (Annual Capitalization Logic)
+            const loanInterest = currentDebt * monthlyLoanRate;
+            pendingCapitalization += loanInterest;
+
+            // Capitalize interest every 12 months
+            if (deferralMonthCount % 12 === 0) {
+                currentDebt += pendingCapitalization;
+                pendingCapitalization = 0;
+            }
 
             let monthlyExpenses = 0;
             customPayments.forEach(p => {
@@ -201,21 +226,28 @@ const Calculator = () => {
                 capital: currentCapital,
                 interestEarned: interest,
                 expenses: monthlyExpenses,
-                insurancePaid: insuranceAmount,
+                insurancePaid: insuranceAmountDeferral,
                 monthlyRepayment: 0,
-                remainingDebt: loanAmount,
-                netValue: currentCapital - loanAmount
+                remainingDebt: currentDebt,
+                netValue: currentCapital - currentDebt
             });
 
             currentDate = addMonths(currentDate, 1);
+        }
+
+        // Capitalize any remaining interest at the end of deferral period
+        if (pendingCapitalization > 0) {
+            currentDebt += pendingCapitalization;
+            pendingCapitalization = 0;
         }
 
         // --- Scenario A: Remboursement Anticipé (Existing Logic) ---
         const rowsA = [...rowsCommon];
         let capitalA = currentCapital;
         let totalInterestA = totalInterestEarnedCommon;
-        const lumpSumPaid = Math.min(capitalA, loanAmount);
-        let debtA = loanAmount - lumpSumPaid;
+        // Use the accumulated debt from deferral period
+        const lumpSumPaid = Math.min(capitalA, currentDebt);
+        let debtA = currentDebt - lumpSumPaid;
         capitalA -= lumpSumPaid;
 
         let monthlyRepaymentA = 0;
@@ -238,7 +270,11 @@ const Calculator = () => {
                 const interest = capitalA * monthlyInvestRate;
                 capitalA += interest;
                 totalInterestA += interest;
+                if (payFromCapital) {
+                    capitalA -= insuranceAmountRepayment;
+                }
             }
+            totalInsurancePaidCommon += insuranceAmountRepayment;
 
             if (debtA > 0) {
                 const monthlyRateLoan = (loanInterestRateRepayment / 100) / 12;
@@ -255,7 +291,7 @@ const Calculator = () => {
                 capital: capitalA,
                 interestEarned: capitalA > 0 ? capitalA * monthlyInvestRate : 0,
                 expenses: 0,
-                insurancePaid: 0,
+                insurancePaid: insuranceAmountRepayment,
                 monthlyRepayment: monthlyRepaymentA,
                 remainingDebt: debtA,
                 netValue: capitalA - debtA
@@ -270,10 +306,11 @@ const Calculator = () => {
                 totalExpenses: totalExpensesCommon,
                 totalInsurancePaid: totalInsurancePaidCommon,
                 lumpSumPaid,
-                remainingDebtStart: loanAmount - lumpSumPaid,
-                monthlyRepaymentAmount: (loanAmount - lumpSumPaid > 0 ? monthlyRepaymentA : 0),
+                remainingDebtStart: currentDebt - lumpSumPaid,
+                monthlyRepaymentAmount: (currentDebt - lumpSumPaid > 0 ? monthlyRepaymentA : 0),
                 finalNetValue: rowsA[rowsA.length - 1]?.netValue || 0,
-                totalCreditCost: totalLoanInterestA + totalInsurancePaidCommon,
+                totalCreditCost: totalLoanInterestA + totalInsurancePaidCommon + (currentDebt - loanAmount), // Add capitalized interest
+                deferralMonthCount,
             }
         });
 
@@ -281,9 +318,9 @@ const Calculator = () => {
         const rowsB = [...rowsCommon];
         let capitalB = currentCapital;
         let totalInterestB = totalInterestEarnedCommon;
-        let debtB = loanAmount; // Full loan amount is amortized
+        let debtB = currentDebt; // Start with accumulated debt
 
-        // Calculate standard monthly payment for the full loan
+        // Calculate standard monthly payment for the full accumulated debt
         let monthlyRepaymentB = 0;
         if (repaymentDurationYears > 0) {
             const annualRate = loanInterestRateRepayment / 100;
@@ -302,7 +339,11 @@ const Calculator = () => {
                 const interest = capitalB * monthlyInvestRate;
                 capitalB += interest;
                 totalInterestB += interest;
+                if (payFromCapital) {
+                    capitalB -= insuranceAmountRepayment;
+                }
             }
+            totalInsurancePaidScenarioB += insuranceAmountRepayment;
 
             // 2. Pay Monthly Installment from Capital (if enabled)
             if (payFromCapital) {
@@ -325,7 +366,7 @@ const Calculator = () => {
                 capital: capitalB,
                 interestEarned: capitalB > 0 ? capitalB * monthlyInvestRate : 0,
                 expenses: 0,
-                insurancePaid: 0,
+                insurancePaid: insuranceAmountRepayment,
                 monthlyRepayment: payFromCapital ? monthlyRepaymentB : 0, // Only show as expense from capital if paid from capital
                 remainingDebt: debtB,
                 netValue: capitalB - debtB
@@ -338,15 +379,16 @@ const Calculator = () => {
             summary: {
                 totalInterestEarned: totalInterestB,
                 totalExpenses: totalExpensesCommon,
-                totalInsurancePaid: totalInsurancePaidCommon,
+                totalInsurancePaid: totalInsurancePaidScenarioB + totalInsurancePaidCommon,
                 lumpSumPaid: 0, // No lump sum in this scenario
-                remainingDebtStart: loanAmount,
+                remainingDebtStart: currentDebt,
                 monthlyRepaymentAmount: monthlyRepaymentB, // Always show the required repayment amount in summary
                 finalNetValue: rowsB[rowsB.length - 1]?.netValue || 0,
-                totalCreditCost: totalLoanInterestB + totalInsurancePaidCommon,
+                totalCreditCost: totalLoanInterestB + totalInsurancePaidScenarioB + totalInsurancePaidCommon + (currentDebt - loanAmount), // Add capitalized interest and both insurance phases
+                deferralMonthCount,
             }
         });
-    }, [loanAmount, loanStartDate, insuranceAmount, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, payFromCapital]);
+    }, [loanAmount, loanStartDate, insuranceAmountDeferral, insuranceAmountRepayment, investmentReturnRate, repaymentStartDate, customPayments, repaymentDurationYears, loanInterestRateRepayment, payFromCapital]);
 
     useEffect(() => {
         calculateSimulation();
@@ -423,12 +465,22 @@ const Calculator = () => {
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-sm font-medium">Assurance Mensuelle (€)</Label>
+                                    <Label className="text-sm font-medium">Assurance Deferral (€/m)</Label>
                                     <Input
                                         type="number"
                                         step="0.01"
-                                        value={insuranceAmount}
-                                        onChange={e => setInsuranceAmount(Number(e.target.value))}
+                                        value={insuranceAmountDeferral}
+                                        onChange={e => setInsuranceAmountDeferral(Number(e.target.value))}
+                                        className="h-9"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium">Assurance Après (€/m)</Label>
+                                    <Input
+                                        type="number"
+                                        step="0.01"
+                                        value={insuranceAmountRepayment}
+                                        onChange={e => setInsuranceAmountRepayment(Number(e.target.value))}
                                         className="h-9"
                                     />
                                 </div>
@@ -466,9 +518,9 @@ const Calculator = () => {
 
                             <div className="flex items-center justify-between border-t border-border/50 pt-4 mt-2">
                                 <Label className="flex flex-col gap-1 cursor-pointer" htmlFor="pay-capital">
-                                    <span className="text-sm font-medium">Payer mensualités avec capital ?</span>
+                                    <span className="text-sm font-medium">Payer mensualités et assurance avec capital ?</span>
                                     <span className="text-xs text-muted-foreground font-normal">
-                                        Si désactivé, les mensualités sont payées de votre poche (hors capital).
+                                        Si désactivé, les mensualités et l'assurance sont payées de votre poche.
                                     </span>
                                 </Label>
                                 <Switch
@@ -583,76 +635,22 @@ const Calculator = () => {
                                             <div className={`text-4xl font-bold mt-2 tracking-tight ${(
                                                 (activeTab === "scenarioA" ? (resultsA.rows[resultsA.rows.length - 1]?.capital || 0) : (resultsB.rows[resultsB.rows.length - 1]?.capital || 0)) -
                                                 (activeTab === "scenarioA"
-                                                    ? (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12
+                                                    ? ((resultsA.summary.monthlyRepaymentAmount + insuranceAmountRepayment) * repaymentDurationYears * 12) + (insuranceAmountDeferral * resultsA.summary.deferralMonthCount)
                                                     : (payFromCapital
-                                                        ? (insuranceAmount * repaymentDurationYears * 12)
-                                                        : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12))
+                                                        ? 0
+                                                        : ((resultsB.summary.monthlyRepaymentAmount + insuranceAmountRepayment) * repaymentDurationYears * 12) + (insuranceAmountDeferral * resultsB.summary.deferralMonthCount)))
                                             ) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
                                                 {fmt(
                                                     (activeTab === "scenarioA" ? (resultsA.rows[resultsA.rows.length - 1]?.capital || 0) : (resultsB.rows[resultsB.rows.length - 1]?.capital || 0)) -
                                                     (activeTab === "scenarioA"
-                                                        ? (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12
+                                                        ? ((resultsA.summary.monthlyRepaymentAmount + insuranceAmountRepayment) * repaymentDurationYears * 12) + (insuranceAmountDeferral * resultsA.summary.deferralMonthCount)
                                                         : (payFromCapital
-                                                            ? (insuranceAmount * repaymentDurationYears * 12)
-                                                            : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12))
+                                                            ? 0
+                                                            : ((resultsB.summary.monthlyRepaymentAmount + insuranceAmountRepayment) * repaymentDurationYears * 12) + (insuranceAmountDeferral * resultsB.summary.deferralMonthCount)))
                                                 )}
-                                            </div>
-                                            <div className="text-xs text-muted-foreground mt-2 font-medium bg-background/50 px-2 py-1 rounded-full border border-border/10">
-                                                Capital Final - Total Sorti de Poche
                                             </div>
                                         </CardContent>
                                     </Card>
-                                </div>
-
-                                {/* Section 2: Trésorerie */}
-                                <div className="space-y-3">
-                                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Trésorerie & Budget</h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        <Card className="bg-slate-50 dark:bg-slate-900/50 border-slate-200 shadow-sm">
-                                            <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-slate-600 dark:text-slate-400">Mensualité Prêt</div>
-                                                <div className="text-2xl font-bold text-slate-700 dark:text-slate-300 mt-1">
-                                                    {fmt(activeTab === "scenarioA" ? resultsA.summary.monthlyRepaymentAmount : resultsB.summary.monthlyRepaymentAmount)}
-                                                </div>
-                                                <div className="text-[10px] text-muted-foreground mt-1">
-                                                    / mois
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-
-                                        <Card className="bg-orange-50 dark:bg-orange-950/20 border-orange-200/50 shadow-sm">
-                                            <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-orange-600 dark:text-orange-400">Total Dépenses</div>
-                                                <div className="text-2xl font-bold text-orange-700 dark:text-orange-300 mt-1">
-                                                    {fmt(activeTab === "scenarioA" ? resultsA.summary.totalExpenses : resultsB.summary.totalExpenses)}
-                                                </div>
-                                                <div className="text-[10px] text-muted-foreground mt-1">
-                                                    Sur la période
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-
-                                        <Card className="bg-slate-100 dark:bg-slate-800/50 border-slate-300 dark:border-slate-700 shadow-sm">
-                                            <CardContent className="pt-6">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Total Sorti de Poche</div>
-                                                </div>
-                                                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100 mt-1">
-                                                    {fmt(
-                                                        activeTab === "scenarioA"
-                                                            ? (resultsA.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12
-                                                            : (payFromCapital
-                                                                ? (insuranceAmount * repaymentDurationYears * 12)
-                                                                : (resultsB.summary.monthlyRepaymentAmount + insuranceAmount) * repaymentDurationYears * 12)
-                                                    )}
-                                                </div>
-                                                <div className="text-[10px] text-muted-foreground mt-1 truncate">
-                                                    {activeTab === "scenarioB" && payFromCapital && "(Assurance uniquement)"}
-                                                    {(!payFromCapital || activeTab === "scenarioA") && "(Mensualités + Ass.)"}
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    </div>
                                 </div>
 
 

@@ -71,15 +71,20 @@ async function fetchTickerBrowser(ticker: string): Promise<YahooQuoteResult | nu
 }
 
 /**
- * Read cached prices from DB via edge function (instant, no Yahoo call).
+ * Fetch prices via the server (Edge Function).
  * Used as fallback when browser fetch fails.
+ *
+ * logic:
+ * - The Edge Function will try to fetch live from Yahoo (server-side).
+ * - If that fails, it returns the DB cache.
  */
-async function fetchFromDbCache(
+async function fetchServerSideFallback(
   tickers: string[]
 ): Promise<Record<string, YahooQuoteResult>> {
   try {
+    // We omit `mode: "cache-only"` so the function defaults to trying a live fetch first.
     const { data, error } = await supabase.functions.invoke("fetch-prices", {
-      body: { tickers, mode: "cache-only" },
+      body: { tickers },
     });
     if (error || !data?.results) return {};
     const results: Record<string, YahooQuoteResult> = {};
@@ -98,7 +103,7 @@ async function fetchFromDbCache(
           currency: info.currency ?? "USD",
           change,
           changePercent,
-          fromCache: true,
+          fromCache: !!info.fromCache, // could be true or false depending on what the server managed to do
         };
       }
     }
@@ -158,7 +163,7 @@ export async function fetchPricesClientSide(
 
   // For any tickers that failed, fall back to the DB cache
   if (failed.length > 0) {
-    const cached = await fetchFromDbCache(failed);
+    const cached = await fetchServerSideFallback(failed);
     for (const [t, r] of Object.entries(cached)) {
       results[t] = r;
     }
