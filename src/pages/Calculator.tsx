@@ -551,66 +551,87 @@ const Calculator = () => {
                                 const isScenarioA = activeTab === "scenarioA";
                                 const results = isScenarioA ? resultsA : resultsB;
 
-                                // 1. Dette Restante
+                                // 1. Dette Restante (Start of phase debt)
                                 const remainingDebt = results.summary.remainingDebtStart;
 
                                 // 2. Interest Earned
                                 const interestEarned = results.summary.totalInterestEarned;
 
-                                // 3. Total Credit Cost (Interests + Insurance)
-                                let totalCost = results.summary.totalCreditCost;
-                                if (!isScenarioA) {
-                                    totalCost += (insuranceAmount * months);
-                                }
+                                // 3. Total Monthly Payments Remaining (New KPI)
+                                // Scenario A: 0 (Assumes paid off).
+                                // Scenario B: (Monthly Repayment + Insurance) * Months.
+                                const monthlyPayment = results.summary.monthlyRepaymentAmount;
+                                const monthlyTotal = isScenarioA ? 0 : (monthlyPayment + insuranceAmount);
+                                const totalPaymentsRemaining = isScenarioA ? 0 : (monthlyTotal * months);
 
-                                // 4. Final Capital
-                                const finalCapital = results.rows[results.rows.length - 1]?.capital || 0;
+                                // 4. Total Cost (Used for P/L calculation logic requested by user)
+                                // User requested: "Interets gagnés - capital - interets payés - assurance"
+                                // Interpreted as: Earnings - (Remaining Debt + Interest + Insurance for the period).
+                                // If Scenario A: You pay the Remaining Debt NOW + Interest/Insurance paid during deferral.
+                                // If Scenario B: You pay (Monthly + Insurance) over time.
+                                // Let's define "Total Cash Out" for the phase.
+                                // For A: Only Deferral outcome matters? No, user pays off the debt. 
+                                // So Cash Out = Remaining Debt at start of phase.
+                                // For B: Cash Out = Sum of Monthly Payments.
+                                const totalCashOut = isScenarioA ? remainingDebt : totalPaymentsRemaining;
 
                                 // 5. Net Benefit (P/L)
-                                const netBenefit = interestEarned - totalCost;
+                                // Formula: Interest Earned - Total Cash Out.
+                                // This shows if the interest covers the loan payments/payoff.
+                                const netBenefit = interestEarned - totalCashOut;
+                                
+                                // 6. Final Capital (Asset Value)
+                                const finalCapital = results.rows[results.rows.length - 1]?.capital || 0;
+
 
                                 return (
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                                        {/* Card 1: Dette Restante */}
+                                        {/* Card 1: Mensualités Restantes (New) */}
                                         <Card className="bg-card border-border/50 shadow-sm">
                                             <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Dette Restante</div>
-                                                <div className="text-2xl font-bold tabular-nums">{fmt(remainingDebt)}</div>
+                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1 truncate">Mensualités Restantes</div>
+                                                <div className="text-xl sm:text-2xl font-bold tabular-nums truncate" title={fmt(totalPaymentsRemaining)}>
+                                                    {isScenarioA ? "0.00 €" : fmt(totalPaymentsRemaining)}
+                                                </div>
+                                                {!isScenarioA && (
+                                                    <div className="text-[10px] text-muted-foreground mt-1 truncate">
+                                                        {months} mois x {fmt(monthlyTotal)}
+                                                    </div>
+                                                )}
                                             </CardContent>
                                         </Card>
 
-                                        {/* Card 2: Coût Crédit */}
+                                        {/* Card 2: Dette Restante */}
                                         <Card className="bg-card border-border/50 shadow-sm">
                                             <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-rose-600 dark:text-rose-400 mb-1">Coût Crédit (Total)</div>
-                                                <div className="text-2xl font-bold text-rose-700 dark:text-rose-300 tabular-nums">{fmt(totalCost)}</div>
-                                                <div className="text-[10px] text-muted-foreground mt-1">Intérêts + Assurance</div>
+                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1 truncate">Dette Restante</div>
+                                                <div className="text-xl sm:text-2xl font-bold tabular-nums truncate" title={fmt(remainingDebt)}>{fmt(remainingDebt)}</div>
                                             </CardContent>
                                         </Card>
 
                                         {/* Card 3: Intérêts Générés */}
                                         <Card className="bg-card border-border/50 shadow-sm">
                                             <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-1">Intérêts Générés</div>
-                                                <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmt(interestEarned)}</div>
+                                                <div className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-1 truncate">Intérêts Générés</div>
+                                                <div className="text-xl sm:text-2xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums truncate" title={fmt(interestEarned)}>{fmt(interestEarned)}</div>
                                             </CardContent>
                                         </Card>
 
                                         {/* Card 4: Solde Final */}
                                         <Card className="bg-card border-border/50 shadow-sm">
                                             <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">Solde Final</div>
-                                                <div className="text-2xl font-bold text-blue-700 dark:text-blue-300 tabular-nums">{fmt(finalCapital)}</div>
+                                                <div className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1 truncate">Solde Final</div>
+                                                <div className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-300 tabular-nums truncate" title={fmt(finalCapital)}>{fmt(finalCapital)}</div>
                                             </CardContent>
                                         </Card>
 
-                                        {/* Card 5: Bénéfice Net (P/L) */}
+                                        {/* Card 5: Bénéfice P/L */}
                                         <Card className={`border-border/50 shadow-sm ${netBenefit >= 0 ? "bg-emerald-50/10 border-emerald-200/50" : "bg-rose-50/10 border-rose-200/50"}`}>
                                             <CardContent className="pt-6">
-                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Bénéfice Net (P/L)</div>
-                                                <div className={`text-2xl font-bold tabular-nums ${netBenefit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{fmt(netBenefit)}</div>
-                                                <div className="text-[10px] text-muted-foreground mt-1 truncate">
-                                                    (Gains - Coûts)
+                                                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1 truncate">Bénéfice P/L (Cashflow)</div>
+                                                <div className={`text-xl sm:text-2xl font-bold tabular-nums truncate ${netBenefit >= 0 ? "text-emerald-600" : "text-rose-600"}`} title={fmt(netBenefit)}>{fmt(netBenefit)}</div>
+                                                <div className="text-[10px] text-muted-foreground mt-1 truncate" title="(Intérêts - Total Versé)">
+                                                    (Intérêts - Total Versé)
                                                 </div>
                                             </CardContent>
                                         </Card>
