@@ -66,21 +66,66 @@ function parseEvent(event: string): { qty: number; price: number; currency: stri
 }
 
 /**
- * Parse a date string like "12-Feb-2026" → "2026-02-12"
+ * Parse a date value from SheetJS.
+ * Handles multiple formats:
+ *   - "12-Feb-2026"         (Saxo native string)
+ *   - "2/12/2026"           (SheetJS raw:false US format)
+ *   - "12/2/2026"           (SheetJS raw:false EU format)
+ *   - "2026-02-12"          (ISO)
+ *   - Date object           (when cellDates:true)
+ *   - number                (Excel serial)
  */
-function parseDate(dateStr: string): string | null {
+function parseDate(dateVal: any): string | null {
+  if (!dateVal && dateVal !== 0) return null;
+
+  // Already a Date object (cellDates: true)
+  if (dateVal instanceof Date) {
+    const y = dateVal.getFullYear();
+    const m = String(dateVal.getMonth() + 1).padStart(2, "0");
+    const d = String(dateVal.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  // Excel serial number
+  if (typeof dateVal === "number") {
+    // Excel epoch: Jan 1 1900 = 1, with the leap year bug (day 60 = Feb 29 1900 doesn't exist)
+    const excelEpoch = new Date(Date.UTC(1900, 0, 1));
+    const offsetDays = dateVal > 59 ? dateVal - 2 : dateVal - 1; // skip the phantom Feb 29 1900
+    const date = new Date(excelEpoch.getTime() + offsetDays * 86400000);
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(date.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  const dateStr = String(dateVal).trim();
   if (!dateStr) return null;
-  // Format: DD-Mon-YYYY
+
+  // Format: DD-Mon-YYYY  (e.g. "12-Feb-2026")
   const months: Record<string, string> = {
     Jan: "01", Feb: "02", Mar: "03", Apr: "04",
     May: "05", Jun: "06", Jul: "07", Aug: "08",
     Sep: "09", Oct: "10", Nov: "11", Dec: "12",
   };
-  const parts = dateStr.split("-");
-  if (parts.length !== 3) return null;
-  const month = months[parts[1]];
-  if (!month) return null;
-  return `${parts[2]}-${month}-${parts[0].padStart(2, "0")}`;
+  const dashParts = dateStr.split("-");
+  if (dashParts.length === 3 && isNaN(Number(dashParts[1]))) {
+    const month = months[dashParts[1]];
+    if (month) return `${dashParts[2]}-${month}-${dashParts[0].padStart(2, "0")}`;
+  }
+
+  // Format: ISO "2026-02-12"
+  if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return dateStr.substring(0, 10);
+
+  // Format: M/D/YYYY or D/M/YYYY (SheetJS raw:false)
+  const slashParts = dateStr.split("/");
+  if (slashParts.length === 3) {
+    const [a, b, y] = slashParts;
+    const month = String(b).padStart(2, "0");
+    const day = String(a).padStart(2, "0");
+    return `${y}-${month}-${day}`;
+  }
+
+  return null;
 }
 
 /**
@@ -128,23 +173,33 @@ export function parseSaxoXLSX(rows: Record<string, any>[], portfolioId: string):
   let skippedCount = 0;
 
   for (const row of rows) {
-    const type: string = (row["Type"] ?? "").trim();
-    const event: string = (row["Événement"] ?? "").trim();
-    const symbol: string = (row["Symbole"] ?? "").trim();
-    const isin: string = (row["Code ISIN de l'instrument"] ?? "").trim();
-    const instrument: string = (row["Instrument"] ?? "").trim();
-    const instrumentCurrency: string = (row["Devise de l'instrument"] ?? "EUR").trim().toUpperCase();
+    const type: string = String(row["Type"] ?? "").trim();
+    const event: string = String(row["Événement"] ?? "").trim();
+    const symbol: string = String(row["Symbole"] ?? "").trim();
+    const isin: string = String(row["Code ISIN de l'instrument"] ?? "").trim();
+    const instrument: string = String(row["Instrument"] ?? "").trim();
+    const instrumentCurrency: string = String(row["Devise de l'instrument"] ?? "EUR").trim().toUpperCase();
+
+    // Montant: with raw:false comes as formatted string like "-2,396.06" or "-2396.06"
     const montantRaw = row["Montant comptabilisé"];
-    const montant = typeof montantRaw === "number" ? montantRaw : parseFloat(String(montantRaw ?? "").replace(",", "."));
+    const montant = typeof montantRaw === "number"
+      ? montantRaw
+      : parseFloat(String(montantRaw ?? "").replace(/[^\d.,-]/g, "").replace(",", "."));
+
+    // Exchange rate: with raw:false comes as string like "0.84569196"
     const exchangeRateRaw = row["Taux de change"];
-    const exchangeRate = typeof exchangeRateRaw === "number" ? exchangeRateRaw : parseFloat(String(exchangeRateRaw ?? "1").replace(",", ".")) || 1;
-    const dateStr: string = (row["Date d'opération"] ?? "").trim();
+    const exchangeRate = typeof exchangeRateRaw === "number"
+      ? exchangeRateRaw
+      : parseFloat(String(exchangeRateRaw ?? "1").replace(",", ".")) || 1;
+
+    // Date: can be a Date object (cellDates:true), a number (serial), or a string
+    const dateVal = row["Date d'opération"];
 
     // Skip rows with 0 or missing amount
-    if (!montantRaw && montantRaw !== 0) { skippedCount++; continue; }
-    if (montant === 0) { skippedCount++; continue; }
+    if (montantRaw === "" || montantRaw === undefined || montantRaw === null) { skippedCount++; continue; }
+    if (isNaN(montant) || montant === 0) { skippedCount++; continue; }
 
-    const date = parseDate(dateStr);
+    const date = parseDate(dateVal);
     if (!date) { skippedCount++; continue; }
 
     // --- DEPOSIT / WITHDRAWAL ---

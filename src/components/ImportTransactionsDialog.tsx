@@ -60,11 +60,18 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
             if (ext === "xlsx" || ext === "xls") {
                 setFileType("xlsx");
                 const buffer = await selectedFile.arrayBuffer();
-                const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
+                // cellDates:true → dates become JS Date objects instead of serial numbers
+                const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
                 const sheetName = workbook.SheetNames[0];
                 const sheet = workbook.Sheets[sheetName];
-                // Convert to array of objects using first row as headers
-                const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+                // raw:true keeps numbers as numbers and dates as Date objects
+                const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+
+                // Debug: log first row to check column names and types
+                if (rows.length > 0) {
+                  console.log("[XLSX] Headers found:", Object.keys(rows[0]));
+                  console.log("[XLSX] First row sample:", rows[0]);
+                }
 
                 // Parse with a placeholder portfolio id (will be set on import)
                 const { transactions, skippedCount: skipped, negativeBalanceWarnings } = parseSaxoXLSX(rows, "temp");
