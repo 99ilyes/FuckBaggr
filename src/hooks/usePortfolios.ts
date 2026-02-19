@@ -157,9 +157,9 @@ export function useHistoricalPrices(tickers: string[], range = "5y", interval = 
     queryFn: async (): Promise<Record<string, AssetHistory>> => {
       if (tickers.length === 0) return {};
 
-      // Use the Supabase Edge Function (server-side, no CORS issues)
-      const { data, error } = await supabase.functions.invoke("fetch-prices", {
-        body: { tickers, mode: "history", range, interval },
+      // Use the dedicated fetch-history Edge Function (direct Yahoo HTTP calls)
+      const { data, error } = await supabase.functions.invoke("fetch-history", {
+        body: { tickers, range, interval },
       });
 
       if (error) {
