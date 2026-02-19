@@ -332,35 +332,46 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
     const valueEUR = computeValueEUR(state.positions, state.cash, t, priceLookup, assetCurrencies);
 
     // Net external flows during this week
-    const netFlow = getNetFlowsEUR(txs, prevTime, t, priceLookup); // priceLookup unused now but kept for signature compat
+    const netFlow = getNetFlowsEUR(txs, prevTime, t, priceLookup);
+
+    // Determine if this point has meaningful data.
+    // A zero value when positions exist likely means missing price data for a ticker
+    // — we skip TWR chaining for that point to avoid aberrant spikes.
+    const hasPositions = Object.keys(state.positions).length > 0;
+    const hasMissingPrices = hasPositions && valueEUR <= 0;
 
     // Compute sub-period return
     // R_i = V_end / (V_start + external_flows_this_period) - 1
-    // We only chain when the denominator is meaningful
-    if (i > 0) {
+    if (i > 0 && !hasMissingPrices && valueEUR > 0) {
       const denominator = prevValueEUR + netFlow;
-      if (denominator > 1 && valueEUR > 0) {
+      if (denominator > 1) {
         const subReturn = valueEUR / denominator - 1;
         cumulativeFactor *= (1 + subReturn);
-      } else if (denominator <= 0 && netFlow > 0 && valueEUR > 0) {
-        // Fresh start after zero value (initial deposit)
+      } else if (denominator <= 0 && netFlow > 0) {
+        // Fresh start after zero value (initial deposit with no prior positions)
         cumulativeFactor = 1;
       }
     }
 
-    if (valueEUR > 0 || (i > 0 && dataPoints.length > 0)) {
+    // Only record a data point when we have a real, non-zero portfolio value.
+    // Skip points where price data is missing (would distort the chart).
+    if (valueEUR > 0) {
       dataPoints.push({
         time: t,
         date: new Date(t * 1000).toISOString().split("T")[0],
-        valueEUR: Math.max(0, valueEUR),
+        valueEUR,
         twr: cumulativeFactor - 1,
         netFlow,
       });
     }
 
-    prevValueEUR = valueEUR;
+    // Only update prevValueEUR when data is meaningful (not missing-price zeros)
+    if (!hasMissingPrices) {
+      prevValueEUR = valueEUR;
+    }
     prevTime = t;
   }
+
 
   if (dataPoints.length === 0) return empty;
 
