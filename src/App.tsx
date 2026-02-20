@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import EarningsTracker from "./pages/EarningsTracker";
 import Calculator from "./pages/Calculator";
 import NotFound from "./pages/NotFound";
+import TestImport from "./pages/TestImport";
 
 const queryClient = new QueryClient();
 
@@ -23,6 +24,7 @@ const App = () => (
             <Route path="/earnings" element={<EarningsTracker />} />
             <Route path="/calculator" element={<Calculator />} />
           </Route>
+          <Route path="/test-import" element={<TestImport />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
