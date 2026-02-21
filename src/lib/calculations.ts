@@ -121,6 +121,8 @@ export function calculateCashBalances(transactions: Transaction[]): CashBalances
       const sourceCurrency = tx.ticker || "EUR";
       balances[sourceCurrency] = (balances[sourceCurrency] || 0) - (tx.quantity * tx.unit_price + tx.fees);
       balances[currency] = (balances[currency] || 0) + tx.quantity;
+    } else if (tx.type === "dividend") {
+      balances[currency] = (balances[currency] || 0) + (tx.quantity || 0) * (tx.unit_price || 1);
     }
   }
 

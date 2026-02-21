@@ -82,17 +82,26 @@ function ibkrToParseResult(txs: TestTransaction[], portfolioId: string): ParsedT
 }
 
 function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): ParsedTransaction {
+    let mappedType = tx.type.toLowerCase() as any;
+    // Specifically map FOREX to deposit/withdrawal so it correctly affects cash balances
+    if (tx.type === "FOREX") {
+        mappedType = tx.amount >= 0 ? "deposit" : "withdrawal";
+    } else if (tx.type === "DIVIDEND" && tx.amount < 0) {
+        // Map withholding taxes (negative dividends) to withdrawal so they decrease cash balance appropriately
+        mappedType = "withdrawal";
+    }
+
     return {
         portfolio_id: portfolioId,
         date: tx.date,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        type: tx.type.toLowerCase() as any, // Cast to any to bypass strict DB enums for display
+        type: mappedType, // Cast to any to bypass strict DB enums for display
         ticker: tx.symbol || null,
         quantity: tx.quantity || Math.abs(tx.amount),
         unit_price: tx.price || 1,
         fees: 0, // Fees are often bundled in amount for TestTransaction, setting 0 for display
         currency: tx.currency,
-        _totalEUR: tx.type === 'BUY' || tx.type === 'WITHDRAWAL' || tx.type === 'TRANSFER_OUT' ? -Math.abs(tx.amount) : Math.abs(tx.amount)
+        _totalEUR: tx.amount // Preserve exact cash flow sign for accurate preview
     };
 }
 
