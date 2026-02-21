@@ -1,0 +1,95 @@
+Extracted: 563, Skipped: 27
+{
+  date: '2025-02-24',
+  type: 'DEPOSIT',
+  amount: 1000,
+  currency: 'EUR',
+  exchangeRate: 1
+}
+{
+  date: '2025-02-25',
+  type: 'BUY',
+  symbol: 'ASML.AS',
+  quantity: 5,
+  price: 694.5,
+  amount: -3475.5,
+  currency: 'EUR',
+  exchangeRate: 1
+}
+{
+  date: '2025-02-25',
+  type: 'BUY',
+  symbol: 'AMZN',
+  quantity: 21,
+  price: 213,
+  amount: -4474,
+  currency: 'USD',
+  exchangeRate: 1
+}
+{
+  date: '2025-02-25',
+  type: 'BUY',
+  symbol: 'AMZN',
+  quantity: 21,
+  price: 212.5,
+  amount: -4463.5,
+  currency: 'USD',
+  exchangeRate: 1
+}
+{
+  date: '2025-02-25',
+  type: 'BUY',
+  symbol: 'CART',
+  quantity: 50,
+  price: 48.68,
+  amount: -2435,
+  currency: 'USD',
+  exchangeRate: 1
+}
+...
+{
+  date: '2026-02-02',
+  type: 'DIVIDEND',
+  symbol: 'GEV',
+  amount: 2.5,
+  currency: 'USD',
+  exchangeRate: 1
+}
+{
+  date: '2026-02-02',
+  type: 'DIVIDEND',
+  symbol: 'GEV',
+  amount: -0.38,
+  currency: 'USD',
+  exchangeRate: 1
+}
+{
+  date: '2026-02-05',
+  type: 'SELL',
+  symbol: 'AMZN',
+  quantity: 25,
+  price: 204,
+  amount: 5099,
+  currency: 'USD',
+  exchangeRate: 1
+}
+{
+  date: '2026-02-05',
+  type: 'BUY',
+  symbol: 'LITE',
+  quantity: 4,
+  price: 492,
+  amount: -1969,
+  currency: 'USD',
+  exchangeRate: 1
+}
+{
+  date: '2026-02-05',
+  type: 'BUY',
+  symbol: 'PLTR',
+  quantity: 25,
+  price: 125.9,
+  amount: -3148.5,
+  currency: 'USD',
+  exchangeRate: 1
+}

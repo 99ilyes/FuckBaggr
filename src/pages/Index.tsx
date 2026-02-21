@@ -260,6 +260,7 @@ export default function Index() {
       return {
         id: p.id,
         name: p.name,
+        description: p.description,
         color: p.color,
         dailyChange: change,
         dailyChangePct: changePct,

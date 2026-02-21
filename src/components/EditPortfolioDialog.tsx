@@ -10,7 +10,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/hooks/use-toast";
+
+const BROKERS = [
+    { value: "saxo", label: "Saxo Bank", color: "#3b82f6" },
+    { value: "ibkr", label: "Interactive Brokers", color: "#ef4444" }
+];
 
 interface Props {
     open: boolean;
@@ -20,11 +26,17 @@ interface Props {
 
 export function EditPortfolioDialog({ open, onOpenChange, portfolio }: Props) {
     const [name, setName] = useState("");
+    const [broker, setBroker] = useState("saxo");
     const updatePortfolio = useUpdatePortfolio();
 
     useEffect(() => {
         if (portfolio) {
             setName(portfolio.name);
+            setBroker(
+                portfolio.description === "ibkr" || portfolio.description === "saxo"
+                    ? portfolio.description
+                    : "saxo"
+            );
         }
     }, [portfolio]);
 
@@ -32,8 +44,11 @@ export function EditPortfolioDialog({ open, onOpenChange, portfolio }: Props) {
         e.preventDefault();
         if (!name.trim() || !portfolio) return;
 
+        const selectedBrokerInfo = BROKERS.find(b => b.value === broker);
+        const color = selectedBrokerInfo?.color || portfolio.color;
+
         updatePortfolio.mutate(
-            { id: portfolio.id, name: name.trim() },
+            { id: portfolio.id, name: name.trim(), description: broker, color },
             {
                 onSuccess: () => {
                     toast({ title: "Portefeuille mis à jour" });
@@ -68,6 +83,19 @@ export function EditPortfolioDialog({ open, onOpenChange, portfolio }: Props) {
                             className="col-span-3"
                             autoFocus
                         />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label className="text-right">Courtier</Label>
+                        <div className="col-span-3">
+                            <Select value={broker} onValueChange={setBroker}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    {BROKERS.map((b) => (
+                                        <SelectItem key={b.value} value={b.value}>{b.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
                     <DialogFooter>
                         <Button type="submit" disabled={!name.trim() || updatePortfolio.isPending}>

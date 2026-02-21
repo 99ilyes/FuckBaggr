@@ -54,8 +54,8 @@ export function PortfolioSelector({
         <button
           onClick={() => onSelect(null)}
           className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all duration-200 whitespace-nowrap ${selectedId === null
-              ? "border-emerald-500 text-white"
-              : "border-transparent text-muted-foreground hover:text-white"
+            ? "border-emerald-500 text-white"
+            : "border-transparent text-muted-foreground hover:text-white"
             }`}
         >
           Vue globale
@@ -66,14 +66,14 @@ export function PortfolioSelector({
               <button
                 onClick={() => onSelect(p.id)}
                 className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all duration-200 whitespace-nowrap flex items-center gap-2 ${selectedId === p.id
-                    ? "border-emerald-500 text-white"
-                    : "border-transparent text-muted-foreground hover:text-white"
+                  ? "border-emerald-500 text-white"
+                  : "border-transparent text-muted-foreground hover:text-white"
                   }`}
               >
-                {getBrokerForPortfolio(p.name) === "saxo" && (
+                {getBrokerForPortfolio(p) === "saxo" && (
                   <SaxoLogo className={`w-4 h-4 rounded-sm ${selectedId === p.id ? "opacity-100" : "opacity-60"}`} />
                 )}
-                {getBrokerForPortfolio(p.name) === "ibkr" && (
+                {getBrokerForPortfolio(p) === "ibkr" && (
                   <IBKRLogo className={`w-4 h-4 rounded-sm ${selectedId === p.id ? "opacity-100" : "opacity-60"}`} />
                 )}
                 {p.name}

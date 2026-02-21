@@ -8,6 +8,7 @@ import { AssetCache, Transaction } from "@/hooks/usePortfolios";
 export interface PortfolioPerformance {
   id: string;
   name: string;
+  description: string | null;
   color: string;
   dailyChange: number;
   dailyChangePct: number;
@@ -156,8 +157,8 @@ export function KPICards({
                     onClick={() => onSelectPortfolio?.(perf.id)}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      {getBrokerForPortfolio(perf.name) === "saxo" && <SaxoLogo className="w-5 h-5 rounded-[2px] opacity-80" />}
-                      {getBrokerForPortfolio(perf.name) === "ibkr" && <IBKRLogo className="w-5 h-5 rounded-[2px] opacity-80" />}
+                      {getBrokerForPortfolio(perf) === "saxo" && <SaxoLogo className="w-5 h-5 rounded-[2px] opacity-80" />}
+                      {getBrokerForPortfolio(perf) === "ibkr" && <IBKRLogo className="w-5 h-5 rounded-[2px] opacity-80" />}
                       <span className="text-sm font-semibold text-muted-foreground truncate" title={perf.name}>
                         {perf.name}
                       </span>

@@ -9,9 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCreatePortfolio } from "@/hooks/usePortfolios";
 import { toast } from "@/hooks/use-toast";
 
-const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
 const TYPES = ["PEA", "CTO", "Crypto", "Assurance Vie", "Autre"];
 const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD"];
+const BROKERS = [
+  { value: "saxo", label: "Saxo Bank", color: "#3b82f6" },
+  { value: "ibkr", label: "Interactive Brokers", color: "#ef4444" }
+];
 
 interface Props {
   open: boolean;
@@ -22,13 +25,17 @@ export function CreatePortfolioDialog({ open, onOpenChange }: Props) {
   const [name, setName] = useState("");
   const [type, setType] = useState("CTO");
   const [currency, setCurrency] = useState("EUR");
-  const [color, setColor] = useState(COLORS[0]);
+  const [broker, setBroker] = useState("saxo");
   const createPortfolio = useCreatePortfolio();
 
   const handleSubmit = () => {
     if (!name.trim()) return;
+
+    const selectedBrokerInfo = BROKERS.find(b => b.value === broker);
+    const color = selectedBrokerInfo?.color || "#3b82f6";
+
     createPortfolio.mutate(
-      { name: name.trim(), type, color, currency },
+      { name: name.trim(), type, color, currency, description: broker },
       {
         onSuccess: () => {
           toast({ title: "Portefeuille créé" });
@@ -76,19 +83,15 @@ export function CreatePortfolioDialog({ open, onOpenChange }: Props) {
             </div>
           </div>
           <div>
-            <Label>Couleur</Label>
-            <div className="flex gap-2 mt-1">
-              {COLORS.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setColor(c)}
-                  className={`w-7 h-7 rounded-full transition-all ${
-                    color === c ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
-                  }`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-            </div>
+            <Label>Courtier</Label>
+            <Select value={broker} onValueChange={setBroker}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {BROKERS.map((b) => (
+                  <SelectItem key={b.value} value={b.value}>{b.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
         <DialogFooter>

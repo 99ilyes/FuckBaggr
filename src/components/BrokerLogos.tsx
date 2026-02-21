@@ -44,10 +44,13 @@ export function IBKRLogo({ className = "w-4 h-4" }: { className?: string }) {
 }
 
 /**
- * Get the appropriate broker logo component for a portfolio by name.
+ * Get the appropriate broker logo component for a portfolio.
  */
-export function getBrokerForPortfolio(portfolioName: string): "saxo" | "ibkr" | null {
-    const name = portfolioName.toLowerCase();
+export function getBrokerForPortfolio(portfolio: { name: string; description?: string | null }): "saxo" | "ibkr" | null {
+    if (portfolio.description && (portfolio.description.toLowerCase() === "saxo" || portfolio.description.toLowerCase() === "ibkr")) {
+        return portfolio.description.toLowerCase() as "saxo" | "ibkr";
+    }
+    const name = portfolio.name.toLowerCase();
     if (name.includes("pea") || name.includes("crédit") || name.includes("credit")) {
         return "saxo";
     }
