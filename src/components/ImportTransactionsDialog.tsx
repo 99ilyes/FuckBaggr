@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -9,9 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCreateBatchTransactions, Portfolio, Transaction } from "@/hooks/usePortfolios";
 import { toast } from "@/hooks/use-toast";
 import { parseCSV } from "@/lib/csvParser";
-import { parseSaxoXLSX, ParsedTransaction } from "@/lib/xlsxParser";
-import { parseIBKR } from "@/lib/ibkrParser";
-import { TestTransaction } from "@/lib/ibkrParser";
+import { parseSaxoTest } from "@/lib/saxoParser";
+import { parseIBKR, TestTransaction } from "@/lib/ibkrParser";
+import { ParsedTransaction } from "@/lib/xlsxParser";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, AlertTriangle, CheckCircle2 } from "lucide-react";
@@ -33,9 +33,9 @@ const TYPE_LABELS: Record<string, { label: string; className: string }> = {
     dividend: { label: "Dividende", className: "text-indigo-600 dark:text-indigo-400 font-medium" },
     interest: { label: "Intérêts", className: "text-purple-600 dark:text-purple-400 font-medium" },
     coupon: { label: "Coupon", className: "text-indigo-600 dark:text-indigo-400 font-medium" },
-    forex: { label: "Forex", className: "text-cyan-600 dark:text-cyan-400 font-medium" },
     transfer_in: { label: "Transfert ↓", className: "text-teal-600 dark:text-teal-400 font-medium" },
     transfer_out: { label: "Transfert ↑", className: "text-pink-600 dark:text-pink-400 font-medium" },
+    forex: { label: "Forex", className: "text-cyan-600 dark:text-cyan-400 font-medium" },
 };
 
 /**
@@ -67,7 +67,8 @@ function ibkrToParseResult(txs: TestTransaction[], portfolioId: string): ParsedT
             return {
                 portfolio_id: portfolioId,
                 date: tx.date,
-                type: mappedType,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                type: mappedType as any,
                 ticker: tx.symbol || null,
                 quantity: isFlow ? Math.abs(tx.amount) : (tx.quantity ?? null),
                 unit_price: isFlow ? 1 : (tx.price ?? null),
@@ -80,6 +81,21 @@ function ibkrToParseResult(txs: TestTransaction[], portfolioId: string): ParsedT
         });
 }
 
+function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): ParsedTransaction {
+    return {
+        portfolio_id: portfolioId,
+        date: tx.date,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        type: tx.type.toLowerCase() as any, // Cast to any to bypass strict DB enums for display
+        ticker: tx.symbol || null,
+        quantity: tx.quantity || Math.abs(tx.amount),
+        unit_price: tx.price || 1,
+        fees: 0, // Fees are often bundled in amount for TestTransaction, setting 0 for display
+        currency: tx.currency,
+        _totalEUR: tx.type === 'BUY' || tx.type === 'WITHDRAWAL' || tx.type === 'TRANSFER_OUT' ? -Math.abs(tx.amount) : Math.abs(tx.amount)
+    };
+}
+
 export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Props) {
     const [portfolioId, setPortfolioId] = useState<string>("");
     const [broker, setBroker] = useState<BrokerType>("saxo");
@@ -87,7 +103,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
     const [file, setFile] = useState<File | null>(null);
     const [skippedCount, setSkippedCount] = useState(0);
     const [negativeWarnings, setNegativeWarnings] = useState<Array<{ date: string; balance: number }>>([]);
-    const [fileType, setFileType] = useState<"csv" | "xlsx" | "html" | null>(null);
+    const [fileType, setFileType] = useState<"csv" | "xlsx" | "html" | "htm" | null>(null);
     const createBatchTransactions = useCreateBatchTransactions();
 
     const resetState = () => {
@@ -99,7 +115,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
         setPortfolioId("");
     };
 
-    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFile = e.target.files?.[0];
         if (!selectedFile) return;
         setFile(selectedFile);
@@ -108,6 +124,10 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
         setNegativeWarnings([]);
 
         const ext = selectedFile.name.split(".").pop()?.toLowerCase();
+
+        // Wait for a valid portfolioId before parsing (or use 'temp' and remap on import)
+        // We'll use 'temp' to allow preview before selecting portfolio
+        const tempPortfolioId = portfolioId || "temp";
 
         try {
             if (broker === "ibkr") {
@@ -119,7 +139,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                 setFileType("html");
                 const text = await selectedFile.text();
                 const { transactions, skipped } = parseIBKR(text);
-                const converted = ibkrToParseResult(transactions, "temp");
+                const converted = ibkrToParseResult(transactions, tempPortfolioId);
                 setPreviewData(converted);
                 setSkippedCount(skipped);
                 setNegativeWarnings([]);
@@ -128,9 +148,10 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                 if (ext === "xlsx" || ext === "xls") {
                     setFileType("xlsx");
                     const buffer = await selectedFile.arrayBuffer();
-                    const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+                    const workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true });
                     const sheetName = workbook.SheetNames[0];
                     const sheet = workbook.Sheets[sheetName];
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
 
                     if (rows.length > 0) {
@@ -138,10 +159,21 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                         console.log("[XLSX] First row sample:", rows[0]);
                     }
 
-                    const { transactions, skippedCount: skipped, negativeBalanceWarnings } = parseSaxoXLSX(rows, "temp");
-                    setPreviewData(transactions);
+                    const { transactions, skipped } = parseSaxoTest(rows);
+                    const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
+
+                    let cashBalance = 0;
+                    const warnings: Array<{ date: string; balance: number }> = [];
+                    for (const tx of mapped) {
+                        cashBalance += tx._totalEUR ?? 0;
+                        if (cashBalance < -0.01) {
+                            warnings.push({ date: tx.date, balance: Math.round(cashBalance * 100) / 100 });
+                        }
+                    }
+
+                    setPreviewData(mapped);
                     setSkippedCount(skipped);
-                    setNegativeWarnings(negativeBalanceWarnings);
+                    setNegativeWarnings(warnings);
                 } else if (ext === "csv") {
                     setFileType("csv");
                     const text = await selectedFile.text();
@@ -150,23 +182,26 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                     setSkippedCount(0);
                     setNegativeWarnings([]);
                 } else {
-                    toast({ title: "Format non supporté", description: "Saxo nécessite un fichier .xlsx ou .csv", variant: "destructive" });
+                    toast({ title: "Format non supporté", description: "Veuillez sélectionner .xlsx, .htm ou .csv", variant: "destructive" });
                 }
             }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (err: any) {
             toast({ title: "Erreur de lecture", description: err.message, variant: "destructive" });
             setPreviewData([]);
         }
-    };
+    }, [portfolioId, broker]);
 
     const handleImport = () => {
         if (!portfolioId || previewData.length === 0) return;
 
+        // Ensure portfolio_id is correctly set (in case it selected after reading)
         const transactionsToImport = previewData.map(({ _isin, _instrument, _totalEUR, ...t }) => ({
             ...t,
             portfolio_id: portfolioId,
         }));
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         createBatchTransactions.mutate(transactionsToImport as any, {
             onSuccess: () => {
                 toast({ title: "Import réussi", description: `${transactionsToImport.length} transactions ajoutées.` });
