@@ -74,6 +74,13 @@ function formatSymbol(raw: string): string | undefined {
     cleanBase = "NOVO-B";
   }
 
+  // Specific override for Amundi Physical Gold ETC in EUR
+  // On Saxo it appears as GOLD:xpar. Yahoo's GOLD.PA is Barrick Gold (USD).
+  // The correct EUR ticker on Yahoo Finance is GOLD-EUR.PA.
+  if (cleanBase === "GOLD" && exchange?.toLowerCase() === "xpar") {
+    return "GOLD-EUR.PA";
+  }
+
   const suffix = EXCHANGE_SUFFIX[exchange?.toLowerCase() ?? ""];
   return cleanBase + (suffix ?? "");
 }
