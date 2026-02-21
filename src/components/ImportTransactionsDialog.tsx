@@ -72,6 +72,26 @@ function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): P
     };
 }
 
+function calculateNegativeWarnings(mapped: ParsedTransaction[]) {
+    let cashBalance = 0;
+    const dailyBalances = new Map<string, number>();
+
+    // Aggregate cash balance sequentially. Map keeps insertion order.
+    // The last value for a given date will be the end-of-day balance.
+    for (const tx of mapped) {
+        cashBalance += tx._totalEUR ?? 0;
+        dailyBalances.set(tx.date, cashBalance);
+    }
+
+    const warnings: Array<{ date: string; balance: number }> = [];
+    for (const [date, balance] of dailyBalances.entries()) {
+        if (balance < -0.01) {
+            warnings.push({ date, balance: Math.round(balance * 100) / 100 });
+        }
+    }
+    return warnings;
+}
+
 export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Props) {
     const [portfolioId, setPortfolioId] = useState<string>("");
     const [broker, setBroker] = useState<BrokerType>("saxo");
@@ -117,14 +137,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                 const { transactions, skipped } = parseIBKR(text);
                 const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
 
-                let cashBalance = 0;
-                const warnings: Array<{ date: string; balance: number }> = [];
-                for (const tx of mapped) {
-                    cashBalance += tx._totalEUR ?? 0;
-                    if (cashBalance < -0.01) {
-                        warnings.push({ date: tx.date, balance: Math.round(cashBalance * 100) / 100 });
-                    }
-                }
+                const warnings = calculateNegativeWarnings(mapped);
 
                 setPreviewData(mapped);
                 setSkippedCount(skipped);
@@ -148,14 +161,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                     const { transactions, skipped } = parseSaxoTest(rows);
                     const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
 
-                    let cashBalance = 0;
-                    const warnings: Array<{ date: string; balance: number }> = [];
-                    for (const tx of mapped) {
-                        cashBalance += tx._totalEUR ?? 0;
-                        if (cashBalance < -0.01) {
-                            warnings.push({ date: tx.date, balance: Math.round(cashBalance * 100) / 100 });
-                        }
-                    }
+                    const warnings = calculateNegativeWarnings(mapped);
 
                     setPreviewData(mapped);
                     setSkippedCount(skipped);
