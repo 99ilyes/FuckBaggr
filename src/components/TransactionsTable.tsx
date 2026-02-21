@@ -16,8 +16,6 @@ const TYPE_LABELS: Record<string, string> = {
   deposit: "Dépôt",
   withdrawal: "Retrait",
   conversion: "Conversion",
-  transfer_in: "Transfert entrant",
-  transfer_out: "Transfert sortant",
 };
 
 interface Props {
@@ -67,10 +65,9 @@ export function TransactionsTable({ transactions, portfolios }: Props) {
                   <TableCell>
                     <span className={`text-xs font-medium px-2 py-0.5 rounded ${tx.type === "buy" ? "bg-primary/20 text-primary" :
                       tx.type === "sell" ? "bg-loss/20 text-loss" :
-                        tx.type === "deposit" || tx.type === "transfer_in" ? "bg-gain/20 text-gain" :
+                        tx.type === "deposit" ? "bg-gain/20 text-gain" :
                           tx.type === "conversion" ? "bg-accent text-accent-foreground" :
-                            tx.type === "transfer_out" ? "bg-orange-500/20 text-orange-500" :
-                              "bg-muted text-muted-foreground"
+                            "bg-muted text-muted-foreground"
                       }`}>
                       {TYPE_LABELS[tx.type] || tx.type}
                     </span>

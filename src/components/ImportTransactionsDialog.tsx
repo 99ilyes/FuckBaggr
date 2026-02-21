@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -111,54 +111,29 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
         setPortfolioId("");
     };
 
-    const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const selectedFile = e.target.files?.[0];
-        if (!selectedFile) return;
-        setFile(selectedFile);
-        setPreviewData([]);
-        setSkippedCount(0);
-        setNegativeWarnings([]);
+    useEffect(() => {
+        if (!file) {
+            setPreviewData([]);
+            setSkippedCount(0);
+            setNegativeWarnings([]);
+            return;
+        }
 
-        const ext = selectedFile.name.split(".").pop()?.toLowerCase();
-
-        // Wait for a valid portfolioId before parsing (or use 'temp' and remap on import)
-        // We'll use 'temp' to allow preview before selecting portfolio
+        const ext = file.name.split(".").pop()?.toLowerCase();
         const tempPortfolioId = portfolioId || "temp";
 
-        try {
-            if (broker === "ibkr") {
-                // IBKR: parse HTML file
-                if (ext !== "html" && ext !== "htm") {
-                    toast({ title: "Format non supporté", description: "IBKR nécessite un fichier .html (relevé Flex)", variant: "destructive" });
-                    return;
-                }
-                setFileType("html");
-                const text = await selectedFile.text();
-                const { transactions, skipped } = parseIBKR(text);
-                const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
-
-                const warnings = calculateNegativeWarnings(mapped);
-
-                setPreviewData(mapped);
-                setSkippedCount(skipped);
-                setNegativeWarnings(warnings);
-            } else {
-                // Saxo: XLSX or CSV
-                if (ext === "xlsx" || ext === "xls") {
-                    setFileType("xlsx");
-                    const buffer = await selectedFile.arrayBuffer();
-                    const workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true });
-                    const sheetName = workbook.SheetNames[0];
-                    const sheet = workbook.Sheets[sheetName];
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
-
-                    if (rows.length > 0) {
-                        console.log("[XLSX] Headers found:", Object.keys(rows[0]));
-                        console.log("[XLSX] First row sample:", rows[0]);
+        const processFile = async () => {
+            try {
+                if (broker === "ibkr") {
+                    // IBKR: parse HTML file
+                    if (ext !== "html" && ext !== "htm") {
+                        toast({ title: "Format non supporté", description: "IBKR nécessite un fichier .html (relevé Flex)", variant: "destructive" });
+                        setFile(null); // Reset if invalid
+                        return;
                     }
-
-                    const { transactions, skipped } = parseSaxoTest(rows);
+                    setFileType("html");
+                    const text = await file.text();
+                    const { transactions, skipped } = parseIBKR(text);
                     const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
 
                     const warnings = calculateNegativeWarnings(mapped);
@@ -166,23 +141,52 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                     setPreviewData(mapped);
                     setSkippedCount(skipped);
                     setNegativeWarnings(warnings);
-                } else if (ext === "csv") {
-                    setFileType("csv");
-                    const text = await selectedFile.text();
-                    const parsed = parseCSV(text, "temp");
-                    setPreviewData(parsed as ParsedTransaction[]);
-                    setSkippedCount(0);
-                    setNegativeWarnings([]);
                 } else {
-                    toast({ title: "Format non supporté", description: "Veuillez sélectionner .xlsx, .htm ou .csv", variant: "destructive" });
+                    // Saxo: XLSX or CSV
+                    if (ext === "xlsx" || ext === "xls") {
+                        setFileType("xlsx");
+                        const buffer = await file.arrayBuffer();
+                        const workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true });
+                        const sheetName = workbook.SheetNames[0];
+                        const sheet = workbook.Sheets[sheetName];
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+
+                        if (rows.length > 0) {
+                            console.log("[XLSX] Headers found:", Object.keys(rows[0]));
+                            console.log("[XLSX] First row sample:", rows[0]);
+                        }
+
+                        const { transactions, skipped } = parseSaxoTest(rows);
+                        const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
+
+                        const warnings = calculateNegativeWarnings(mapped);
+
+                        setPreviewData(mapped);
+                        setSkippedCount(skipped);
+                        setNegativeWarnings(warnings);
+                    } else if (ext === "csv") {
+                        setFileType("csv");
+                        const text = await file.text();
+                        const parsed = parseCSV(text, tempPortfolioId);
+                        setPreviewData(parsed as ParsedTransaction[]);
+                        setSkippedCount(0);
+                        setNegativeWarnings([]);
+                    } else {
+                        toast({ title: "Format non supporté", description: "Veuillez sélectionner .xlsx, .htm ou .csv", variant: "destructive" });
+                        setFile(null);
+                    }
                 }
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } catch (err: any) {
+                toast({ title: "Erreur de lecture", description: err.message, variant: "destructive" });
+                setPreviewData([]);
+                setFile(null);
             }
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (err: any) {
-            toast({ title: "Erreur de lecture", description: err.message, variant: "destructive" });
-            setPreviewData([]);
-        }
-    }, [portfolioId, broker]);
+        };
+
+        processFile();
+    }, [file, broker, portfolioId]);
 
     const handleImport = () => {
         if (!portfolioId || previewData.length === 0) return;
@@ -265,7 +269,10 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                                     type="file"
                                     accept={acceptedFormats}
                                     className="hidden"
-                                    onChange={handleFileChange}
+                                    onChange={(e) => {
+                                        const selectedFile = e.target.files?.[0];
+                                        if (selectedFile) setFile(selectedFile);
+                                    }}
                                 />
                             </Button>
                         </div>
