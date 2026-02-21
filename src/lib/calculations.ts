@@ -158,12 +158,12 @@ export function calculatePortfolioStats(
   let totalInvested = 0;
 
   for (const tx of transactions) {
-    if (tx.type === "deposit") {
+    if (tx.type === "deposit" || tx.type === "transfer_in") {
       const amount = (tx.quantity || 0) * (tx.unit_price || 1);
       const currency = (tx as any).currency || "EUR";
       const rate = getExchangeRate(currency, baseCurrency, assetsCache);
       totalInvested += amount * rate;
-    } else if (tx.type === "withdrawal") {
+    } else if (tx.type === "withdrawal" || tx.type === "transfer_out") {
       const amount = (tx.quantity || 0) * (tx.unit_price || 1);
       const currency = (tx as any).currency || "EUR";
       const rate = getExchangeRate(currency, baseCurrency, assetsCache);
