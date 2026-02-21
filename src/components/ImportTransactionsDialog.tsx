@@ -162,6 +162,12 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
 
                         const warnings = calculateNegativeWarnings(mapped);
 
+                        if (mapped.length === 0 && skipped > 0) {
+                            toast({ title: "Fichier de relevé incomplet", description: "Ce fichier semble être un 'Relevé de compte' (AccountStatement). Veuillez exporter vos 'Opérations' (Trades Executed/Transactions) pour que toutes les colonnes soient trouvées.", variant: "destructive" });
+                            setFile(null);
+                            return;
+                        }
+
                         setPreviewData(mapped);
                         setSkippedCount(skipped);
                         setNegativeWarnings(warnings);
