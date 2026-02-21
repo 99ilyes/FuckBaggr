@@ -23,6 +23,11 @@ export interface YahooQuoteResult {
   fromCache?: boolean;
 }
 
+export interface YahooHistoryResult {
+  timestamps: number[]; // Epoch seconds at midnight roughly
+  closes: number[];     // Daily close prices
+}
+
 const YAHOO_TIMEOUT_MS = 5000;
 
 /** Fetch a single ticker directly from Yahoo Finance v8 (browser → unique IP). */
@@ -168,6 +173,67 @@ export async function fetchPricesClientSide(
       results[t] = r;
     }
   }
+
+  return results;
+}
+
+/**
+ * Fetch historical daily prices for a given ticker from Yahoo Finance v8.
+ * Using `interval=1d` and `range=10y` (or `max`).
+ */
+export async function fetchHistoricalPricesClientSide(
+  tickers: string[]
+): Promise<Record<string, YahooHistoryResult>> {
+  if (tickers.length === 0) return {};
+
+  const results: Record<string, YahooHistoryResult> = {};
+
+  await Promise.all(
+    tickers.map(async (ticker) => {
+      try {
+        const baseUrl = import.meta.env.DEV
+          ? "/api/yf"
+          : "https://query2.finance.yahoo.com";
+
+        // Fetch up to 10 years of daily data
+        const url = `${baseUrl}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=10y`;
+
+        const resp = await fetch(url, {
+          signal: AbortSignal.timeout(YAHOO_TIMEOUT_MS * 2), // slightly longer timeout for history
+          headers: { "Accept": "application/json" },
+        });
+
+        if (!resp.ok) return;
+
+        const data = await resp.json();
+        const result = data?.chart?.result?.[0];
+
+        if (!result || !result.timestamp || !result.indicators?.quote?.[0]?.close) {
+          return;
+        }
+
+        const timestamps: number[] = result.timestamp;
+        const closes: (number | null)[] = result.indicators.quote[0].close;
+
+        // Filter out null closes to maintain parallel arrays cleanly
+        const validTimestamps: number[] = [];
+        const validCloses: number[] = [];
+
+        for (let i = 0; i < timestamps.length; i++) {
+          if (closes[i] != null) {
+            validTimestamps.push(timestamps[i]);
+            validCloses.push(closes[i] as number);
+          }
+        }
+
+        if (validTimestamps.length > 0) {
+          results[ticker] = { timestamps: validTimestamps, closes: validCloses };
+        }
+      } catch (e) {
+        console.warn(`Failed to fetch history for ${ticker}`, e);
+      }
+    })
+  );
 
   return results;
 }
