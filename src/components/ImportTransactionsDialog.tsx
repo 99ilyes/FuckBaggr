@@ -10,6 +10,8 @@ import { useCreateBatchTransactions, Portfolio, Transaction } from "@/hooks/useP
 import { toast } from "@/hooks/use-toast";
 import { parseCSV } from "@/lib/csvParser";
 import { parseSaxoXLSX, ParsedTransaction } from "@/lib/xlsxParser";
+import { parseIBKR } from "@/lib/ibkrParser";
+import { TestTransaction } from "@/lib/ibkrParser";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, AlertTriangle, CheckCircle2 } from "lucide-react";
@@ -21,6 +23,8 @@ interface Props {
     portfolios: Portfolio[];
 }
 
+type BrokerType = "saxo" | "ibkr";
+
 const TYPE_LABELS: Record<string, { label: string; className: string }> = {
     buy: { label: "Achat", className: "text-emerald-600 dark:text-emerald-400 font-medium" },
     sell: { label: "Vente", className: "text-rose-600 dark:text-rose-400 font-medium" },
@@ -29,15 +33,61 @@ const TYPE_LABELS: Record<string, { label: string; className: string }> = {
     dividend: { label: "Dividende", className: "text-indigo-600 dark:text-indigo-400 font-medium" },
     interest: { label: "Intérêts", className: "text-purple-600 dark:text-purple-400 font-medium" },
     coupon: { label: "Coupon", className: "text-indigo-600 dark:text-indigo-400 font-medium" },
+    forex: { label: "Forex", className: "text-cyan-600 dark:text-cyan-400 font-medium" },
+    transfer_in: { label: "Transfert ↓", className: "text-teal-600 dark:text-teal-400 font-medium" },
+    transfer_out: { label: "Transfert ↑", className: "text-pink-600 dark:text-pink-400 font-medium" },
 };
+
+/**
+ * Convert IBKR TestTransaction[] to ParsedTransaction[] for uniform handling
+ */
+function ibkrToParseResult(txs: TestTransaction[], portfolioId: string): ParsedTransaction[] {
+    return txs
+        .filter(tx => {
+            // Skip FOREX transactions — they don't map to portfolio transactions
+            if (tx.type === "FOREX") return false;
+            return true;
+        })
+        .map(tx => {
+            const typeMap: Record<string, string> = {
+                BUY: "buy",
+                SELL: "sell",
+                DEPOSIT: "deposit",
+                WITHDRAWAL: "withdrawal",
+                DIVIDEND: "dividend",
+                TRANSFER_IN: "buy",      // Treat transfer in as buy for portfolio
+                TRANSFER_OUT: "sell",     // Treat transfer out as sell for portfolio
+            };
+
+            const mappedType = typeMap[tx.type] || "deposit";
+
+            // For deposits/withdrawals, quantity = abs(amount), unit_price = 1
+            const isFlow = ["DEPOSIT", "WITHDRAWAL"].includes(tx.type);
+
+            return {
+                portfolio_id: portfolioId,
+                date: tx.date,
+                type: mappedType,
+                ticker: tx.symbol || null,
+                quantity: isFlow ? Math.abs(tx.amount) : (tx.quantity ?? null),
+                unit_price: isFlow ? 1 : (tx.price ?? null),
+                fees: 0,
+                currency: tx.currency || "EUR",
+                _isin: undefined,
+                _instrument: undefined,
+                _totalEUR: tx.amount,
+            } as ParsedTransaction;
+        });
+}
 
 export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Props) {
     const [portfolioId, setPortfolioId] = useState<string>("");
+    const [broker, setBroker] = useState<BrokerType>("saxo");
     const [previewData, setPreviewData] = useState<ParsedTransaction[]>([]);
     const [file, setFile] = useState<File | null>(null);
     const [skippedCount, setSkippedCount] = useState(0);
     const [negativeWarnings, setNegativeWarnings] = useState<Array<{ date: string; balance: number }>>([]);
-    const [fileType, setFileType] = useState<"csv" | "xlsx" | null>(null);
+    const [fileType, setFileType] = useState<"csv" | "xlsx" | "html" | null>(null);
     const createBatchTransactions = useCreateBatchTransactions();
 
     const resetState = () => {
@@ -60,37 +110,48 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
         const ext = selectedFile.name.split(".").pop()?.toLowerCase();
 
         try {
-            if (ext === "xlsx" || ext === "xls") {
-                setFileType("xlsx");
-                const buffer = await selectedFile.arrayBuffer();
-                // cellDates:true → dates become JS Date objects instead of serial numbers
-                const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-                const sheetName = workbook.SheetNames[0];
-                const sheet = workbook.Sheets[sheetName];
-                // raw:true keeps numbers as numbers and dates as Date objects
-                const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
-
-                // Debug: log first row to check column names and types
-                if (rows.length > 0) {
-                    console.log("[XLSX] Headers found:", Object.keys(rows[0]));
-                    console.log("[XLSX] First row sample:", rows[0]);
+            if (broker === "ibkr") {
+                // IBKR: parse HTML file
+                if (ext !== "html" && ext !== "htm") {
+                    toast({ title: "Format non supporté", description: "IBKR nécessite un fichier .html (relevé Flex)", variant: "destructive" });
+                    return;
                 }
-
-                // Parse with a placeholder portfolio id (will be set on import)
-                const { transactions, skippedCount: skipped, negativeBalanceWarnings } = parseSaxoXLSX(rows, "temp");
-                setPreviewData(transactions);
-                setSkippedCount(skipped);
-                setNegativeWarnings(negativeBalanceWarnings);
-            } else if (ext === "csv") {
-                setFileType("csv");
+                setFileType("html");
                 const text = await selectedFile.text();
-                const parsed = parseCSV(text, "temp");
-                // Cast to ParsedTransaction for uniform display
-                setPreviewData(parsed as ParsedTransaction[]);
-                setSkippedCount(0);
+                const { transactions, skipped } = parseIBKR(text);
+                const converted = ibkrToParseResult(transactions, "temp");
+                setPreviewData(converted);
+                setSkippedCount(skipped);
                 setNegativeWarnings([]);
             } else {
-                toast({ title: "Format non supporté", description: "Veuillez sélectionner un fichier .xlsx ou .csv", variant: "destructive" });
+                // Saxo: XLSX or CSV
+                if (ext === "xlsx" || ext === "xls") {
+                    setFileType("xlsx");
+                    const buffer = await selectedFile.arrayBuffer();
+                    const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+                    const sheetName = workbook.SheetNames[0];
+                    const sheet = workbook.Sheets[sheetName];
+                    const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+
+                    if (rows.length > 0) {
+                        console.log("[XLSX] Headers found:", Object.keys(rows[0]));
+                        console.log("[XLSX] First row sample:", rows[0]);
+                    }
+
+                    const { transactions, skippedCount: skipped, negativeBalanceWarnings } = parseSaxoXLSX(rows, "temp");
+                    setPreviewData(transactions);
+                    setSkippedCount(skipped);
+                    setNegativeWarnings(negativeBalanceWarnings);
+                } else if (ext === "csv") {
+                    setFileType("csv");
+                    const text = await selectedFile.text();
+                    const parsed = parseCSV(text, "temp");
+                    setPreviewData(parsed as ParsedTransaction[]);
+                    setSkippedCount(0);
+                    setNegativeWarnings([]);
+                } else {
+                    toast({ title: "Format non supporté", description: "Saxo nécessite un fichier .xlsx ou .csv", variant: "destructive" });
+                }
             }
         } catch (err: any) {
             toast({ title: "Erreur de lecture", description: err.message, variant: "destructive" });
@@ -101,7 +162,6 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
     const handleImport = () => {
         if (!portfolioId || previewData.length === 0) return;
 
-        // Strip preview-only fields before inserting
         const transactionsToImport = previewData.map(({ _isin, _instrument, _totalEUR, ...t }) => ({
             ...t,
             portfolio_id: portfolioId,
@@ -124,18 +184,34 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
         return val.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
+    const acceptedFormats = broker === "ibkr" ? ".html,.htm" : ".csv,.xlsx,.xls";
+    const formatHint = broker === "ibkr"
+        ? "Relevé Flex IBKR (.html)"
+        : "Relevé Saxo Bank (.xlsx) ou CSV";
+
     return (
         <Dialog open={open} onOpenChange={(v) => { if (!v) resetState(); onOpenChange(v); }}>
             <DialogContent className="sm:max-w-4xl">
                 <DialogHeader>
                     <DialogTitle>Importer des transactions</DialogTitle>
                     <DialogDescription>
-                        Sélectionnez un relevé Saxo Bank (.xlsx) ou un fichier CSV et un portefeuille de destination.
+                        Sélectionnez votre courtier, un fichier de relevé et un portefeuille de destination.
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4 py-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                            <Label>Courtier</Label>
+                            <Select value={broker} onValueChange={(v) => { setBroker(v as BrokerType); setFile(null); setPreviewData([]); setSkippedCount(0); setNegativeWarnings([]); }}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="saxo">Saxo Bank</SelectItem>
+                                    <SelectItem value="ibkr">Interactive Brokers</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
                         <div className="space-y-2">
                             <Label>Portefeuille</Label>
                             <Select value={portfolioId} onValueChange={setPortfolioId}>
@@ -149,7 +225,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                         </div>
 
                         <div className="space-y-2">
-                            <Label>Fichier CSV ou XLSX</Label>
+                            <Label>{formatHint}</Label>
                             <Button
                                 variant="outline"
                                 className="w-full relative overflow-hidden"
@@ -160,7 +236,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                                 <input
                                     id="file-upload"
                                     type="file"
-                                    accept=".csv,.xlsx,.xls"
+                                    accept={acceptedFormats}
                                     className="hidden"
                                     onChange={handleFileChange}
                                 />
@@ -177,7 +253,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                             </span>
                             {skippedCount > 0 && (
                                 <span className="text-muted-foreground">
-                                    {skippedCount} lignes ignorées (dividendes, intérêts, frais…)
+                                    {skippedCount} lignes ignorées
                                 </span>
                             )}
                         </div>
