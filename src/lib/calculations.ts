@@ -38,7 +38,7 @@ export function calculatePositions(
 
   for (const tx of sortedTransactions) {
     if (!tx.ticker || !tx.quantity || !tx.unit_price) continue;
-    if (tx.type !== "buy" && tx.type !== "sell") continue;
+    if (tx.type !== "buy" && tx.type !== "sell" && tx.type !== "transfer_in" && tx.type !== "transfer_out") continue;
 
     const pos = positions.get(tx.ticker) || {
       quantity: 0,
@@ -46,10 +46,10 @@ export function calculatePositions(
       currency: (tx as any).currency || "EUR",
     };
 
-    if (tx.type === "buy") {
+    if (tx.type === "buy" || tx.type === "transfer_in") {
       pos.totalCost += tx.quantity * tx.unit_price + tx.fees;
       pos.quantity += tx.quantity;
-    } else if (tx.type === "sell") {
+    } else if (tx.type === "sell" || tx.type === "transfer_out") {
       if (pos.quantity > 0) {
         const pru = pos.totalCost / pos.quantity;
         pos.quantity -= tx.quantity;

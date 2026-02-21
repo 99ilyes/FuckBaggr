@@ -38,48 +38,7 @@ const TYPE_LABELS: Record<string, { label: string; className: string }> = {
     forex: { label: "Forex", className: "text-cyan-600 dark:text-cyan-400 font-medium" },
 };
 
-/**
- * Convert IBKR TestTransaction[] to ParsedTransaction[] for uniform handling
- */
-function ibkrToParseResult(txs: TestTransaction[], portfolioId: string): ParsedTransaction[] {
-    return txs
-        .filter(tx => {
-            // Skip FOREX transactions — they don't map to portfolio transactions
-            if (tx.type === "FOREX") return false;
-            return true;
-        })
-        .map(tx => {
-            const typeMap: Record<string, string> = {
-                BUY: "buy",
-                SELL: "sell",
-                DEPOSIT: "deposit",
-                WITHDRAWAL: "withdrawal",
-                DIVIDEND: "dividend",
-                TRANSFER_IN: "buy",      // Treat transfer in as buy for portfolio
-                TRANSFER_OUT: "sell",     // Treat transfer out as sell for portfolio
-            };
-
-            const mappedType = typeMap[tx.type] || "deposit";
-
-            // For deposits/withdrawals, quantity = abs(amount), unit_price = 1
-            const isFlow = ["DEPOSIT", "WITHDRAWAL"].includes(tx.type);
-
-            return {
-                portfolio_id: portfolioId,
-                date: tx.date,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                type: mappedType as any,
-                ticker: tx.symbol || null,
-                quantity: isFlow ? Math.abs(tx.amount) : (tx.quantity ?? null),
-                unit_price: isFlow ? 1 : (tx.price ?? null),
-                fees: 0,
-                currency: tx.currency || "EUR",
-                _isin: undefined,
-                _instrument: undefined,
-                _totalEUR: tx.amount,
-            } as ParsedTransaction;
-        });
-}
+// Removed ibkrToParseResult
 
 function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): ParsedTransaction {
     let mappedType = tx.type.toLowerCase() as any;
@@ -91,6 +50,14 @@ function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): P
         mappedType = "withdrawal";
     }
 
+    // Extract hidden fee from difference between amount and theoretical trade value
+    let calculatedFees = 0;
+    if (tx.type === "BUY" && tx.quantity != null && tx.price != null) {
+        calculatedFees = Math.max(0, Math.abs(tx.amount) - (tx.quantity * tx.price));
+    } else if (tx.type === "SELL" && tx.quantity != null && tx.price != null) {
+        calculatedFees = Math.max(0, (tx.quantity * tx.price) - tx.amount);
+    }
+
     return {
         portfolio_id: portfolioId,
         date: tx.date,
@@ -99,7 +66,7 @@ function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): P
         ticker: tx.symbol || null,
         quantity: tx.quantity || Math.abs(tx.amount),
         unit_price: tx.price || 1,
-        fees: 0, // Fees are often bundled in amount for TestTransaction, setting 0 for display
+        fees: calculatedFees,
         currency: tx.currency,
         _totalEUR: tx.amount // Preserve exact cash flow sign for accurate preview
     };
@@ -148,10 +115,20 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                 setFileType("html");
                 const text = await selectedFile.text();
                 const { transactions, skipped } = parseIBKR(text);
-                const converted = ibkrToParseResult(transactions, tempPortfolioId);
-                setPreviewData(converted);
+                const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
+
+                let cashBalance = 0;
+                const warnings: Array<{ date: string; balance: number }> = [];
+                for (const tx of mapped) {
+                    cashBalance += tx._totalEUR ?? 0;
+                    if (cashBalance < -0.01) {
+                        warnings.push({ date: tx.date, balance: Math.round(cashBalance * 100) / 100 });
+                    }
+                }
+
+                setPreviewData(mapped);
                 setSkippedCount(skipped);
-                setNegativeWarnings([]);
+                setNegativeWarnings(warnings);
             } else {
                 // Saxo: XLSX or CSV
                 if (ext === "xlsx" || ext === "xls") {
