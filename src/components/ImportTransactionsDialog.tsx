@@ -288,8 +288,8 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
 
                     {/* Negative balance warning */}
                     {negativeWarnings.length > 0 && (
-                        <Alert variant="destructive">
-                            <AlertTriangle className="h-4 w-4" />
+                        <Alert className="border-orange-500/50 text-orange-600 dark:border-orange-500/30 dark:text-orange-400">
+                            <AlertTriangle className="h-4 w-4 stroke-current" />
                             <AlertDescription>
                                 <strong>Solde cash négatif détecté</strong> — {negativeWarnings.length} point(s) avec solde négatif (ex : {negativeWarnings[0].date} → {formatAmount(negativeWarnings[0].balance)} €).
                                 Des transactions de dépôt sont peut-être manquantes dans ce relevé.
@@ -369,7 +369,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                     <Button variant="ghost" onClick={() => { resetState(); onOpenChange(false); }}>Annuler</Button>
                     <Button
                         onClick={handleImport}
-                        disabled={!portfolioId || previewData.length === 0 || createBatchTransactions.isPending || negativeWarnings.length > 0}
+                        disabled={!portfolioId || previewData.length === 0 || createBatchTransactions.isPending}
                     >
                         {createBatchTransactions.isPending ? "Import en cours…" : `Importer ${previewData.length > 0 ? `(${previewData.length})` : ""}`}
                     </Button>
