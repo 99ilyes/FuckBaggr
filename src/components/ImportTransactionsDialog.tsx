@@ -64,10 +64,14 @@ function mapTransactionsBulk(transactions: TestTransaction[], portfolioId: strin
         const finalCurrency = isCashFlow ? (tx.cashCurrency || tx.currency) : tx.currency;
 
         let calculatedFees = 0;
-        if (tx.type === "BUY" && tx.quantity != null && tx.price != null) {
-            calculatedFees = Math.max(0, Math.abs(tx.amount) - (tx.quantity * tx.price));
-        } else if (tx.type === "SELL" && tx.quantity != null && tx.price != null) {
-            calculatedFees = Math.max(0, (tx.quantity * tx.price) - tx.amount);
+        const isCrossCurrency = !isCashFlow && tx.cashCurrency && tx.cashCurrency !== tx.currency;
+
+        if (!isCrossCurrency) {
+            if (tx.type === "BUY" && tx.quantity != null && tx.price != null) {
+                calculatedFees = Math.max(0, Math.abs(tx.amount) - (tx.quantity * tx.price));
+            } else if (tx.type === "SELL" && tx.quantity != null && tx.price != null) {
+                calculatedFees = Math.max(0, (tx.quantity * tx.price) - tx.amount);
+            }
         }
 
         const tradeValueAssetCurrency = (tx.quantity || 0) * (tx.price || 1);
