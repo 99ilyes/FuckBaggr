@@ -100,6 +100,20 @@ export function useDeleteTransaction() {
   });
 }
 
+export function useDeleteTransactionsByPortfolio() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (portfolioId: string) => {
+      const { error } = await supabase.from("transactions").delete().eq("portfolio_id", portfolioId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["portfolios"] });
+    },
+  });
+}
+
 export function useUpdateTransaction() {
   const qc = useQueryClient();
   return useMutation({

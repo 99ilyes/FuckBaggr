@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { Portfolio, useDeletePortfolio } from "@/hooks/usePortfolios";
+import { Portfolio, useDeletePortfolio, useDeleteTransactionsByPortfolio } from "@/hooks/usePortfolios";
 import { EditPortfolioDialog } from "@/components/EditPortfolioDialog";
 import { Button } from "@/components/ui/button";
 import { SaxoLogo, IBKRLogo, getBrokerForPortfolio } from "@/components/BrokerLogos";
-import { Plus, Trash2, Pencil } from "lucide-react";
+import { Plus, Trash2, Pencil, Eraser } from "lucide-react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -35,7 +35,9 @@ export function PortfolioSelector({
   onCreateClick,
 }: PortfolioSelectorProps) {
   const deletePortfolio = useDeletePortfolio();
+  const deleteTransactions = useDeleteTransactionsByPortfolio();
   const [portfolioToDelete, setPortfolioToDelete] = useState<string | null>(null);
+  const [portfolioToEmpty, setPortfolioToEmpty] = useState<string | null>(null);
   const [portfolioToEdit, setPortfolioToEdit] = useState<Portfolio | null>(null);
 
   const handleDelete = () => {
@@ -45,6 +47,13 @@ export function PortfolioSelector({
         onSelect(null);
       }
       setPortfolioToDelete(null);
+    }
+  };
+
+  const handleEmpty = () => {
+    if (portfolioToEmpty) {
+      deleteTransactions.mutate(portfolioToEmpty);
+      setPortfolioToEmpty(null);
     }
   };
 
@@ -84,6 +93,10 @@ export function PortfolioSelector({
                 <Pencil className="mr-2 h-4 w-4" />
                 Renommer
               </ContextMenuItem>
+              <ContextMenuItem onClick={() => setPortfolioToEmpty(p.id)}>
+                <Eraser className="mr-2 h-4 w-4" />
+                Vider
+              </ContextMenuItem>
               <ContextMenuItem
                 className="text-destructive focus:text-destructive"
                 onClick={() => setPortfolioToDelete(p.id)}
@@ -116,6 +129,23 @@ export function PortfolioSelector({
             <AlertDialogCancel className="bg-transparent border-white/10 text-white hover:bg-white/5 hover:text-white">Annuler</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!portfolioToEmpty} onOpenChange={(open) => !open && setPortfolioToEmpty(null)}>
+        <AlertDialogContent className="border-border bg-card">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Êtes-vous sûr de vouloir vider le portefeuille ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Cette action supprimera toutes les transactions de ce portefeuille. Vous devrez les réimporter. Le portefeuille lui-même sera conservé.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-transparent border-white/10 text-white hover:bg-white/5 hover:text-white">Annuler</AlertDialogCancel>
+            <AlertDialogAction onClick={handleEmpty} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Vider
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
