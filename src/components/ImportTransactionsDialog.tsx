@@ -1,17 +1,18 @@
 import { useState, useCallback } from "react";
 import * as XLSX from "xlsx";
+import { useQueryClient } from "@tanstack/react-query";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useCreateBatchTransactions, Portfolio, Transaction } from "@/hooks/usePortfolios";
+import { useCreateBatchTransactions, Portfolio } from "@/hooks/usePortfolios";
 import { toast } from "@/hooks/use-toast";
 import { parseCSV } from "@/lib/csvParser";
-import { parseSaxoTest } from "@/lib/saxoParser";
 import { parseIBKR, TestTransaction } from "@/lib/ibkrParser";
-import { ParsedTransaction } from "@/lib/xlsxParser";
+import { ParsedTransaction, parseSaxoXLSX } from "@/lib/xlsxParser";
+import { supabase } from "@/integrations/supabase/client";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, AlertTriangle, CheckCircle2 } from "lucide-react";
@@ -21,6 +22,7 @@ interface Props {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     portfolios: Portfolio[];
+    onImportSuccess?: (portfolioId: string) => void;
 }
 
 type BrokerType = "saxo" | "ibkr";
@@ -45,74 +47,91 @@ const TYPE_LABELS: Record<string, { label: string; className: string }> = {
  */
 function groupForexToConversions(forexTxs: TestTransaction[], portfolioId: string): ParsedTransaction[] {
     const results: ParsedTransaction[] = [];
-    let i = 0;
-    while (i < forexTxs.length) {
-        const tx1 = forexTxs[i];
-        const tx2 = i + 1 < forexTxs.length ? forexTxs[i + 1] : null;
+    const pushAsInterest = (tx: TestTransaction) => {
+        results.push({
+            portfolio_id: portfolioId,
+            date: tx.date,
+            type: "interest",
+            ticker: null,
+            quantity: tx.amount,
+            unit_price: 1,
+            fees: 0,
+            currency: tx.currency,
+            _totalEUR: tx.amount,
+        });
+    };
 
-        // Need at least a pair with same date
-        if (!tx2 || tx1.date !== tx2.date) {
-            // Orphan forex — treat as interest/fee
-            results.push({
-                portfolio_id: portfolioId,
-                date: tx1.date,
-                type: "interest",
-                ticker: null,
-                quantity: tx1.amount,
-                unit_price: 1,
-                fees: 0,
-                currency: tx1.currency,
-                _totalEUR: tx1.amount,
-            });
-            i++;
-            continue;
-        }
-
-        // Identify source (negative) and target (positive)
-        // Identify source (negative) and target (positive)
+    const pushPairAsConversion = (a: TestTransaction, b: TestTransaction): boolean => {
         let source: TestTransaction | null = null;
         let target: TestTransaction | null = null;
 
-        if (tx1.amount < 0 && tx2.amount > 0) {
-            source = tx1; target = tx2;
-        } else if (tx2.amount < 0 && tx1.amount > 0) {
-            source = tx2; target = tx1;
+        if (a.amount < 0 && b.amount > 0) {
+            source = a;
+            target = b;
+        } else if (b.amount < 0 && a.amount > 0) {
+            source = b;
+            target = a;
         } else {
-            // Both same sign! This usually means the first one is an isolated fee, followed by a valid pair later.
-            results.push({
-                portfolio_id: portfolioId,
-                date: tx1.date,
-                type: "interest",
-                ticker: null,
-                quantity: tx1.amount,
-                unit_price: 1,
-                fees: 0,
-                currency: tx1.currency,
-                _totalEUR: tx1.amount,
-            });
-            i++;
-            continue;
+            return false;
         }
 
-        // conversion: ticker = source currency, currency = target currency
-        const sourceAmount = Math.abs(source!.amount);
-        const targetAmount = Math.abs(target!.amount);
-        const rate = sourceAmount / targetAmount; // how much source currency for 1 target currency
+        const sourceAmount = Math.abs(source.amount);
+        const targetAmount = Math.abs(target.amount);
+        if (targetAmount <= 0) return false;
+        const rate = sourceAmount / targetAmount;
 
         results.push({
             portfolio_id: portfolioId,
-            date: tx1.date,
+            date: a.date,
             type: "conversion",
-            ticker: source!.currency,  // source currency
-            quantity: targetAmount,    // amount received
-            unit_price: rate,          // exchange rate
+            ticker: source.currency,
+            quantity: targetAmount,
+            unit_price: rate,
             fees: 0,
-            currency: target!.currency, // target currency
-            _totalEUR: 0, // net zero for cash flow purposes
+            currency: target.currency,
+            _totalEUR: 0,
         });
+        return true;
+    };
 
-        i += 2;
+    // Deterministic path for Saxo: parser can tag each FOREX pair with an id.
+    const groupedById = new Map<string, TestTransaction[]>();
+    const ungrouped: TestTransaction[] = [];
+    for (const tx of forexTxs) {
+        const groupId = (tx as any).fxGroupId as string | undefined;
+        if (!groupId) {
+            ungrouped.push(tx);
+            continue;
+        }
+        const group = groupedById.get(groupId) || [];
+        group.push(tx);
+        groupedById.set(groupId, group);
     }
+
+    for (const group of groupedById.values()) {
+        if (group.length !== 2 || !pushPairAsConversion(group[0], group[1])) {
+            group.forEach(pushAsInterest);
+        }
+    }
+
+    // Backward-compatible fallback (IBKR and old imports without group id)
+    let i = 0;
+    while (i < ungrouped.length) {
+        const tx1 = ungrouped[i];
+        const tx2 = i + 1 < ungrouped.length ? ungrouped[i + 1] : null;
+        if (!tx2 || tx1.date !== tx2.date) {
+            pushAsInterest(tx1);
+            i++;
+            continue;
+        }
+        if (pushPairAsConversion(tx1, tx2)) {
+            i += 2;
+            continue;
+        }
+        pushAsInterest(tx1);
+        i++;
+    }
+
     return results;
 }
 
@@ -151,7 +170,8 @@ function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): P
     };
 }
 
-export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Props) {
+export function ImportTransactionsDialog({ open, onOpenChange, portfolios, onImportSuccess }: Props) {
+    const queryClient = useQueryClient();
     const [portfolioId, setPortfolioId] = useState<string>("");
     const [broker, setBroker] = useState<BrokerType>("saxo");
     const [previewData, setPreviewData] = useState<ParsedTransaction[]>([]);
@@ -231,39 +251,12 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                     const workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true });
                     const sheetName = workbook.SheetNames[0];
                     const sheet = workbook.Sheets[sheetName];
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+                    const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+                    const parsed = parseSaxoXLSX(rows, tempPortfolioId);
 
-                    if (rows.length > 0) {
-                        console.log("[XLSX] Headers found:", Object.keys(rows[0]));
-                        console.log("[XLSX] First row sample:", rows[0]);
-                    }
-
-                    const { transactions, skipped } = parseSaxoTest(rows);
-
-                    const forexTxs = transactions.filter(t => t.type === "FOREX");
-                    const otherTxs = transactions.filter(t => t.type !== "FOREX");
-
-                    const mappedOthers = otherTxs.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
-                    const mappedForex = groupForexToConversions(forexTxs, tempPortfolioId);
-                    const mapped = [...mappedOthers, ...mappedForex].sort((a, b) => a.date.localeCompare(b.date));
-
-                    const dailyTotals = new Map<string, number>();
-                    for (const tx of mapped) {
-                        dailyTotals.set(tx.date, (dailyTotals.get(tx.date) || 0) + (tx._totalEUR ?? 0));
-                    }
-                    let cashBalance = 0;
-                    const warnings: Array<{ date: string; balance: number }> = [];
-                    for (const [date, dayAmount] of dailyTotals) {
-                        cashBalance += dayAmount;
-                        if (cashBalance < -0.01) {
-                            warnings.push({ date, balance: Math.round(cashBalance * 100) / 100 });
-                        }
-                    }
-
-                    setPreviewData(mapped);
-                    setSkippedCount(skipped);
-                    setNegativeWarnings(warnings);
+                    setPreviewData(parsed.transactions);
+                    setSkippedCount(parsed.skippedCount);
+                    setNegativeWarnings(parsed.negativeBalanceWarnings);
                 } else if (ext === "csv") {
                     setFileType("csv");
                     const text = await selectedFile.text();
@@ -282,26 +275,143 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
         }
     }, [portfolioId, broker]);
 
-    const handleImport = () => {
+    const txKey = (tx: {
+        date: string;
+        type: string;
+        ticker: string | null;
+        quantity: number | null;
+        unit_price: number | null;
+        fees: number;
+        currency: string | null;
+    }) => {
+        const dateKey = String(tx.date || "").slice(0, 10);
+        const q = Number((tx.quantity || 0).toFixed(8));
+        const u = Number((tx.unit_price || 0).toFixed(8));
+        const f = Number((tx.fees || 0).toFixed(8));
+        return [
+            dateKey,
+            tx.type,
+            tx.ticker || "",
+            tx.currency || "",
+            q,
+            u,
+            f,
+        ].join("|");
+    };
+
+    const handleImport = async () => {
         if (!portfolioId || previewData.length === 0) return;
 
-        // Ensure portfolio_id is correctly set (in case it selected after reading)
-        const transactionsToImport = previewData.map(({ _isin, _instrument, _totalEUR, ...t }) => ({
-            ...t,
+        // Keep only real DB columns (drop preview/debug fields like _isin/_instrument/_totalEUR/_sourceTag).
+        const transactionsToImport = previewData.map((tx) => ({
             portfolio_id: portfolioId,
+            date: tx.date,
+            type: tx.type,
+            ticker: tx.ticker,
+            quantity: tx.quantity,
+            unit_price: tx.unit_price,
+            fees: tx.fees,
+            currency: tx.currency,
         }));
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        createBatchTransactions.mutate(transactionsToImport as any, {
-            onSuccess: () => {
-                toast({ title: "Import réussi", description: `${transactionsToImport.length} transactions ajoutées.` });
-                onOpenChange(false);
-                resetState();
-            },
-            onError: (error) => {
-                toast({ title: "Erreur d'import", description: error.message, variant: "destructive" });
+        try {
+            const { data: existing, error: existingError } = await supabase
+                .from("transactions")
+                .select("id,created_at,date,type,ticker,quantity,unit_price,fees,currency")
+                .eq("portfolio_id", portfolioId)
+                .order("created_at", { ascending: true });
+
+            if (existingError) {
+                throw existingError;
             }
-        });
+
+            const existingRows = existing || [];
+            const incomingByKey = new Map<string, typeof transactionsToImport>();
+            for (const tx of transactionsToImport) {
+                const key = txKey(tx);
+                const list = incomingByKey.get(key) || [];
+                list.push(tx);
+                incomingByKey.set(key, list);
+            }
+
+            const incomingDates = transactionsToImport
+                .map((tx) => String(tx.date || "").slice(0, 10))
+                .filter(Boolean)
+                .sort();
+            const minIncomingDate = incomingDates[0] || "";
+            const maxIncomingDate = incomingDates[incomingDates.length - 1] || "";
+            const isSaxoXlsxSync = broker === "saxo" && fileType === "xlsx" && !!minIncomingDate && !!maxIncomingDate;
+            const inIncomingRange = (date: string) => {
+                const d = String(date || "").slice(0, 10);
+                return d >= minIncomingDate && d <= maxIncomingDate;
+            };
+
+            const existingByKey = new Map<string, typeof existingRows>();
+            for (const row of existingRows) {
+                if (isSaxoXlsxSync && !inIncomingRange(row.date)) continue;
+                const key = txKey(row);
+                const list = existingByKey.get(key) || [];
+                list.push(row);
+                existingByKey.set(key, list);
+            }
+
+            const incomingUnique: typeof transactionsToImport = [];
+            let skippedAsDuplicate = 0;
+            const duplicateIdsToDelete: string[] = [];
+            for (const [key, txList] of incomingByKey.entries()) {
+                const existingForKey = existingByKey.get(key) || [];
+                const existingCount = existingForKey.length;
+                const toInsertCount = Math.max(0, txList.length - existingCount);
+                skippedAsDuplicate += txList.length - toInsertCount;
+
+                if (existingCount > txList.length) {
+                    const duplicatesToDelete = [...existingForKey]
+                        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                        .slice(0, existingCount - txList.length);
+                    duplicateIdsToDelete.push(...duplicatesToDelete.map((d) => d.id));
+                }
+
+                for (let i = 0; i < toInsertCount; i++) {
+                    incomingUnique.push(txList[i]);
+                }
+            }
+
+            if (isSaxoXlsxSync) {
+                for (const [key, existingForKey] of existingByKey.entries()) {
+                    if (incomingByKey.has(key)) continue;
+                    duplicateIdsToDelete.push(...existingForKey.map((row) => row.id));
+                }
+            }
+
+            if (duplicateIdsToDelete.length > 0) {
+                const { error: deleteError } = await supabase
+                    .from("transactions")
+                    .delete()
+                    .in("id", duplicateIdsToDelete);
+                if (deleteError) {
+                    throw deleteError;
+                }
+            }
+
+            if (incomingUnique.length > 0) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                await createBatchTransactions.mutateAsync(incomingUnique as any);
+            }
+
+            await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            await queryClient.invalidateQueries({ queryKey: ["portfolios"] });
+
+            const portfolioName = portfolios.find((p) => p.id === portfolioId)?.name || "portefeuille sélectionné";
+            toast({
+                title: "Import réussi",
+                description: `${incomingUnique.length} ajoutées dans ${portfolioName}${skippedAsDuplicate > 0 ? `, ${skippedAsDuplicate} doublons ignorés` : ""}${duplicateIdsToDelete.length > 0 ? `, ${duplicateIdsToDelete.length} doublons nettoyés` : ""}.`,
+            });
+            onImportSuccess?.(portfolioId);
+            onOpenChange(false);
+            resetState();
+        } catch (error: any) {
+            toast({ title: "Erreur d'import", description: error.message, variant: "destructive" });
+        }
     };
 
     const formatAmount = (val: number | undefined) => {

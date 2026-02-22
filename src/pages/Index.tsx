@@ -9,6 +9,7 @@ import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { ImportTransactionsDialog } from "@/components/ImportTransactionsDialog";
 import { PositionsTable } from "@/components/PositionsTable";
 import { TransactionsTable } from "@/components/TransactionsTable";
+import { PerformanceTab } from "@/components/PerformanceTab";
 import { AllocationChart } from "@/components/AllocationChart";
 import { TopMovers } from "@/components/TopMovers";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ export default function Index() {
 
   const { data: portfolios = [] } = usePortfolios();
   const { data: allTransactions = [] } = useTransactions();
+  const { data: selectedPortfolioTransactions = [] } = useTransactions(selectedPortfolioId || undefined);
   const { data: assetsCache = [], refetch: refetchCache } = useAssetsCache();
 
   // Create an effective cache that overrides DB values with live proxy values AND fetched previous close
@@ -55,11 +57,8 @@ export default function Index() {
   }, [assetsCache, lastRefreshTime]);
 
   const filteredTransactions = useMemo(
-    () =>
-      selectedPortfolioId ?
-        allTransactions.filter((t) => t.portfolio_id === selectedPortfolioId) :
-        allTransactions,
-    [allTransactions, selectedPortfolioId]
+    () => selectedPortfolioId ? selectedPortfolioTransactions : allTransactions,
+    [selectedPortfolioId, selectedPortfolioTransactions, allTransactions]
   );
 
   // Use EUR as base currency for now
@@ -71,12 +70,40 @@ export default function Index() {
     [filteredTransactions, effectiveAssetsCache, baseCurrency]
   );
 
-  // Get unique tickers from positions for historical price fetching
-  const positionTickers = useMemo(
-    () => positions.map((p) => p.ticker).filter((t) => !t.includes("=X")),
-    [positions]
-  );
-  const { data: historicalPrices = {} } = useHistoricalPrices(positionTickers);
+  // Tickers needed for portfolio history & TWR (all traded assets + FX pairs)
+  const normalizePerformanceTicker = useCallback((ticker: string) => {
+    // Legacy Saxo imports may contain GOLD-EUR.PA; historical series is on GOLD.PA.
+    return ticker === "GOLD-EUR.PA" ? "GOLD.PA" : ticker;
+  }, []);
+
+  const performanceTickers = useMemo(() => {
+    const tickers = new Set<string>();
+    const currencies = new Set<string>();
+
+    for (const tx of filteredTransactions) {
+      if (
+        tx.ticker &&
+        !tx.ticker.includes("=X") &&
+        (tx.type === "buy" || tx.type === "sell" || tx.type === "transfer_in" || tx.type === "transfer_out")
+      ) {
+        tickers.add(normalizePerformanceTicker(tx.ticker));
+      }
+      const c = (tx.currency || "").toUpperCase();
+      if (c && c !== "EUR") currencies.add(c);
+    }
+
+    for (const c of currencies) {
+      tickers.add(`${c}EUR=X`);
+    }
+
+    return Array.from(tickers).sort();
+  }, [filteredTransactions, normalizePerformanceTicker]);
+
+  const {
+    data: historicalPrices = {},
+    isLoading: historicalLoading,
+    isFetching: historicalFetching,
+  } = useHistoricalPrices(performanceTickers, "max", "1wk");
 
   const cashBalances = useMemo(
     () => calculateCashBalances(filteredTransactions),
@@ -355,6 +382,7 @@ export default function Index() {
           <TabsList>
             <TabsTrigger value="positions">Positions</TabsTrigger>
             <TabsTrigger value="transactions">Transactions</TabsTrigger>
+            <TabsTrigger value="performance">Performance</TabsTrigger>
           </TabsList>
           <TabsContent value="positions">
             <Card className="border-border/50">
@@ -379,6 +407,16 @@ export default function Index() {
                 <TransactionsTable transactions={filteredTransactions} portfolios={portfolios} />
               </CardContent>
             </Card>
+          </TabsContent>
+          <TabsContent value="performance">
+            <PerformanceTab
+              transactions={filteredTransactions}
+              historicalPrices={historicalPrices}
+              portfolioId={selectedPortfolioId}
+              portfolioName={selectedPortfolio?.name || "Vue globale"}
+              portfolioColor={(selectedPortfolio as any)?.color}
+              loading={historicalLoading || historicalFetching}
+            />
           </TabsContent>
         </Tabs>
       </main>

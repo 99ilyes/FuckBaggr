@@ -150,6 +150,51 @@ export function getExchangeRate(from: string, to: string, cache: AssetCache[]): 
   return 1; // Fallback assumes 1:1 if rate missing (should ideally warn)
 }
 
+function getExchangeRateFromConversions(
+  from: string,
+  to: string,
+  transactions: Transaction[]
+): number | null {
+  if (from === to) return 1;
+
+  const sorted = [...transactions].sort((a, b) => b.date.localeCompare(a.date));
+  for (const tx of sorted) {
+    if (tx.type !== "conversion") continue;
+    const source = (tx.ticker || "").toUpperCase();
+    const target = (tx.currency || "").toUpperCase();
+    const unit = tx.unit_price || 0;
+    if (!source || !target || !unit || unit <= 0) continue;
+
+    // Example EUR -> USD conversion stores unit as EUR per USD.
+    if (source === to.toUpperCase() && target === from.toUpperCase()) {
+      return unit;
+    }
+    // Example USD -> EUR conversion stores unit as USD per EUR.
+    if (source === from.toUpperCase() && target === to.toUpperCase()) {
+      return 1 / unit;
+    }
+  }
+
+  return null;
+}
+
+function getBestExchangeRate(
+  from: string,
+  to: string,
+  cache: AssetCache[],
+  transactions: Transaction[]
+): number {
+  const marketRate = getExchangeRate(from, to, cache);
+  if (from === to || marketRate !== 1) return marketRate;
+
+  const fallbackRate = getExchangeRateFromConversions(from, to, transactions);
+  if (fallbackRate && isFinite(fallbackRate) && fallbackRate > 0) {
+    return fallbackRate;
+  }
+
+  return marketRate;
+}
+
 export function calculatePortfolioStats(
   positions: AssetPosition[],
   cashBalances: CashBalances,
@@ -157,24 +202,33 @@ export function calculatePortfolioStats(
   transactions: Transaction[],
   baseCurrency = "EUR"
 ) {
+  // "Investi" = external capital injected by the user.
+  // Includes: deposits/withdrawals + in-kind transfers of securities.
+  // Excludes: realized gains reinvested via buy/sell/dividends.
   let totalInvested = 0;
-
   for (const tx of transactions) {
-    if (tx.type === "deposit" || tx.type === "transfer_in") {
-      const amount = (tx.quantity || 0) * (tx.unit_price || 1);
-      const currency = (tx as any).currency || "EUR";
-      const rate = getExchangeRate(currency, baseCurrency, assetsCache);
-      totalInvested += amount * rate;
-    } else if (tx.type === "withdrawal" || tx.type === "transfer_out") {
-      const amount = (tx.quantity || 0) * (tx.unit_price || 1);
-      const currency = (tx as any).currency || "EUR";
-      const rate = getExchangeRate(currency, baseCurrency, assetsCache);
-      totalInvested -= amount * rate;
-    }
+    if (tx.type !== "deposit" && tx.type !== "withdrawal" && tx.type !== "transfer_in" && tx.type !== "transfer_out") continue;
+    const amount = (tx.quantity || 0) * (tx.unit_price || 1);
+    const currency = (tx as any).currency || "EUR";
+    const rate = getBestExchangeRate(currency, baseCurrency, assetsCache, transactions);
+    if (tx.type === "deposit") totalInvested += amount * rate;
+    if (tx.type === "withdrawal") totalInvested -= amount * rate;
+    if (tx.type === "transfer_in") totalInvested += amount * rate;
+    if (tx.type === "transfer_out") totalInvested -= amount * rate;
   }
 
+  const positionsValue = positions.reduce(
+    (sum, p) => sum + p.currentValue * getBestExchangeRate(p.currency, baseCurrency, assetsCache, transactions),
+    0
+  );
+
+  const cashValue = Object.entries(cashBalances || {}).reduce(
+    (sum, [currency, amount]) => sum + amount * getBestExchangeRate(currency, baseCurrency, assetsCache, transactions),
+    0
+  );
+
   return {
-    totalValue: positions.reduce((s, p) => s + p.currentValue * getExchangeRate(p.currency, baseCurrency, assetsCache), 0),
+    totalValue: positionsValue + cashValue,
     totalInvested,
   };
 }
@@ -186,7 +240,7 @@ export function calculateCashBalance(
 ): number {
   const balances = calculateCashBalances(transactions);
   return Object.entries(balances).reduce(
-    (s, [currency, amount]) => s + amount * getExchangeRate(currency, baseCurrency, assetsCache),
+    (s, [currency, amount]) => s + amount * getBestExchangeRate(currency, baseCurrency, assetsCache, transactions),
     0
   );
 }

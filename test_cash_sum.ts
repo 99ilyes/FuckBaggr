@@ -1,44 +1,21 @@
-export interface TestTransaction {
-    date: string;
-    type: "DEPOSIT" | "WITHDRAWAL" | "BUY" | "SELL" | "DIVIDEND" | "TRANSFER_IN" | "TRANSFER_OUT" | "FOREX" | "INTEREST";
-    symbol?: string;
-    quantity?: number;
-    price?: number;
-    amount: number;
-    currency: string;
-    cashCurrency?: string;
-    exchangeRate: number;
-    // Optional deterministic grouping id for FOREX pairs (used by Saxo parser)
-    fxGroupId?: string;
-}
+import { readFileSync } from 'fs';
+import { JSDOM } from 'jsdom';
+const { window } = new JSDOM();
+(global as any).DOMParser = window.DOMParser;
+(global as any).Element = window.Element;
+(global as any).Node = window.Node;
 
-const EXCHANGE_MAPPING: Record<string, string> = {
-    // Common IBKR symbol to Yahoo mappings can be added here
-};
+import { TestTransaction } from './src/lib/ibkrParser.ts';
 
 function formatIbkrSymbol(raw: string): string {
-    // IBKR usually just uses the ticker, but for EU stocks we might need to append suffixes.
-    // For now, let's keep it simple. If it's a known EU stock, we might need a mapping.
-    // We'll rely on the user to fix symbols manually if needed, or we do a basic matching.
     let clean = raw.toUpperCase().replace(" ", "-");
     if (clean === "ASML") return "ASML.AS";
-    // Add other common ones if needed, or leave as is (for US stocks)
     return clean;
 }
 
 function parseNumber(str: string): number {
     if (!str) return 0;
-    // The IBKR statement strictly uses '.' for decimals and ',' for thousands,
-    // e.g. "49,182", "51,580.61", "1,000.00".
-    // We simply remove all spaces and all commas to get the raw parseable string.
     let s = str.replace(/[\s,]/g, "");
-
-    // In the edge case where the user REALLY has a European localized file 
-    // that uses NO dots and only commas for decimals (e.g. "50,24" instead of "50.24"),
-    // but the file clearly shows "50.24" in the dump.
-    // If the string had a comma but NO dot, and it has exactly 2 trailing digits, it MIGHT be decimal.
-    // However, given the dump, IBKR uses '.' for decimals universally here.
-
     const n = parseFloat(s);
     return isNaN(n) ? 0 : n;
 }
@@ -63,7 +40,7 @@ function getPreviousText(element: Element | null): string {
     return "";
 }
 
-export function parseIBKR(htmlContent: string): { transactions: TestTransaction[], skipped: number } {
+export function parseIBKRCustom(htmlContent: string): { transactions: TestTransaction[], skipped: number } {
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlContent, "text/html");
     const tables = Array.from(doc.querySelectorAll("table"));
@@ -101,6 +78,7 @@ export function parseIBKR(htmlContent: string): { transactions: TestTransaction[
                     const prodIndex = headerCells.findIndex(h => h.toLowerCase().includes("produit"));
 
                     if (symIndex === -1 || dateIndex === -1 || qtyIndex === -1 || priceIndex === -1) {
+                        console.log("SKIPPED: Missing columns", { sectionTitle, headerCells, cells });
                         skipped++; continue;
                     }
 
@@ -111,7 +89,10 @@ export function parseIBKR(htmlContent: string): { transactions: TestTransaction[
                     const comm = commIndex !== -1 ? parseNumber(cells[commIndex]) : 0;
                     const produit = prodIndex !== -1 ? parseNumber(cells[prodIndex]) : 0;
 
-                    if (!rawSym || qty === 0 || isNaN(qty)) { skipped++; continue; }
+                    if (!rawSym || qty === 0 || isNaN(qty)) {
+                        console.log("SKIPPED: Invalid data", { rawSym, qty, cells });
+                        skipped++; continue;
+                    }
 
                     // Forex handling: e.g. EUR.USD
                     if (rawSym.length === 7 && rawSym.includes(".")) {
@@ -127,7 +108,7 @@ export function parseIBKR(htmlContent: string): { transactions: TestTransaction[
 
                         // Handle Commission paid
                         if (comm !== 0) {
-                            transactions.push({ date: rawDate, type: "FOREX", amount: -Math.abs(comm), currency: currentCurrency, exchangeRate: 1 });
+                            transactions.push({ date: rawDate, type: "FOREX", amount: -Math.abs(comm), currency: quoteCur, exchangeRate: 1 });
                         }
                         continue;
                     }
@@ -166,6 +147,7 @@ export function parseIBKR(htmlContent: string): { transactions: TestTransaction[
                     const montIndex = headerCells.findIndex(h => h.toLowerCase() === "montant");
 
                     if (dateIndex === -1 || montIndex === -1) {
+                        console.log("SKIPPED: Missing date/montant", { sectionTitle, headerCells, cells });
                         skipped++; continue;
                     }
 
@@ -212,6 +194,7 @@ export function parseIBKR(htmlContent: string): { transactions: TestTransaction[
                     const montIndex = headerCells.findIndex(h => h.toLowerCase() === "montant");
 
                     if (dateIndex === -1 || descIndex === -1 || montIndex === -1) {
+                        console.log("SKIPPED: Missing dividend cols", { sectionTitle, headerCells, cells });
                         skipped++; continue;
                     }
 
@@ -249,3 +232,31 @@ export function parseIBKR(htmlContent: string): { transactions: TestTransaction[
 
     return { transactions, skipped };
 }
+
+const file = process.argv[2] || "U19321556_20250224_20260205.htm";
+const htmlContent = readFileSync(file, 'utf-8');
+const { transactions, skipped } = parseIBKRCustom(htmlContent);
+
+console.log(`\n============== SKIPPED: ${skipped} =================\n`);
+
+let eurAchat = 0; let eurVente = 0;
+let usdAchat = 0; let usdVente = 0;
+let eurNet = 0; let usdNet = 0;
+
+for (const tx of transactions) {
+    if (tx.currency === "EUR") {
+        eurNet += tx.amount;
+        if (tx.type === "BUY" || (tx.type === "FOREX" && tx.amount < 0)) eurAchat += tx.amount;
+        if (tx.type === "SELL" || (tx.type === "FOREX" && tx.amount > 0)) eurVente += tx.amount;
+    } else if (tx.currency === "USD") {
+        usdNet += tx.amount;
+        if (tx.type === "BUY" || (tx.type === "FOREX" && tx.amount < 0)) usdAchat += tx.amount;
+        if (tx.type === "SELL" || (tx.type === "FOREX" && tx.amount > 0)) usdVente += tx.amount;
+    }
+}
+
+console.log(`GROSS ACHAT EUR: ${eurAchat.toFixed(2)} | IBKR SAYS: -165,007.88`);
+console.log(`GROSS VENTE EUR: ${eurVente.toFixed(2)} | IBKR SAYS: 98,440.38`);
+console.log(`GROSS ACHAT USD: ${usdAchat.toFixed(2)} | IBKR SAYS: -237,303.88`);
+console.log(`GROSS VENTE USD: ${usdVente.toFixed(2)} | IBKR SAYS: 237,313.94`);
+console.log(`NET PARSER SUM: EUR = ${eurNet.toFixed(2)}, USD = ${usdNet.toFixed(2)}`);

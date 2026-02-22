@@ -52,6 +52,13 @@ export function buildPriceLookup(
   return out;
 }
 
+function resolveTickerAlias(ticker: string): string {
+  // Legacy Saxo imports used GOLD-EUR.PA, but Yahoo historical coverage is
+  // reliable on GOLD.PA. Keep this fallback for already-imported rows.
+  if (ticker === "GOLD-EUR.PA") return "GOLD.PA";
+  return ticker;
+}
+
 /**
  * Forward-fill lookup with ±5 day tolerance to handle timestamp misalignment
  * between our weekly Monday-00:00-UTC timeline and Yahoo's market-open timestamps.
@@ -129,7 +136,15 @@ function replayState(
   const sorted = [...transactions].sort((a, b) => {
     const diff = new Date(a.date).getTime() - new Date(b.date).getTime();
     if (diff !== 0) return diff;
-    const typePriority: Record<string, number> = { deposit: 0, buy: 1, conversion: 2, sell: 3, withdrawal: 4 };
+    const typePriority: Record<string, number> = {
+      deposit: 0,
+      transfer_in: 1,
+      buy: 2,
+      conversion: 3,
+      sell: 4,
+      transfer_out: 5,
+      withdrawal: 6,
+    };
     return (typePriority[a.type] ?? 99) - (typePriority[b.type] ?? 99);
   });
 
@@ -166,6 +181,20 @@ function replayState(
         }
         break;
       }
+      case "transfer_in": {
+        if (!tx.ticker || qty === 0 || price === 0) break;
+        if (!positions[tx.ticker]) positions[tx.ticker] = { quantity: 0, currency };
+        positions[tx.ticker].quantity += qty;
+        break;
+      }
+      case "transfer_out": {
+        if (!tx.ticker || qty === 0) break;
+        if (positions[tx.ticker]) {
+          positions[tx.ticker].quantity -= qty;
+          if (positions[tx.ticker].quantity <= 1e-9) delete positions[tx.ticker];
+        }
+        break;
+      }
       case "deposit": {
         const amount = qty !== 0 ? qty * price : price;
         // Convert non-EUR deposits to EUR using a rough approximation;
@@ -180,6 +209,16 @@ function replayState(
         const amount = qty !== 0 ? qty * price : price;
         if (currency === "EUR") {
           cash["EUR"] = (cash["EUR"] ?? 0) - amount;
+        }
+        break;
+      }
+      case "dividend":
+      case "interest":
+      case "coupon": {
+        // Track only EUR side; non-EUR flows are represented by conversion txs.
+        const amount = qty !== 0 ? qty * price : price;
+        if (currency === "EUR") {
+          cash["EUR"] = (cash["EUR"] ?? 0) + amount;
         }
         break;
       }
@@ -225,7 +264,7 @@ function computeValueEUR(
 
   for (const [ticker, pos] of Object.entries(positions)) {
     if (pos.quantity <= 1e-9) continue;
-    const priceSeries = priceLookup[ticker];
+    const priceSeries = priceLookup[ticker] ?? priceLookup[resolveTickerAlias(ticker)];
     if (!priceSeries) continue;
     const price = getPriceAt(priceSeries, timestamp);
     if (price === null || price === 0) continue;
@@ -258,7 +297,7 @@ function getNetFlowsEUR(
   transactions: Transaction[],
   fromSec: number,
   toSec: number,
-  _priceLookup: Record<string, { time: number; price: number }[]>
+  priceLookup: Record<string, { time: number; price: number }[]>
 ): number {
   // Aggregate flows by calendar day (UTC date string)
   const byDay: Record<string, number> = {};
@@ -266,15 +305,28 @@ function getNetFlowsEUR(
   for (const tx of transactions) {
     const txSec = new Date(tx.date).getTime() / 1000;
     if (txSec <= fromSec || txSec > toSec) continue;
-    if (tx.type !== "deposit" && tx.type !== "withdrawal") continue;
+    if (
+      tx.type !== "deposit" &&
+      tx.type !== "withdrawal" &&
+      tx.type !== "transfer_in" &&
+      tx.type !== "transfer_out"
+    ) continue;
+
     const currency = (tx.currency ?? "EUR").toUpperCase();
-    // Only count EUR flows as external capital movements
-    if (currency !== "EUR") continue;
     const qty = tx.quantity ?? 0;
     const price = tx.unit_price ?? 0;
     const amount = qty !== 0 ? qty * price : price;
+    const signedAmount =
+      tx.type === "deposit" || tx.type === "transfer_in"
+        ? amount
+        : -amount;
+    const amountEUR =
+      currency === "EUR"
+        ? signedAmount
+        : toEUR(signedAmount, currency, txSec, priceLookup);
+
     const day = new Date(tx.date).toISOString().split("T")[0];
-    byDay[day] = (byDay[day] ?? 0) + (tx.type === "deposit" ? amount : -amount);
+    byDay[day] = (byDay[day] ?? 0) + amountEUR;
   }
 
   // Sum daily nets — days where deposit == withdrawal cancel out to ~0
@@ -333,6 +385,7 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
   let cumulativeFactor = 1; // product of (1 + R_i)
   let prevValueEUR = 0;
   let prevTime = weeklyTimes[0] - 7 * 24 * 3600;
+  const MIN_CHAIN_BASE_EUR = 100;
 
   for (let i = 0; i < weeklyTimes.length; i++) {
     const t = weeklyTimes[i];
@@ -349,16 +402,23 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
     const hasPositions = Object.keys(state.positions).length > 0;
     const hasMissingPrices = hasPositions && valueEUR <= 0;
 
-    // Compute sub-period return
-    // R_i = V_end / (V_start + external_flows_this_period) - 1
+    // Compute sub-period return.
+    // Weekly granularity can be unstable when the portfolio is nearly empty
+    // (tiny base, admin fee, then large redeposit). We skip chaining when the
+    // base is too small and treat large inflows on tiny bases as restart points.
     if (i > 0 && !hasMissingPrices && valueEUR > 0) {
-      const denominator = prevValueEUR + netFlow;
-      if (denominator > 1) {
-        const subReturn = valueEUR / denominator - 1;
-        cumulativeFactor *= (1 + subReturn);
-      } else if (denominator <= 0 && netFlow > 0) {
-        // Fresh start after zero value (initial deposit with no prior positions)
-        cumulativeFactor = 1;
+      const isFreshRestart = prevValueEUR < MIN_CHAIN_BASE_EUR && netFlow > MIN_CHAIN_BASE_EUR;
+      if (!isFreshRestart) {
+        // Start-of-period flow convention:
+        // R_i = V_end / (V_start + external_flows_this_period) - 1
+        const denominator = prevValueEUR + netFlow;
+        if (denominator > MIN_CHAIN_BASE_EUR) {
+          let subReturn = valueEUR / denominator - 1;
+          if (subReturn < -0.999999) subReturn = -0.999999;
+          if (Number.isFinite(subReturn)) {
+            cumulativeFactor *= (1 + subReturn);
+          }
+        }
       }
     }
 

@@ -75,6 +75,14 @@ function parseDate(v: any): string | null {
 }
 
 // ── Numeric parser ─────────────────────────────────────────────────────
+function looksLikeThousandsWithComma(raw: string): boolean {
+    const clean = raw.replace(/^-/, "");
+    const parts = clean.split(",");
+    if (parts.length <= 1) return false;
+    if (parts[0] === "0") return false; // e.g. 0,845 is usually decimal
+    return parts.slice(1).every((p) => p.length === 3);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function parseNum(v: any, fallback = 0): number {
     if (typeof v === "number") return v;
@@ -88,7 +96,7 @@ function parseNum(v: any, fallback = 0): number {
             s = s.replace(/,/g, "");
         }
     } else if (s.includes(",")) {
-        s = s.replace(/,/g, ".");
+        s = looksLikeThousandsWithComma(s) ? s.replace(/,/g, "") : s.replace(/,/g, ".");
     }
     const n = parseFloat(s);
     return isNaN(n) ? fallback : n;
@@ -109,6 +117,7 @@ function extractQtyPrice(event: string): { qty: number; price: number } | null {
 export function parseSaxoTest(rows: Record<string, any>[]): { transactions: TestTransaction[]; skipped: number } {
     const transactions: TestTransaction[] = [];
     let skipped = 0;
+    let fxGroupCounter = 0;
 
     for (const row of rows) {
         const type = String(row["Type"] ?? "").trim();
@@ -127,28 +136,34 @@ export function parseSaxoTest(rows: Record<string, any>[]): { transactions: Test
 
         if (amount === 0 && !isTransferIn && !isTransferOut && type !== "Montant de liquidités") { skipped++; continue; }
 
-        // DEPOSIT / WITHDRAWAL
-        if (type === "Transfert d'espèces" || type === "Transfert d’espèces" || type === "Montant de liquidités") {
+        // CASH MOVEMENTS
+        const isCashTransfer = type === "Transfert d'espèces" || type === "Transfert d’espèces";
+        const isCashAdjustment = type === "Montant de liquidités";
+        if (isCashTransfer || isCashAdjustment) {
             const sym = symbolRaw ? formatSymbol(symbolRaw) : undefined;
+            const cashTxType: TestTransaction["type"] = isCashAdjustment
+                ? "INTEREST"
+                : (amount > 0 ? "DEPOSIT" : "WITHDRAWAL");
 
             // Generate synthetic FX if not EUR
             if (currency !== "EUR" && amount !== 0) {
                 const targetVolume = amount / exchangeRate;
+                const fxGroupId = `SAXO_FX_${fxGroupCounter++}`;
                 if (amount < 0) {
                     // Outflow: spend EUR to get USD
-                    transactions.push({ date, amount, currency: "EUR", exchangeRate, cashCurrency: "EUR", type: "FOREX" });
-                    transactions.push({ date, amount: Math.abs(targetVolume), currency, exchangeRate, cashCurrency: "EUR", type: "FOREX" });
-                    transactions.push({ date, amount: -Math.abs(targetVolume), currency, exchangeRate, cashCurrency: "EUR", type: "INTEREST", symbol: sym });
+                    transactions.push({ date, amount, currency: "EUR", exchangeRate, cashCurrency: "EUR", type: "FOREX", fxGroupId });
+                    transactions.push({ date, amount: Math.abs(targetVolume), currency, exchangeRate, cashCurrency: "EUR", type: "FOREX", fxGroupId });
+                    transactions.push({ date, amount: -Math.abs(targetVolume), currency, exchangeRate, cashCurrency: "EUR", type: cashTxType, symbol: sym });
                 } else {
                     // Inflow: get USD and convert to EUR
-                    transactions.push({ date, amount: -Math.abs(targetVolume), currency, exchangeRate, cashCurrency: "EUR", type: "FOREX" });
-                    transactions.push({ date, amount, currency: "EUR", exchangeRate, cashCurrency: "EUR", type: "FOREX" });
-                    transactions.push({ date, amount: Math.abs(targetVolume), currency, exchangeRate, cashCurrency: "EUR", type: "INTEREST", symbol: sym });
+                    transactions.push({ date, amount: -Math.abs(targetVolume), currency, exchangeRate, cashCurrency: "EUR", type: "FOREX", fxGroupId });
+                    transactions.push({ date, amount, currency: "EUR", exchangeRate, cashCurrency: "EUR", type: "FOREX", fxGroupId });
+                    transactions.push({ date, amount: Math.abs(targetVolume), currency, exchangeRate, cashCurrency: "EUR", type: cashTxType, symbol: sym });
                 }
             } else {
                 transactions.push({
                     date, amount, currency, exchangeRate, cashCurrency: "EUR",
-                    type: amount > 0 ? "DEPOSIT" : "WITHDRAWAL",
+                    type: cashTxType,
                 });
             }
             continue;
@@ -178,15 +193,16 @@ export function parseSaxoTest(rows: Record<string, any>[]): { transactions: Test
 
             if (isFX) {
                 const targetVolume = parsed.qty * finalPrice;
+                const fxGroupId = `SAXO_FX_${fxGroupCounter++}`;
                 if (txType === "BUY") {
                     // We spent EUR (amount) to get USD (targetVolume)
-                    transactions.push({ date, amount, currency: "EUR", exchangeRate, cashCurrency: "EUR", type: "FOREX" });
-                    transactions.push({ date, amount: targetVolume, currency, exchangeRate, cashCurrency: "EUR", type: "FOREX" });
+                    transactions.push({ date, amount, currency: "EUR", exchangeRate, cashCurrency: "EUR", type: "FOREX", fxGroupId });
+                    transactions.push({ date, amount: targetVolume, currency, exchangeRate, cashCurrency: "EUR", type: "FOREX", fxGroupId });
                     txAmount = -targetVolume;
                 } else if (txType === "SELL") {
                     // We sold USD (targetVolume) to get EUR (amount)
-                    transactions.push({ date, amount: -targetVolume, currency, exchangeRate, cashCurrency: "EUR", type: "FOREX" });
-                    transactions.push({ date, amount, currency: "EUR", exchangeRate, cashCurrency: "EUR", type: "FOREX" });
+                    transactions.push({ date, amount: -targetVolume, currency, exchangeRate, cashCurrency: "EUR", type: "FOREX", fxGroupId });
+                    transactions.push({ date, amount, currency: "EUR", exchangeRate, cashCurrency: "EUR", type: "FOREX", fxGroupId });
                     txAmount = targetVolume;
                 }
             }
@@ -208,9 +224,10 @@ export function parseSaxoTest(rows: Record<string, any>[]): { transactions: Test
 
             if (currency !== "EUR" && amount !== 0) {
                 const targetVolume = amount / exchangeRate;
+                const fxGroupId = `SAXO_FX_${fxGroupCounter++}`;
                 // Dividends are inflows
-                transactions.push({ date, amount: -Math.abs(targetVolume), currency, exchangeRate, cashCurrency: "EUR", type: "FOREX" });
-                transactions.push({ date, amount, currency: "EUR", exchangeRate, cashCurrency: "EUR", type: "FOREX" });
+                transactions.push({ date, amount: -Math.abs(targetVolume), currency, exchangeRate, cashCurrency: "EUR", type: "FOREX", fxGroupId });
+                transactions.push({ date, amount, currency: "EUR", exchangeRate, cashCurrency: "EUR", type: "FOREX", fxGroupId });
                 txAmount = Math.abs(targetVolume);
             }
 
