@@ -50,8 +50,8 @@ function mapTransactionsBulk(transactions: TestTransaction[], portfolioId: strin
             result.push({
                 portfolio_id: portfolioId,
                 date: tx.date,
-                type: tx.amount > 0 ? "forex_in" as any : "forex_out" as any,
-                ticker: null,
+                type: tx.amount > 0 ? "deposit" as any : "withdrawal" as any,
+                ticker: "FOREX",
                 quantity: Math.abs(tx.amount),
                 unit_price: 1,
                 fees: 0,
@@ -104,11 +104,22 @@ function mapTransactionsBulk(transactions: TestTransaction[], portfolioId: strin
                 result.push({
                     portfolio_id: portfolioId,
                     date: tx.date,
-                    type: "conversion" as any,
-                    ticker: tx.cashCurrency, // Source currency
+                    type: "withdrawal" as any,
+                    ticker: "CONVERSION", // Fallback flag for DB constraint
+                    currency: tx.cashCurrency,   // Source currency
+                    quantity: absAmount, // target amount (EUR)
+                    unit_price: 1, // Exchange rate
+                    fees: 0,
+                    _totalEUR: 0 // Already accounted
+                });
+                result.push({
+                    portfolio_id: portfolioId,
+                    date: tx.date,
+                    type: "deposit" as any,
+                    ticker: "CONVERSION",
                     currency: tx.currency,   // Target currency
                     quantity: tradeValueAssetCurrency, // Target amount
-                    unit_price: absAmount / tradeValueAssetCurrency, // Exchange rate
+                    unit_price: 1, // Exchange rate
                     fees: 0,
                     _totalEUR: 0 // Already accounted
                 });
@@ -118,11 +129,22 @@ function mapTransactionsBulk(transactions: TestTransaction[], portfolioId: strin
                 result.push({
                     portfolio_id: portfolioId,
                     date: tx.date,
-                    type: "conversion" as any,
-                    ticker: tx.currency, // Source
+                    type: "withdrawal" as any,
+                    ticker: "CONVERSION",
+                    currency: tx.currency, // Source
+                    quantity: tradeValueAssetCurrency,
+                    unit_price: 1, // Exchange rate
+                    fees: 0,
+                    _totalEUR: 0
+                });
+                result.push({
+                    portfolio_id: portfolioId,
+                    date: tx.date,
+                    type: "deposit" as any,
+                    ticker: "CONVERSION",
                     currency: tx.cashCurrency, // Target
                     quantity: absAmount, // target amount (EUR)
-                    unit_price: tradeValueAssetCurrency / absAmount, // Exchange rate
+                    unit_price: 1, // Exchange rate
                     fees: 0,
                     _totalEUR: 0
                 });
