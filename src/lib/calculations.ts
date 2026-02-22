@@ -174,8 +174,7 @@ export function calculatePortfolioStats(
   }
 
   return {
-    totalValue: positions.reduce((s, p) => s + p.currentValue * getExchangeRate(p.currency, baseCurrency, assetsCache), 0) +
-      Object.entries(cashBalances).reduce((s, [c, a]) => s + a * getExchangeRate(c, baseCurrency, assetsCache), 0),
+    totalValue: positions.reduce((s, p) => s + p.currentValue * getExchangeRate(p.currency, baseCurrency, assetsCache), 0),
     totalInvested,
   };
 }

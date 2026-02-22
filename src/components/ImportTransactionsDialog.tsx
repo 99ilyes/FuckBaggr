@@ -58,7 +58,7 @@ function groupForexToConversions(forexTxs: TestTransaction[], portfolioId: strin
                 date: tx1.date,
                 type: "interest",
                 ticker: null,
-                quantity: Math.abs(tx1.amount),
+                quantity: tx1.amount,
                 unit_price: 1,
                 fees: 0,
                 currency: tx1.currency,
@@ -75,8 +75,19 @@ function groupForexToConversions(forexTxs: TestTransaction[], portfolioId: strin
         } else if (tx2.amount < 0 && tx1.amount > 0) {
             source = tx2; target = tx1;
         } else {
-            // Both same sign — skip pair
-            i += 2;
+            // Both same sign — treat first one as orphan fee and let the second be handled in next iteration
+            results.push({
+                portfolio_id: portfolioId,
+                date: tx1.date,
+                type: "interest",
+                ticker: null,
+                quantity: tx1.amount,
+                unit_price: 1,
+                fees: 0,
+                currency: tx1.currency,
+                _totalEUR: tx1.amount,
+            });
+            i++;
             continue;
         }
 
@@ -138,7 +149,7 @@ function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): P
         date: tx.date,
         type: mappedType as any,
         ticker: tx.symbol || null,
-        quantity: tx.quantity || Math.abs(tx.amount),
+        quantity: (mappedType === "interest" || mappedType === "dividend") ? tx.amount : (tx.quantity || Math.abs(tx.amount)),
         unit_price: tx.price || 1,
         fees: calculatedFees,
         currency: tx.currency,
@@ -189,11 +200,11 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                 setFileType("html");
                 const text = await selectedFile.text();
                 const { transactions, skipped } = parseIBKR(text);
-                
+
                 // Separate FOREX from other transactions
                 const forexTxs = transactions.filter(t => t.type === "FOREX");
                 const otherTxs = transactions.filter(t => t.type !== "FOREX");
-                
+
                 // Map non-FOREX normally
                 const mappedOthers = otherTxs.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
                 // Group FOREX into conversions
