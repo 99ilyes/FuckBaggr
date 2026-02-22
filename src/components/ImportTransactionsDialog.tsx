@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -40,169 +40,36 @@ const TYPE_LABELS: Record<string, { label: string; className: string }> = {
 
 // Removed ibkrToParseResult
 
-function mapTransactionsBulk(transactions: TestTransaction[], portfolioId: string): ParsedTransaction[] {
-    const result: ParsedTransaction[] = [];
-
-    // Group FOREX transactions by date to pair them up
-    const forexByDate = new Map<string, TestTransaction[]>();
-
-    for (const tx of transactions) {
-        if (tx.type === "FOREX") {
-            const list = forexByDate.get(tx.date) || [];
-            list.push(tx);
-            forexByDate.set(tx.date, list);
-            continue;
-        }
-
-        let mappedType = tx.type.toLowerCase() as any;
-        if (tx.type === "DIVIDEND" && tx.amount < 0) {
-            mappedType = "withdrawal";
-        }
-
-        // Cash transactions (DEPOSIT/WITHDRAWAL/DIVIDEND) should use cashCurrency if available
-        const isCashFlow = tx.type === "DEPOSIT" || tx.type === "WITHDRAWAL" || tx.type === "DIVIDEND" || mappedType === "withdrawal";
-        const finalCurrency = isCashFlow ? (tx.cashCurrency || tx.currency) : tx.currency;
-
-        let calculatedFees = 0;
-        const isCrossCurrency = !isCashFlow && tx.cashCurrency && tx.cashCurrency !== tx.currency;
-
-        if (!isCrossCurrency) {
-            if (tx.type === "BUY" && tx.quantity != null && tx.price != null) {
-                calculatedFees = Math.max(0, Math.abs(tx.amount) - (tx.quantity * tx.price));
-            } else if (tx.type === "SELL" && tx.quantity != null && tx.price != null) {
-                calculatedFees = Math.max(0, (tx.quantity * tx.price) - tx.amount);
-            }
-        }
-
-        const tradeValueAssetCurrency = (tx.quantity || 0) * (tx.price || 1);
-
-        result.push({
-            portfolio_id: portfolioId,
-            date: tx.date,
-            type: mappedType,
-            ticker: tx.symbol || null,
-            quantity: tx.quantity || Math.abs(tx.amount),
-            unit_price: tx.price || 1,
-            fees: calculatedFees,
-            currency: finalCurrency,
-            _totalEUR: tx.amount
-        });
-
-        // Implicit conversion for Saxo Bank cases where a trade in USD deducts EUR cash directly
-        if (!isCashFlow && tx.cashCurrency && tx.cashCurrency !== tx.currency && tradeValueAssetCurrency > 0) {
-            const absAmount = Math.abs(tx.amount); // Account currency (EUR) amount
-            if (tx.type === "BUY") {
-                // Bought in USD (currency), paid in EUR (cashCurrency)
-                // Need a conversion from EUR to USD to fund it
-                result.push({
-                    portfolio_id: portfolioId,
-                    date: tx.date,
-                    type: "conversion" as any,
-                    ticker: tx.cashCurrency, // Source currency
-                    currency: tx.currency,   // Target currency
-                    quantity: tradeValueAssetCurrency, // Target amount
-                    unit_price: absAmount / tradeValueAssetCurrency, // Exchange rate
-                    fees: 0,
-                    _totalEUR: 0 // Already accounted
-                });
-            } else if (tx.type === "SELL" || tx.type === "DIVIDEND") {
-                // Sold in USD, received EUR
-                // Need a conversion from USD to EUR
-                result.push({
-                    portfolio_id: portfolioId,
-                    date: tx.date,
-                    type: "conversion" as any,
-                    ticker: tx.currency, // Source
-                    currency: tx.cashCurrency, // Target
-                    quantity: absAmount, // target amount (EUR)
-                    unit_price: tradeValueAssetCurrency / absAmount, // Exchange rate
-                    fees: 0,
-                    _totalEUR: 0
-                });
-            }
-        }
+function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): ParsedTransaction {
+    let mappedType = tx.type.toLowerCase() as any;
+    // Specifically map FOREX to deposit/withdrawal so it correctly affects cash balances
+    if (tx.type === "FOREX") {
+        mappedType = tx.amount >= 0 ? "deposit" : "withdrawal";
+    } else if (tx.type === "DIVIDEND" && tx.amount < 0) {
+        // Map withholding taxes (negative dividends) to withdrawal so they decrease cash balance appropriately
+        mappedType = "withdrawal";
     }
 
-    // Process explicit FOREX pairs (IBKR style)
-    for (const [date, forexTxList] of forexByDate.entries()) {
-        // We expect FOREX to come in pairs: one positive (target), one negative (source)
-        let i = 0;
-        while (i < forexTxList.length - 1) {
-            const a = forexTxList[i];
-            const b = forexTxList[i + 1];
-
-            // Wait, IBKR groups them. Let's find pairs of opposing signs.
-            // For simplicity, just assume they are adjacent if parsed sequentially.
-            if ((a.amount > 0 && b.amount < 0) || (a.amount < 0 && b.amount > 0)) {
-                const target = a.amount > 0 ? a : b;
-                const source = a.amount < 0 ? a : b;
-
-                result.push({
-                    portfolio_id: portfolioId,
-                    date,
-                    type: "conversion" as any,
-                    ticker: source.currency,
-                    currency: target.currency,
-                    quantity: target.amount,
-                    unit_price: Math.abs(source.amount) / target.amount,
-                    fees: 0,
-                    _totalEUR: 0
-                });
-                i += 2;
-            } else {
-                // If they don't pair, treat as simple deposit/withdrawal (fallback)
-                result.push({
-                    portfolio_id: portfolioId,
-                    date: a.date,
-                    type: a.amount >= 0 ? "deposit" as any : "withdrawal" as any,
-                    ticker: null,
-                    quantity: Math.abs(a.amount),
-                    unit_price: 1,
-                    fees: 0,
-                    currency: a.currency,
-                    _totalEUR: a.amount
-                });
-                i++;
-            }
-        }
-        if (i === forexTxList.length - 1) {
-            const a = forexTxList[i];
-            result.push({
-                portfolio_id: portfolioId,
-                date: a.date,
-                type: a.amount >= 0 ? "deposit" as any : "withdrawal" as any,
-                ticker: null,
-                quantity: Math.abs(a.amount),
-                unit_price: 1,
-                fees: 0,
-                currency: a.currency,
-                _totalEUR: a.amount
-            });
-        }
+    // Extract hidden fee from difference between amount and theoretical trade value
+    let calculatedFees = 0;
+    if (tx.type === "BUY" && tx.quantity != null && tx.price != null) {
+        calculatedFees = Math.max(0, Math.abs(tx.amount) - (tx.quantity * tx.price));
+    } else if (tx.type === "SELL" && tx.quantity != null && tx.price != null) {
+        calculatedFees = Math.max(0, (tx.quantity * tx.price) - tx.amount);
     }
 
-    // Sort by date to maintain chronological order
-    return result.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-}
-
-function calculateNegativeWarnings(mapped: ParsedTransaction[]) {
-    let cashBalance = 0;
-    const dailyBalances = new Map<string, number>();
-
-    // Aggregate cash balance sequentially. Map keeps insertion order.
-    // The last value for a given date will be the end-of-day balance.
-    for (const tx of mapped) {
-        cashBalance += tx._totalEUR ?? 0;
-        dailyBalances.set(tx.date, cashBalance);
-    }
-
-    const warnings: Array<{ date: string; balance: number }> = [];
-    for (const [date, balance] of dailyBalances.entries()) {
-        if (balance < -0.01) {
-            warnings.push({ date, balance: Math.round(balance * 100) / 100 });
-        }
-    }
-    return warnings;
+    return {
+        portfolio_id: portfolioId,
+        date: tx.date,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        type: mappedType, // Cast to any to bypass strict DB enums for display
+        ticker: tx.symbol || null,
+        quantity: tx.quantity || Math.abs(tx.amount),
+        unit_price: tx.price || 1,
+        fees: calculatedFees,
+        currency: tx.currency,
+        _totalEUR: tx.amount // Preserve exact cash flow sign for accurate preview
+    };
 }
 
 export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Props) {
@@ -224,88 +91,92 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
         setPortfolioId("");
     };
 
-    useEffect(() => {
-        if (!file) {
-            setPreviewData([]);
-            setSkippedCount(0);
-            setNegativeWarnings([]);
-            return;
-        }
+    const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFile = e.target.files?.[0];
+        if (!selectedFile) return;
+        setFile(selectedFile);
+        setPreviewData([]);
+        setSkippedCount(0);
+        setNegativeWarnings([]);
 
-        const ext = file.name.split(".").pop()?.toLowerCase();
+        const ext = selectedFile.name.split(".").pop()?.toLowerCase();
+
+        // Wait for a valid portfolioId before parsing (or use 'temp' and remap on import)
+        // We'll use 'temp' to allow preview before selecting portfolio
         const tempPortfolioId = portfolioId || "temp";
 
-        const processFile = async () => {
-            try {
-                if (broker === "ibkr") {
-                    // IBKR: parse HTML file
-                    if (ext !== "html" && ext !== "htm") {
-                        toast({ title: "Format non supporté", description: "IBKR nécessite un fichier .html (relevé Flex)", variant: "destructive" });
-                        setFile(null); // Reset if invalid
-                        return;
-                    }
-                    setFileType("html");
-                    const text = await file.text();
-                    const { transactions, skipped } = parseIBKR(text);
-                    const mapped = mapTransactionsBulk(transactions, tempPortfolioId);
+        try {
+            if (broker === "ibkr") {
+                // IBKR: parse HTML file
+                if (ext !== "html" && ext !== "htm") {
+                    toast({ title: "Format non supporté", description: "IBKR nécessite un fichier .html (relevé Flex)", variant: "destructive" });
+                    return;
+                }
+                setFileType("html");
+                const text = await selectedFile.text();
+                const { transactions, skipped } = parseIBKR(text);
+                const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
 
-                    const warnings = calculateNegativeWarnings(mapped);
+                let cashBalance = 0;
+                const warnings: Array<{ date: string; balance: number }> = [];
+                for (const tx of mapped) {
+                    cashBalance += tx._totalEUR ?? 0;
+                    if (cashBalance < -0.01) {
+                        warnings.push({ date: tx.date, balance: Math.round(cashBalance * 100) / 100 });
+                    }
+                }
+
+                setPreviewData(mapped);
+                setSkippedCount(skipped);
+                setNegativeWarnings(warnings);
+            } else {
+                // Saxo: XLSX or CSV
+                if (ext === "xlsx" || ext === "xls") {
+                    setFileType("xlsx");
+                    const buffer = await selectedFile.arrayBuffer();
+                    const workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true });
+                    const sheetName = workbook.SheetNames[0];
+                    const sheet = workbook.Sheets[sheetName];
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+
+                    if (rows.length > 0) {
+                        console.log("[XLSX] Headers found:", Object.keys(rows[0]));
+                        console.log("[XLSX] First row sample:", rows[0]);
+                    }
+
+                    const { transactions, skipped } = parseSaxoTest(rows);
+                    const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
+
+                    let cashBalance = 0;
+                    const warnings: Array<{ date: string; balance: number }> = [];
+                    for (const tx of mapped) {
+                        cashBalance += tx._totalEUR ?? 0;
+                        if (cashBalance < -0.01) {
+                            warnings.push({ date: tx.date, balance: Math.round(cashBalance * 100) / 100 });
+                        }
+                    }
 
                     setPreviewData(mapped);
                     setSkippedCount(skipped);
                     setNegativeWarnings(warnings);
+                } else if (ext === "csv") {
+                    setFileType("csv");
+                    const text = await selectedFile.text();
+                    const parsed = parseCSV(text, "temp");
+                    setPreviewData(parsed as ParsedTransaction[]);
+                    setSkippedCount(0);
+                    setNegativeWarnings([]);
                 } else {
-                    // Saxo: XLSX or CSV
-                    if (ext === "xlsx" || ext === "xls") {
-                        setFileType("xlsx");
-                        const buffer = await file.arrayBuffer();
-                        const workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true });
-                        const sheetName = workbook.SheetNames[0];
-                        const sheet = workbook.Sheets[sheetName];
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
-
-                        if (rows.length > 0) {
-                            console.log("[XLSX] Headers found:", Object.keys(rows[0]));
-                            console.log("[XLSX] First row sample:", rows[0]);
-                        }
-
-                        const { transactions, skipped } = parseSaxoTest(rows);
-                        const mapped = mapTransactionsBulk(transactions, tempPortfolioId);
-
-                        const warnings = calculateNegativeWarnings(mapped);
-
-                        if (mapped.length === 0 && skipped > 0) {
-                            toast({ title: "Fichier de relevé incomplet", description: "Ce fichier semble être un 'Relevé de compte' (AccountStatement). Veuillez exporter vos 'Opérations' (Trades Executed/Transactions) pour que toutes les colonnes soient trouvées.", variant: "destructive" });
-                            setFile(null);
-                            return;
-                        }
-
-                        setPreviewData(mapped);
-                        setSkippedCount(skipped);
-                        setNegativeWarnings(warnings);
-                    } else if (ext === "csv") {
-                        setFileType("csv");
-                        const text = await file.text();
-                        const parsed = parseCSV(text, tempPortfolioId);
-                        setPreviewData(parsed as ParsedTransaction[]);
-                        setSkippedCount(0);
-                        setNegativeWarnings([]);
-                    } else {
-                        toast({ title: "Format non supporté", description: "Veuillez sélectionner .xlsx, .htm ou .csv", variant: "destructive" });
-                        setFile(null);
-                    }
+                    toast({ title: "Format non supporté", description: "Veuillez sélectionner .xlsx, .htm ou .csv", variant: "destructive" });
                 }
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            } catch (err: any) {
-                toast({ title: "Erreur de lecture", description: err.message, variant: "destructive" });
-                setPreviewData([]);
-                setFile(null);
             }
-        };
-
-        processFile();
-    }, [file, broker, portfolioId]);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } catch (err: any) {
+            toast({ title: "Erreur de lecture", description: err.message, variant: "destructive" });
+            setPreviewData([]);
+        }
+    }, [portfolioId, broker]);
 
     const handleImport = () => {
         if (!portfolioId || previewData.length === 0) return;
@@ -388,10 +259,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                                     type="file"
                                     accept={acceptedFormats}
                                     className="hidden"
-                                    onChange={(e) => {
-                                        const selectedFile = e.target.files?.[0];
-                                        if (selectedFile) setFile(selectedFile);
-                                    }}
+                                    onChange={handleFileChange}
                                 />
                             </Button>
                         </div>
@@ -414,8 +282,8 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
 
                     {/* Negative balance warning */}
                     {negativeWarnings.length > 0 && (
-                        <Alert className="border-orange-500/50 text-orange-600 dark:border-orange-500/30 dark:text-orange-400">
-                            <AlertTriangle className="h-4 w-4 stroke-current" />
+                        <Alert variant="destructive">
+                            <AlertTriangle className="h-4 w-4" />
                             <AlertDescription>
                                 <strong>Solde cash négatif détecté</strong> — {negativeWarnings.length} point(s) avec solde négatif (ex : {negativeWarnings[0].date} → {formatAmount(negativeWarnings[0].balance)} €).
                                 Des transactions de dépôt sont peut-être manquantes dans ce relevé.
@@ -495,7 +363,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                     <Button variant="ghost" onClick={() => { resetState(); onOpenChange(false); }}>Annuler</Button>
                     <Button
                         onClick={handleImport}
-                        disabled={!portfolioId || previewData.length === 0 || createBatchTransactions.isPending}
+                        disabled={!portfolioId || previewData.length === 0 || createBatchTransactions.isPending || negativeWarnings.length > 0}
                     >
                         {createBatchTransactions.isPending ? "Import en cours…" : `Importer ${previewData.length > 0 ? `(${previewData.length})` : ""}`}
                     </Button>

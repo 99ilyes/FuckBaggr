@@ -74,13 +74,6 @@ function formatSymbol(raw: string): string | undefined {
     cleanBase = "NOVO-B";
   }
 
-  // Specific override for Amundi Physical Gold ETC in EUR
-  // On Saxo it appears as GOLD:xpar. Yahoo's GOLD.PA is Barrick Gold (USD).
-  // The correct EUR ticker on Yahoo Finance is GOLD-EUR.PA.
-  if (cleanBase === "GOLD" && exchange?.toLowerCase() === "xpar") {
-    return "GOLD-EUR.PA";
-  }
-
   const suffix = EXCHANGE_SUFFIX[exchange?.toLowerCase() ?? ""];
   return cleanBase + (suffix ?? "");
 }
@@ -139,19 +132,8 @@ function parseNum(v: any, fallback = 0): number {
 function extractQtyPrice(event: string): { qty: number; price: number } | null {
   const m = event.match(/(?:Acheter|Vendre|Transfert entrant|Transfert sortant)\s+([-\d,.\s]+)\s*@\s*([\d,.\s]+)/i);
   if (!m) return null;
-
-  let rawQty = m[1].replace(/\s+/g, "");
-  let rawPrice = m[2].replace(/\s+/g, "");
-
-  if (/(?:^|\D)\d{1,3},\d{3}$/.test(rawQty) || /^,\d{3}$/.test(rawQty) || /^\d+,\d{3}$/.test(rawQty)) {
-    rawQty = rawQty.replace(/,/g, "");
-  }
-  if (/(?:^|\D)\d{1,3},\d{3}$/.test(rawPrice) || /^,\d{3}$/.test(rawPrice) || /^\d+,\d{3}$/.test(rawPrice)) {
-    rawPrice = rawPrice.replace(/,/g, "");
-  }
-
-  const qty = Math.abs(parseNum(rawQty));
-  const price = parseNum(rawPrice);
+  const qty = Math.abs(parseNum(m[1]));
+  const price = parseNum(m[2]);
   if (isNaN(qty) || isNaN(price)) return null;
   return { qty, price };
 }
@@ -603,6 +585,7 @@ function computeKPIs(transactions: TestTransaction[], histories: Record<string, 
       const transferValue = (tx.quantity || 0) * eurPrice;
       current.quantity += tx.quantity || 0;
       current.eurCostBasis += transferValue;
+      netInjected += transferValue;
     } else if (tx.type === "TRANSFER_OUT") {
       const transferValue = (tx.quantity || 0) * eurPrice;
       if (current.quantity > 0) {
@@ -611,6 +594,7 @@ function computeKPIs(transactions: TestTransaction[], histories: Record<string, 
         current.quantity -= tx.quantity || 0;
         current.eurCostBasis -= basisSold;
       }
+      netInjected -= transferValue;
     }
 
     // Clean up floating point tiny errors around 0
