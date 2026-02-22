@@ -35,7 +35,9 @@ const TYPE_LABELS: Record<string, { label: string; className: string }> = {
     coupon: { label: "Coupon", className: "text-indigo-600 dark:text-indigo-400 font-medium" },
     transfer_in: { label: "Transfert ↓", className: "text-teal-600 dark:text-teal-400 font-medium" },
     transfer_out: { label: "Transfert ↑", className: "text-pink-600 dark:text-pink-400 font-medium" },
-    forex: { label: "Forex", className: "text-cyan-600 dark:text-cyan-400 font-medium" },
+    forex_in: { label: "Forex (In)", className: "text-cyan-600 dark:text-cyan-400 font-medium" },
+    forex_out: { label: "Forex (Out)", className: "text-cyan-600 dark:text-cyan-400 font-medium" },
+    conversion: { label: "Conversion", className: "text-indigo-600 dark:text-indigo-400 font-medium" },
 };
 
 // Removed ibkrToParseResult
@@ -43,14 +45,19 @@ const TYPE_LABELS: Record<string, { label: string; className: string }> = {
 function mapTransactionsBulk(transactions: TestTransaction[], portfolioId: string): ParsedTransaction[] {
     const result: ParsedTransaction[] = [];
 
-    // Group FOREX transactions by date to pair them up
-    const forexByDate = new Map<string, TestTransaction[]>();
-
     for (const tx of transactions) {
         if (tx.type === "FOREX") {
-            const list = forexByDate.get(tx.date) || [];
-            list.push(tx);
-            forexByDate.set(tx.date, list);
+            result.push({
+                portfolio_id: portfolioId,
+                date: tx.date,
+                type: tx.amount > 0 ? "forex_in" as any : "forex_out" as any,
+                ticker: null,
+                quantity: Math.abs(tx.amount),
+                unit_price: 1,
+                fees: 0,
+                currency: tx.currency,
+                _totalEUR: tx.amount
+            });
             continue;
         }
 
@@ -120,64 +127,6 @@ function mapTransactionsBulk(transactions: TestTransaction[], portfolioId: strin
                     _totalEUR: 0
                 });
             }
-        }
-    }
-
-    // Process explicit FOREX pairs (IBKR style)
-    for (const [date, forexTxList] of forexByDate.entries()) {
-        // We expect FOREX to come in pairs: one positive (target), one negative (source)
-        let i = 0;
-        while (i < forexTxList.length - 1) {
-            const a = forexTxList[i];
-            const b = forexTxList[i + 1];
-
-            // Wait, IBKR groups them. Let's find pairs of opposing signs.
-            // For simplicity, just assume they are adjacent if parsed sequentially.
-            if ((a.amount > 0 && b.amount < 0) || (a.amount < 0 && b.amount > 0)) {
-                const target = a.amount > 0 ? a : b;
-                const source = a.amount < 0 ? a : b;
-
-                result.push({
-                    portfolio_id: portfolioId,
-                    date,
-                    type: "conversion" as any,
-                    ticker: source.currency,
-                    currency: target.currency,
-                    quantity: target.amount,
-                    unit_price: Math.abs(source.amount) / target.amount,
-                    fees: 0,
-                    _totalEUR: 0
-                });
-                i += 2;
-            } else {
-                // If they don't pair, treat as simple deposit/withdrawal (fallback)
-                result.push({
-                    portfolio_id: portfolioId,
-                    date: a.date,
-                    type: a.amount >= 0 ? "deposit" as any : "withdrawal" as any,
-                    ticker: null,
-                    quantity: Math.abs(a.amount),
-                    unit_price: 1,
-                    fees: 0,
-                    currency: a.currency,
-                    _totalEUR: a.amount
-                });
-                i++;
-            }
-        }
-        if (i === forexTxList.length - 1) {
-            const a = forexTxList[i];
-            result.push({
-                portfolio_id: portfolioId,
-                date: a.date,
-                type: a.amount >= 0 ? "deposit" as any : "withdrawal" as any,
-                ticker: null,
-                quantity: Math.abs(a.amount),
-                unit_price: 1,
-                fees: 0,
-                currency: a.currency,
-                _totalEUR: a.amount
-            });
         }
     }
 

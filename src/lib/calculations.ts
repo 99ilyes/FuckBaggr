@@ -123,6 +123,10 @@ export function calculateCashBalances(transactions: Transaction[]): CashBalances
       balances[currency] = (balances[currency] || 0) + tx.quantity;
     } else if (tx.type === "dividend") {
       balances[currency] = (balances[currency] || 0) + (tx.quantity || 0) * (tx.unit_price || 1);
+    } else if (tx.type === "forex_in") {
+      balances[currency] = (balances[currency] || 0) + (tx.quantity || 0) * (tx.unit_price || 1);
+    } else if (tx.type === "forex_out") {
+      balances[currency] = (balances[currency] || 0) - (tx.quantity || 0) * (tx.unit_price || 1);
     }
   }
 
