@@ -35,19 +35,94 @@ const TYPE_LABELS: Record<string, { label: string; className: string }> = {
     coupon: { label: "Coupon", className: "text-indigo-600 dark:text-indigo-400 font-medium" },
     transfer_in: { label: "Transfert ↓", className: "text-teal-600 dark:text-teal-400 font-medium" },
     transfer_out: { label: "Transfert ↑", className: "text-pink-600 dark:text-pink-400 font-medium" },
-    forex: { label: "Forex", className: "text-cyan-600 dark:text-cyan-400 font-medium" },
+    conversion: { label: "Conversion", className: "text-orange-600 dark:text-orange-400 font-medium" },
 };
 
-// Removed ibkrToParseResult
+/**
+ * Group FOREX TestTransactions into conversion ParsedTransactions.
+ * FOREX transactions come in pairs: one negative (source currency) and one positive (target currency),
+ * optionally followed by a small negative commission in one of the currencies.
+ */
+function groupForexToConversions(forexTxs: TestTransaction[], portfolioId: string): ParsedTransaction[] {
+    const results: ParsedTransaction[] = [];
+    let i = 0;
+    while (i < forexTxs.length) {
+        const tx1 = forexTxs[i];
+        const tx2 = i + 1 < forexTxs.length ? forexTxs[i + 1] : null;
+
+        // Need at least a pair with same date
+        if (!tx2 || tx1.date !== tx2.date) {
+            // Orphan forex — treat as interest/fee
+            results.push({
+                portfolio_id: portfolioId,
+                date: tx1.date,
+                type: "interest",
+                ticker: null,
+                quantity: Math.abs(tx1.amount),
+                unit_price: 1,
+                fees: 0,
+                currency: tx1.currency,
+                _totalEUR: tx1.amount,
+            });
+            i++;
+            continue;
+        }
+
+        // Identify source (negative) and target (positive)
+        let source: TestTransaction, target: TestTransaction;
+        if (tx1.amount < 0 && tx2.amount > 0) {
+            source = tx1; target = tx2;
+        } else if (tx2.amount < 0 && tx1.amount > 0) {
+            source = tx2; target = tx1;
+        } else {
+            // Both same sign — skip pair
+            i += 2;
+            continue;
+        }
+
+        // Absorb commission(s) that follow with same date
+        let fees = 0;
+        let nextIdx = i + 2;
+        while (nextIdx < forexTxs.length && forexTxs[nextIdx].date === tx1.date && forexTxs[nextIdx].amount < 0 && Math.abs(forexTxs[nextIdx].amount) < Math.abs(source.amount) * 0.01) {
+            fees += Math.abs(forexTxs[nextIdx].amount);
+            nextIdx++;
+        }
+
+        // conversion: ticker = source currency, currency = target currency
+        // quantity = amount received (target), unit_price = source_amount / target_amount (exchange rate)
+        const sourceAmount = Math.abs(source.amount);
+        const targetAmount = Math.abs(target.amount);
+        const rate = sourceAmount / targetAmount;
+
+        results.push({
+            portfolio_id: portfolioId,
+            date: tx1.date,
+            type: "conversion",
+            ticker: source.currency,  // source currency
+            quantity: targetAmount,    // amount received
+            unit_price: rate,          // exchange rate
+            fees,
+            currency: target.currency, // target currency
+            _totalEUR: 0, // net zero for cash flow purposes
+        });
+
+        i = nextIdx;
+    }
+    return results;
+}
 
 function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): ParsedTransaction {
-    let mappedType = tx.type.toLowerCase() as any;
-    // Specifically map FOREX to deposit/withdrawal so it correctly affects cash balances
-    if (tx.type === "FOREX") {
-        mappedType = tx.amount >= 0 ? "deposit" : "withdrawal";
-    } else if (tx.type === "DIVIDEND" && tx.amount < 0) {
-        // Map withholding taxes (negative dividends) to withdrawal so they decrease cash balance appropriately
-        mappedType = "withdrawal";
+    let mappedType: string;
+    switch (tx.type) {
+        case "BUY": mappedType = "buy"; break;
+        case "SELL": mappedType = "sell"; break;
+        case "DEPOSIT": mappedType = "deposit"; break;
+        case "WITHDRAWAL": mappedType = "withdrawal"; break;
+        case "DIVIDEND": mappedType = "dividend"; break;
+        case "INTEREST": mappedType = "interest"; break;
+        case "TRANSFER_IN": mappedType = "buy"; break;
+        case "TRANSFER_OUT": mappedType = "sell"; break;
+        default: mappedType = tx.type.toLowerCase(); break;
     }
 
     // Extract hidden fee from difference between amount and theoretical trade value
@@ -61,14 +136,13 @@ function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): P
     return {
         portfolio_id: portfolioId,
         date: tx.date,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        type: mappedType, // Cast to any to bypass strict DB enums for display
+        type: mappedType as any,
         ticker: tx.symbol || null,
         quantity: tx.quantity || Math.abs(tx.amount),
         unit_price: tx.price || 1,
         fees: calculatedFees,
         currency: tx.currency,
-        _totalEUR: tx.amount // Preserve exact cash flow sign for accurate preview
+        _totalEUR: tx.amount
     };
 }
 
@@ -115,7 +189,17 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                 setFileType("html");
                 const text = await selectedFile.text();
                 const { transactions, skipped } = parseIBKR(text);
-                const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
+                
+                // Separate FOREX from other transactions
+                const forexTxs = transactions.filter(t => t.type === "FOREX");
+                const otherTxs = transactions.filter(t => t.type !== "FOREX");
+                
+                // Map non-FOREX normally
+                const mappedOthers = otherTxs.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
+                // Group FOREX into conversions
+                const mappedForex = groupForexToConversions(forexTxs, tempPortfolioId);
+                // Combine and sort by date
+                const mapped = [...mappedOthers, ...mappedForex].sort((a, b) => a.date.localeCompare(b.date));
 
                 let cashBalance = 0;
                 const warnings: Array<{ date: string; balance: number }> = [];
