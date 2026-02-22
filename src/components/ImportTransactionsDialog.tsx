@@ -201,12 +201,17 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                 // Combine and sort by date
                 const mapped = [...mappedOthers, ...mappedForex].sort((a, b) => a.date.localeCompare(b.date));
 
+                // Check daily end-of-day balances (not per-transaction)
+                const dailyTotals = new Map<string, number>();
+                for (const tx of mapped) {
+                    dailyTotals.set(tx.date, (dailyTotals.get(tx.date) || 0) + (tx._totalEUR ?? 0));
+                }
                 let cashBalance = 0;
                 const warnings: Array<{ date: string; balance: number }> = [];
-                for (const tx of mapped) {
-                    cashBalance += tx._totalEUR ?? 0;
+                for (const [date, dayAmount] of dailyTotals) {
+                    cashBalance += dayAmount;
                     if (cashBalance < -0.01) {
-                        warnings.push({ date: tx.date, balance: Math.round(cashBalance * 100) / 100 });
+                        warnings.push({ date, balance: Math.round(cashBalance * 100) / 100 });
                     }
                 }
 
@@ -232,12 +237,16 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                     const { transactions, skipped } = parseSaxoTest(rows);
                     const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
 
+                    const dailyTotals = new Map<string, number>();
+                    for (const tx of mapped) {
+                        dailyTotals.set(tx.date, (dailyTotals.get(tx.date) || 0) + (tx._totalEUR ?? 0));
+                    }
                     let cashBalance = 0;
                     const warnings: Array<{ date: string; balance: number }> = [];
-                    for (const tx of mapped) {
-                        cashBalance += tx._totalEUR ?? 0;
+                    for (const [date, dayAmount] of dailyTotals) {
+                        cashBalance += dayAmount;
                         if (cashBalance < -0.01) {
-                            warnings.push({ date: tx.date, balance: Math.round(cashBalance * 100) / 100 });
+                            warnings.push({ date, balance: Math.round(cashBalance * 100) / 100 });
                         }
                     }
 
@@ -447,7 +456,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                     <Button variant="ghost" onClick={() => { resetState(); onOpenChange(false); }}>Annuler</Button>
                     <Button
                         onClick={handleImport}
-                        disabled={!portfolioId || previewData.length === 0 || createBatchTransactions.isPending || negativeWarnings.length > 0}
+                        disabled={!portfolioId || previewData.length === 0 || createBatchTransactions.isPending}
                     >
                         {createBatchTransactions.isPending ? "Import en cours…" : `Importer ${previewData.length > 0 ? `(${previewData.length})` : ""}`}
                     </Button>
