@@ -114,6 +114,13 @@ export function calculateCashBalances(transactions: Transaction[]): CashBalances
       balances[currency] = (balances[currency] || 0) - (tx.quantity * tx.unit_price + tx.fees);
     } else if (tx.type === "sell" && tx.quantity && tx.unit_price) {
       balances[currency] = (balances[currency] || 0) + (tx.quantity * tx.unit_price - tx.fees);
+    } else if (tx.type === "conversion" && tx.quantity && tx.unit_price) {
+      // ticker = source currency, currency = target currency
+      // quantity = amount in target currency, unit_price = exchange rate
+      // So source amount = quantity * unit_price
+      const sourceCurrency = tx.ticker || "EUR";
+      balances[sourceCurrency] = (balances[sourceCurrency] || 0) - (tx.quantity * tx.unit_price + tx.fees);
+      balances[currency] = (balances[currency] || 0) + tx.quantity;
     } else if (tx.type === "dividend") {
       balances[currency] = (balances[currency] || 0) + (tx.quantity || 0) * (tx.unit_price || 1);
     }
@@ -151,8 +158,6 @@ export function calculatePortfolioStats(
   let totalInvested = 0;
 
   for (const tx of transactions) {
-    if (tx.ticker === "FOREX" || tx.ticker === "CONVERSION") continue;
-
     if (tx.type === "deposit") {
       const amount = (tx.quantity || 0) * (tx.unit_price || 1);
       const currency = (tx as any).currency || "EUR";
