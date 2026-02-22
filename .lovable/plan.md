@@ -1,70 +1,71 @@
 
 
-## Page isolee /test-import -- Parseur XLSX de transactions Saxo Bank
+## Import IBKR -- Mapping coherent vers la base de donnees et reconstruction des KPIs
 
-### Objectif
-Creer une page standalone a `/test-import`, sans lien dans la navigation, sans ecriture en base, sans impact sur le state global. Elle permet d'uploader un fichier XLSX, de le parser en memoire selon des regles strictes, et d'afficher le resultat dans un DataTable.
+### Probleme actuel
+
+Le mapping IBKR vers la base de donnees presente plusieurs incoherences :
+
+1. **FOREX mappe en deposit/withdrawal** : Les 411 transactions FOREX (conversions EUR/USD) sont actuellement transformees en `deposit`/`withdrawal`, ce qui **gonfle artificiellement le montant "Investi"** dans les KPIs (72k EUR de depots fictifs au lieu de ~72k reels)
+2. **Dividendes negatifs (retenues d'impots)** mappe en `withdrawal` -- devrait rester `dividend` avec montant negatif
+3. **Interets et frais** melanges avec les depots/retraits reels
+4. **`calculateCashBalances`** ne gere pas le type `interest`
+
+### Solution
+
+Transformer les FOREX en `conversion` (type deja supporte par la DB et par `calculateCashBalances`) et corriger le mapping des dividendes/interets.
 
 ---
 
-### Fichiers a creer / modifier
+### Fichiers modifies
 
-| Fichier | Action |
+| Fichier | Changement |
 |---|---|
-| `src/pages/TestImport.tsx` | Creer -- page complete (upload, parsing, affichage) |
-| `src/App.tsx` | Modifier -- ajouter route `/test-import` hors AppLayout |
-
-Aucun autre fichier modifie. Aucun lien dans la sidebar. Aucune ecriture en base.
-
----
-
-### Interface Transaction
-
-```text
-TestTransaction {
-  date: string              // ISO 8601 (YYYY-MM-DD)
-  type: 'DEPOSIT' | 'WITHDRAWAL' | 'BUY' | 'SELL' | 'DIVIDEND'
-  symbol?: string           // Ticker Yahoo Finance formate
-  quantity?: number          // Valeur absolue
-  price?: number            // Prix unitaire extrait de Evenement
-  amount: number            // Montant comptabilise (EUR)
-  currency: string          // Devise de l'instrument
-  exchangeRate: number      // Taux de change
-}
-```
+| `src/lib/ibkrParser.ts` | Distinguer `INTEREST` des depots/retraits dans la section "interet" |
+| `src/components/ImportTransactionsDialog.tsx` | Recrire `mapTestTransactionToParsed` pour grouper les FOREX en `conversion` |
+| `src/lib/calculations.ts` | Ajouter le type `interest` dans `calculateCashBalances` |
 
 ---
-
-### Regles de parsing (ligne par ligne)
-
-1. **Transfert d'especes** : `DEPOSIT` si montant > 0, `WITHDRAWAL` si montant < 0
-2. **Operation** : `BUY` si montant < 0, `SELL` si montant > 0. Extraction qty/price via regex sur Evenement (ex: `Acheter 3 @ 88.00 USD`, `Vendre -1 @ 1,212.00 EUR`). Quantites en valeur absolue.
-3. **Operation sur titres** + "Dividende en especes" dans Evenement : `DIVIDEND`
-4. **Lignes ignorees** : montant = 0 ou vide, types non reconnus (interets, transferts entrants/sortants a montant 0, frais de service)
-5. **Tri** : chronologique croissant par date
-
-### Formatage des symboles
-
-| Suffixe source | Remplacement |
-|---|---|
-| `:xams` | `.AS` |
-| `:xpar` | `.PA` |
-| `:xdus` | `.DE` |
-| `:xmil` | `.MI` |
-| `:xnas` | (supprime) |
-| `:xnys` | (supprime) |
-
-### Affichage
-
-- **Tableau des transactions** : colonnes Date, Type, Symbole, Quantite, Prix unitaire, Montant net, Devise
-- Badges colores par type (BUY en bleu, SELL en rouge, DEPOSIT en vert, WITHDRAWAL en orange, DIVIDEND en violet)
-- Compteur de lignes parsees / ignorees en haut
 
 ### Details techniques
 
-- Utilise `xlsx` (SheetJS) deja installe, avec `cellDates: true` et `raw: true`
-- Parsing de date robuste (Date object, serial Excel, strings DD-Mon-YYYY)
-- Regex pour extraction qty/price : `/(?:Acheter|Vendre)\s+([-\d,.\s]+)\s*@\s*([\d,.\s]+)\s+([A-Z]+)/i`
-- Route ajoutee dans App.tsx hors du `<AppLayout />` pour rester isolee (pas de sidebar)
-- Zero dependance nouvelle, zero ecriture DB
+#### 1. Parser IBKR (`ibkrParser.ts`)
+
+- Ajouter le type `INTEREST` dans `TestTransaction.type`
+- Section "interet" : mapper en `INTEREST` au lieu de `DEPOSIT`/`WITHDRAWAL`
+- Section "frais" : garder en `WITHDRAWAL` (ce sont bien des sorties de cash)
+
+#### 2. Mapping FOREX vers conversion (`ImportTransactionsDialog.tsx`)
+
+Post-traitement des paires FOREX consecutives :
+- Grouper les transactions FOREX par date (paires positif/negatif)
+- Pour chaque paire : creer UNE transaction `conversion` avec :
+  - `ticker` = devise source (celle avec montant negatif, ex: "USD")
+  - `currency` = devise cible (celle avec montant positif, ex: "EUR")
+  - `quantity` = montant recu (positif)
+  - `unit_price` = taux de change (montant source / montant cible)
+  - `fees` = commissions associees
+- Les transactions FOREX de commission (3eme ligne) sont absorbees dans les frais
+
+Exemple concret du fichier :
+```text
+FOREX: -49,182 EUR  +  51,580.61 USD  +  -1.91 USD commission
+  --> conversion: ticker="EUR", currency="USD", quantity=51580.61, unit_price=0.9535 (49182/51580.61), fees=1.91
+```
+
+#### 3. Calcul cash (`calculations.ts`)
+
+Ajouter dans `calculateCashBalances` :
+```text
+interest : balances[currency] += quantity * unit_price
+```
+
+#### 4. Impact sur les KPIs du dashboard
+
+Avec ces changements :
+- **"Investi"** ne comptera que les vrais DEPOSIT/WITHDRAWAL (pas les conversions)
+- **Cash par devise** sera correctement calcule via les conversions
+- **Performance** sera correcte car basee sur vrais flux entrants/sortants
+- Les positions (BUY/SELL) restent inchangees
+- Les dividendes (positifs et negatifs/taxes) alimentent correctement le cash
 
