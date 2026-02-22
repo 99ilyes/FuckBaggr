@@ -125,7 +125,7 @@ export function parseIBKR(htmlContent: string): { transactions: TestTransaction[
 
                         // Handle Commission paid
                         if (comm !== 0) {
-                            transactions.push({ date: rawDate, type: "FOREX", amount: -Math.abs(comm), currency: quoteCur, exchangeRate: 1 });
+                            transactions.push({ date: rawDate, type: "FOREX", amount: -Math.abs(comm), currency: currentCurrency, exchangeRate: 1 });
                         }
                         continue;
                     }

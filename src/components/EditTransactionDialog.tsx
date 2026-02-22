@@ -176,9 +176,9 @@ export function EditTransactionDialog({ open, onOpenChange, transaction }: Props
                         </div>
                     )}
 
-                    {isCashTransaction && (
+                    {!isConversion && (
                         <div>
-                            <Label>Devise</Label>
+                            <Label>Devise de règlement</Label>
                             <Select value={currency} onValueChange={setCurrency}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>

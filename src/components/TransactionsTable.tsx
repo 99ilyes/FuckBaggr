@@ -85,12 +85,22 @@ export function TransactionsTable({ transactions, portfolios }: Props) {
                       {portfolio?.name || "—"}
                     </div>
                   </TableCell>
-                  <TableCell className="text-right font-mono text-sm">{tx.quantity?.toFixed(2) || "—"}</TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    {tx.type === "conversion"
+                      ? formatCurrency(tx.quantity || 0, tx.currency || "EUR")
+                      : tx.quantity?.toFixed(2) || "—"}
+                  </TableCell>
                   <TableCell className="text-right font-mono text-sm">
                     {tx.unit_price ? formatCurrency(tx.unit_price, tx.currency || "EUR") : "—"}
                   </TableCell>
-                  <TableCell className="text-right font-mono text-sm">{formatCurrency(tx.fees, tx.currency || "EUR")}</TableCell>
-                  <TableCell className="text-right font-mono text-sm">{formatCurrency(total, tx.currency || "EUR")}</TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    {formatCurrency(tx.fees, tx.type === "conversion" ? (tx.ticker || "EUR") : (tx.currency || "EUR"))}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    {tx.type === "conversion"
+                      ? formatCurrency(total, tx.ticker || "EUR")
+                      : formatCurrency(total, tx.currency || "EUR")}
+                  </TableCell>
                   <TableCell>
                     <Button
                       variant="ghost"

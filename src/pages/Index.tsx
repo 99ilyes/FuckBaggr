@@ -89,8 +89,8 @@ export default function Index() {
   );
 
   const cashBalance = useMemo(
-    () => calculateCashBalance(filteredTransactions),
-    [filteredTransactions]
+    () => calculateCashBalance(filteredTransactions, effectiveAssetsCache, baseCurrency),
+    [filteredTransactions, effectiveAssetsCache, baseCurrency]
   );
 
   const portfolioAllocation = useMemo(() => {

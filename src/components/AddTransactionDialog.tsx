@@ -191,9 +191,9 @@ export function AddTransactionDialog({ open, onOpenChange, portfolios, defaultPo
             </div>
           )}
 
-          {isCashTransaction && (
+          {!isConversion && (
             <div>
-              <Label>Devise</Label>
+              <Label>Devise de règlement</Label>
               <Select value={currency} onValueChange={setCurrency}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>

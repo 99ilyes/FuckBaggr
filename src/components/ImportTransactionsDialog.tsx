@@ -69,13 +69,16 @@ function groupForexToConversions(forexTxs: TestTransaction[], portfolioId: strin
         }
 
         // Identify source (negative) and target (positive)
-        let source: TestTransaction, target: TestTransaction;
+        // Identify source (negative) and target (positive)
+        let source: TestTransaction | null = null;
+        let target: TestTransaction | null = null;
+
         if (tx1.amount < 0 && tx2.amount > 0) {
             source = tx1; target = tx2;
         } else if (tx2.amount < 0 && tx1.amount > 0) {
             source = tx2; target = tx1;
         } else {
-            // Both same sign — treat first one as orphan fee and let the second be handled in next iteration
+            // Both same sign! This usually means the first one is an isolated fee, followed by a valid pair later.
             results.push({
                 portfolio_id: portfolioId,
                 date: tx1.date,
@@ -91,33 +94,24 @@ function groupForexToConversions(forexTxs: TestTransaction[], portfolioId: strin
             continue;
         }
 
-        // Absorb commission(s) that follow with same date
-        let fees = 0;
-        let nextIdx = i + 2;
-        while (nextIdx < forexTxs.length && forexTxs[nextIdx].date === tx1.date && forexTxs[nextIdx].amount < 0 && Math.abs(forexTxs[nextIdx].amount) < Math.abs(source.amount) * 0.01) {
-            fees += Math.abs(forexTxs[nextIdx].amount);
-            nextIdx++;
-        }
-
         // conversion: ticker = source currency, currency = target currency
-        // quantity = amount received (target), unit_price = source_amount / target_amount (exchange rate)
-        const sourceAmount = Math.abs(source.amount);
-        const targetAmount = Math.abs(target.amount);
-        const rate = sourceAmount / targetAmount;
+        const sourceAmount = Math.abs(source!.amount);
+        const targetAmount = Math.abs(target!.amount);
+        const rate = sourceAmount / targetAmount; // how much source currency for 1 target currency
 
         results.push({
             portfolio_id: portfolioId,
             date: tx1.date,
             type: "conversion",
-            ticker: source.currency,  // source currency
+            ticker: source!.currency,  // source currency
             quantity: targetAmount,    // amount received
             unit_price: rate,          // exchange rate
-            fees,
-            currency: target.currency, // target currency
+            fees: 0,
+            currency: target!.currency, // target currency
             _totalEUR: 0, // net zero for cash flow purposes
         });
 
-        i = nextIdx;
+        i += 2;
     }
     return results;
 }
@@ -131,8 +125,8 @@ function mapTestTransactionToParsed(tx: TestTransaction, portfolioId: string): P
         case "WITHDRAWAL": mappedType = "withdrawal"; break;
         case "DIVIDEND": mappedType = "dividend"; break;
         case "INTEREST": mappedType = "interest"; break;
-        case "TRANSFER_IN": mappedType = "buy"; break;
-        case "TRANSFER_OUT": mappedType = "sell"; break;
+        case "TRANSFER_IN": mappedType = "transfer_in"; break;
+        case "TRANSFER_OUT": mappedType = "transfer_out"; break;
         default: mappedType = tx.type.toLowerCase(); break;
     }
 
@@ -246,7 +240,13 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios }: Pro
                     }
 
                     const { transactions, skipped } = parseSaxoTest(rows);
-                    const mapped = transactions.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
+
+                    const forexTxs = transactions.filter(t => t.type === "FOREX");
+                    const otherTxs = transactions.filter(t => t.type !== "FOREX");
+
+                    const mappedOthers = otherTxs.map(t => mapTestTransactionToParsed(t, tempPortfolioId));
+                    const mappedForex = groupForexToConversions(forexTxs, tempPortfolioId);
+                    const mapped = [...mappedOthers, ...mappedForex].sort((a, b) => a.date.localeCompare(b.date));
 
                     const dailyTotals = new Map<string, number>();
                     for (const tx of mapped) {

@@ -181,11 +181,18 @@ export function KPICards({
               <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
                 <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Cash</span>
               </div>
-              <div className="flex-1 flex flex-col justify-center w-full">
-                {/* Existing Cash Logic can remain simplified */}
-                <p className="text-2xl font-bold tracking-tight text-foreground">
-                  {formatCurrency(cashBalance, baseCurrency)}
-                </p>
+              <div className="flex-1 flex flex-col justify-center w-full gap-0.5 max-h-[100px] overflow-y-auto">
+                {currencies.length > 0 ? (
+                  currencies.map(([currency, amount]) => (
+                    <p key={currency} className="text-xl sm:text-lg md:text-xl font-bold tracking-tight text-foreground">
+                      {formatCurrency(amount, currency)}
+                    </p>
+                  ))
+                ) : (
+                  <p className="text-xl sm:text-lg md:text-xl font-bold tracking-tight text-foreground">
+                    {formatCurrency(0, baseCurrency)}
+                  </p>
+                )}
               </div>
             </>
           )}

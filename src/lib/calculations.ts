@@ -160,12 +160,12 @@ export function calculatePortfolioStats(
   let totalInvested = 0;
 
   for (const tx of transactions) {
-    if (tx.type === "deposit") {
+    if (tx.type === "deposit" || tx.type === "transfer_in") {
       const amount = (tx.quantity || 0) * (tx.unit_price || 1);
       const currency = (tx as any).currency || "EUR";
       const rate = getExchangeRate(currency, baseCurrency, assetsCache);
       totalInvested += amount * rate;
-    } else if (tx.type === "withdrawal") {
+    } else if (tx.type === "withdrawal" || tx.type === "transfer_out") {
       const amount = (tx.quantity || 0) * (tx.unit_price || 1);
       const currency = (tx as any).currency || "EUR";
       const rate = getExchangeRate(currency, baseCurrency, assetsCache);
@@ -179,10 +179,16 @@ export function calculatePortfolioStats(
   };
 }
 
-/** Legacy single-currency cash balance (sum of all) */
-export function calculateCashBalance(transactions: Transaction[]): number {
+export function calculateCashBalance(
+  transactions: Transaction[],
+  assetsCache: AssetCache[] = [],
+  baseCurrency = "EUR"
+): number {
   const balances = calculateCashBalances(transactions);
-  return Object.values(balances).reduce((s, v) => s + v, 0);
+  return Object.entries(balances).reduce(
+    (s, [currency, amount]) => s + amount * getExchangeRate(currency, baseCurrency, assetsCache),
+    0
+  );
 }
 
 export function formatCurrency(value: number, currency = "EUR"): string {
