@@ -33,7 +33,7 @@ import {
 // ── Interface ──────────────────────────────────────────────────────────
 export interface TestTransaction {
   date: string; // ISO 8601 (YYYY-MM-DD)
-  type: "DEPOSIT" | "WITHDRAWAL" | "BUY" | "SELL" | "DIVIDEND" | "TRANSFER_IN" | "TRANSFER_OUT" | "FOREX";
+  type: "DEPOSIT" | "WITHDRAWAL" | "BUY" | "SELL" | "DIVIDEND" | "TRANSFER_IN" | "TRANSFER_OUT" | "FOREX" | "INTEREST";
   symbol?: string;
   quantity?: number;
   price?: number;
@@ -384,7 +384,7 @@ function reconstructDailyPortfolioAndTWR(
       }
 
       const c = tx.cashCurrency || tx.currency;
-      if (tx.type === "DEPOSIT" || tx.type === "WITHDRAWAL" || tx.type === "FOREX" || tx.type === "DIVIDEND" || tx.type === "BUY" || tx.type === "SELL") {
+      if (tx.type === "DEPOSIT" || tx.type === "WITHDRAWAL" || tx.type === "FOREX" || tx.type === "DIVIDEND" || tx.type === "BUY" || tx.type === "SELL" || tx.type === "INTEREST") {
         cashByCurrency.set(c, (cashByCurrency.get(c) || 0) + tx.amount);
       }
 

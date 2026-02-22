@@ -1,6 +1,6 @@
 export interface TestTransaction {
     date: string;
-    type: "DEPOSIT" | "WITHDRAWAL" | "BUY" | "SELL" | "DIVIDEND" | "TRANSFER_IN" | "TRANSFER_OUT" | "FOREX";
+    type: "DEPOSIT" | "WITHDRAWAL" | "BUY" | "SELL" | "DIVIDEND" | "TRANSFER_IN" | "TRANSFER_OUT" | "FOREX" | "INTEREST";
     symbol?: string;
     quantity?: number;
     price?: number;
@@ -149,6 +149,7 @@ export function parseIBKR(htmlContent: string): { transactions: TestTransaction[
 
         // 2. CASH MOVEMENTS
         else if (sectionTitle.includes("dépôts et retraits") || sectionTitle.includes("frais") || sectionTitle.includes("intérêt")) {
+            const isInterestSection = sectionTitle.includes("intérêt");
             let currentCurrency = "USD";
             for (let i = 1; i < rows.length; i++) {
                 const cells = Array.from(rows[i].querySelectorAll("td")).map(c => c.textContent?.trim() || "");
@@ -171,13 +172,23 @@ export function parseIBKR(htmlContent: string): { transactions: TestTransaction[
 
                     if (!date || isNaN(amount) || amount === 0) continue;
 
-                    transactions.push({
-                        date,
-                        type: amount > 0 ? "DEPOSIT" : "WITHDRAWAL",
-                        amount,
-                        currency: currentCurrency,
-                        exchangeRate: 1
-                    });
+                    if (isInterestSection) {
+                        transactions.push({
+                            date,
+                            type: "INTEREST",
+                            amount,
+                            currency: currentCurrency,
+                            exchangeRate: 1
+                        });
+                    } else {
+                        transactions.push({
+                            date,
+                            type: amount > 0 ? "DEPOSIT" : "WITHDRAWAL",
+                            amount,
+                            currency: currentCurrency,
+                            exchangeRate: 1
+                        });
+                    }
                 }
             }
         }
