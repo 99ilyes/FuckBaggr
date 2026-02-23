@@ -3,46 +3,18 @@ import { usePortfolios, useTransactions, useHistoricalPrices } from "@/hooks/use
 import { PerformanceTab } from "@/components/PerformanceTab";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { DEFAULT_MAX_BENCHMARKS, loadPerformanceBenchmarkTickers, persistPerformanceBenchmarkTickers } from "@/lib/performanceBenchmarks";
 
-const BENCH_STORAGE_KEY = "perf_benchmark_tickers";
-const LEGACY_BENCH_STORAGE_KEY = "perf_benchmark_ticker";
-const MAX_BENCHMARKS = 5;
+const MAX_BENCHMARKS = DEFAULT_MAX_BENCHMARKS;
 
 export default function Performance() {
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
-  const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(BENCH_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          return parsed
-            .filter((ticker): ticker is string => typeof ticker === "string" && ticker.trim().length > 0)
-            .map((ticker) => ticker.toUpperCase())
-            .slice(0, MAX_BENCHMARKS);
-        }
-      }
-
-      const legacyTicker = localStorage.getItem(LEGACY_BENCH_STORAGE_KEY);
-      return legacyTicker ? [legacyTicker.toUpperCase()] : [];
-    } catch {
-      return [];
-    }
-  });
+  const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>(() => loadPerformanceBenchmarkTickers(MAX_BENCHMARKS));
   const [benchSearch, setBenchSearch] = useState("");
 
   // Persist benchmarks to localStorage
   useEffect(() => {
-    try {
-      if (benchmarkTickers.length > 0) {
-        localStorage.setItem(BENCH_STORAGE_KEY, JSON.stringify(benchmarkTickers));
-      } else {
-        localStorage.removeItem(BENCH_STORAGE_KEY);
-      }
-      localStorage.removeItem(LEGACY_BENCH_STORAGE_KEY);
-    } catch (_error) {
-      // Ignore localStorage write errors (private mode, quota, etc.).
-    }
+    persistPerformanceBenchmarkTickers(benchmarkTickers);
   }, [benchmarkTickers]);
 
   const { data: portfolios = [] } = usePortfolios();

@@ -11,16 +11,20 @@ import { PositionsTable } from "@/components/PositionsTable";
 import { TransactionsTable } from "@/components/TransactionsTable";
 
 import { AllocationChart } from "@/components/AllocationChart";
+import { DashboardPerformanceChart } from "@/components/DashboardPerformanceChart";
 import { TopMovers } from "@/components/TopMovers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, RefreshCw, Upload } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { toast } from "@/hooks/use-toast";
+import { DEFAULT_MAX_BENCHMARKS, loadPerformanceBenchmarkTickers } from "@/lib/performanceBenchmarks";
 
 export default function Index() {
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
+  const [chartView, setChartView] = useState<"performance" | "allocation">("performance");
   const [createPortfolioOpen, setCreatePortfolioOpen] = useState(false);
   const [addTransactionOpen, setAddTransactionOpen] = useState(false);
   const [importTransactionsOpen, setImportTransactionsOpen] = useState(false);
@@ -35,6 +39,10 @@ export default function Index() {
   const { data: allTransactions = [] } = useTransactions();
   const { data: selectedPortfolioTransactions = [] } = useTransactions(selectedPortfolioId || undefined);
   const { data: assetsCache = [], refetch: refetchCache } = useAssetsCache();
+  const benchmarkTickers = useMemo(
+    () => loadPerformanceBenchmarkTickers(DEFAULT_MAX_BENCHMARKS),
+    []
+  );
 
   // Create an effective cache that overrides DB values with live proxy values AND fetched previous close
   const effectiveAssetsCache = useMemo(() => {
@@ -97,14 +105,27 @@ export default function Index() {
       tickers.add(`${c}EUR=X`);
     }
 
+    for (const benchmarkTicker of benchmarkTickers) {
+      tickers.add(benchmarkTicker);
+    }
+
     return Array.from(tickers).sort();
-  }, [filteredTransactions, normalizePerformanceTicker]);
+  }, [filteredTransactions, normalizePerformanceTicker, benchmarkTickers]);
 
   const {
     data: historicalPrices = {},
     isLoading: historicalLoading,
     isFetching: historicalFetching,
-  } = useHistoricalPrices(performanceTickers, "max", "1wk");
+  } = useHistoricalPrices(performanceTickers, "max", "1d");
+
+  const benchmarkHistories = useMemo(() => {
+    const byTicker: Record<string, { time: number; price: number }[]> = {};
+    for (const ticker of benchmarkTickers) {
+      const history = historicalPrices[ticker]?.history;
+      if (history && history.length > 0) byTicker[ticker] = history;
+    }
+    return byTicker;
+  }, [benchmarkTickers, historicalPrices]);
 
   const cashBalances = useMemo(
     () => calculateCashBalances(filteredTransactions),
@@ -387,8 +408,46 @@ export default function Index() {
 
 
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-          <div className="order-2 lg:order-1">
-            <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
+          <div className="order-2 lg:order-1 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Graphique
+              </p>
+              <ToggleGroup
+                type="single"
+                value={chartView}
+                onValueChange={(value) => {
+                  if (value === "performance" || value === "allocation") {
+                    setChartView(value);
+                  }
+                }}
+                variant="outline"
+                size="sm"
+                className="gap-1"
+              >
+                <ToggleGroupItem value="performance" aria-label="Afficher la performance">
+                  Performance
+                </ToggleGroupItem>
+                <ToggleGroupItem value="allocation" aria-label="Afficher la répartition">
+                  Répartition
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
+
+            {chartView === "performance" ? (
+              <DashboardPerformanceChart
+                transactions={filteredTransactions}
+                historicalPrices={historicalPrices}
+                portfolioId={selectedPortfolioId}
+                portfolioName={selectedPortfolio?.name || "Vue globale"}
+                portfolioColor={selectedPortfolio?.color}
+                loading={historicalLoading || historicalFetching}
+                benchmarkHistories={benchmarkHistories}
+                benchmarkTickers={benchmarkTickers}
+              />
+            ) : (
+              <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
+            )}
           </div>
           <div className="order-1 lg:order-2">
             <TopMovers
