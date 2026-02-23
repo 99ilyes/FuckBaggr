@@ -1,28 +1,51 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { usePortfolios, useTransactions, useAssetsCache, useHistoricalPrices } from "@/hooks/usePortfolios";
+import { usePortfolios, useTransactions, useHistoricalPrices } from "@/hooks/usePortfolios";
 import { PerformanceTab } from "@/components/PerformanceTab";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
 import { TickerSearch } from "@/components/TickerSearch";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
 
-const BENCH_STORAGE_KEY = "perf_benchmark_ticker";
+const BENCH_STORAGE_KEY = "perf_benchmark_tickers";
+const LEGACY_BENCH_STORAGE_KEY = "perf_benchmark_ticker";
+const MAX_BENCHMARKS = 5;
 
 export default function Performance() {
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
-  const [benchmarkTicker, setBenchmarkTicker] = useState<string | null>(() => {
-    try { return localStorage.getItem(BENCH_STORAGE_KEY); } catch { return null; }
+  const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(BENCH_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .filter((ticker): ticker is string => typeof ticker === "string" && ticker.trim().length > 0)
+            .map((ticker) => ticker.toUpperCase())
+            .slice(0, MAX_BENCHMARKS);
+        }
+      }
+
+      const legacyTicker = localStorage.getItem(LEGACY_BENCH_STORAGE_KEY);
+      return legacyTicker ? [legacyTicker.toUpperCase()] : [];
+    } catch {
+      return [];
+    }
   });
   const [benchSearch, setBenchSearch] = useState("");
 
-  // Persist benchmark to localStorage
+  // Persist benchmarks to localStorage
   useEffect(() => {
     try {
-      if (benchmarkTicker) localStorage.setItem(BENCH_STORAGE_KEY, benchmarkTicker);
-      else localStorage.removeItem(BENCH_STORAGE_KEY);
-    } catch {}
-  }, [benchmarkTicker]);
+      if (benchmarkTickers.length > 0) {
+        localStorage.setItem(BENCH_STORAGE_KEY, JSON.stringify(benchmarkTickers));
+      } else {
+        localStorage.removeItem(BENCH_STORAGE_KEY);
+      }
+      localStorage.removeItem(LEGACY_BENCH_STORAGE_KEY);
+    } catch (_error) {
+      // Ignore localStorage write errors (private mode, quota, etc.).
+    }
+  }, [benchmarkTickers]);
 
   const { data: portfolios = [] } = usePortfolios();
   const { data: allTransactions = [] } = useTransactions();
@@ -50,18 +73,22 @@ export default function Performance() {
       if (c && c !== "EUR") currencies.add(c);
     }
     for (const c of currencies) tickers.add(`${c}EUR=X`);
-    // Include benchmark ticker in historical fetch
-    if (benchmarkTicker) tickers.add(benchmarkTicker);
+    // Include benchmark tickers in historical fetch
+    for (const benchmarkTicker of benchmarkTickers) tickers.add(benchmarkTicker);
     return Array.from(tickers).sort();
-  }, [filteredTransactions, normalizePerformanceTicker, benchmarkTicker]);
+  }, [filteredTransactions, normalizePerformanceTicker, benchmarkTickers]);
 
   const { data: historicalPrices = {}, isLoading: historicalLoading, isFetching: historicalFetching } =
     useHistoricalPrices(performanceTickers, "max", "1wk");
 
-  const benchmarkHistory = useMemo(() => {
-    if (!benchmarkTicker || !historicalPrices[benchmarkTicker]) return undefined;
-    return historicalPrices[benchmarkTicker].history;
-  }, [benchmarkTicker, historicalPrices]);
+  const benchmarkHistories = useMemo(() => {
+    const byTicker: Record<string, { time: number; price: number }[]> = {};
+    for (const ticker of benchmarkTickers) {
+      const history = historicalPrices[ticker]?.history;
+      if (history && history.length > 0) byTicker[ticker] = history;
+    }
+    return byTicker;
+  }, [benchmarkTickers, historicalPrices]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -73,28 +100,53 @@ export default function Performance() {
           </div>
 
           {/* Benchmark selector */}
-          <div className="flex items-center gap-2">
-            {benchmarkTicker ? (
-              <div className="flex items-center gap-1.5 rounded-md border border-border/50 bg-secondary/50 px-2.5 py-1 text-xs">
-                <span className="h-2 w-2 rounded-full bg-[hsl(var(--chart-3))]" />
-                <span className="font-medium">{benchmarkTicker}</span>
+          <div className="flex flex-col items-end gap-2">
+            <div className="w-52 md:w-56">
+              <TickerSearch
+                value={benchSearch}
+                onChange={setBenchSearch}
+                onSelect={(r) => {
+                  const ticker = r.symbol.toUpperCase();
+                  setBenchmarkTickers((prev) => {
+                    if (prev.includes(ticker) || prev.length >= MAX_BENCHMARKS) return prev;
+                    return [...prev, ticker];
+                  });
+                  setBenchSearch("");
+                }}
+              />
+            </div>
+
+            {benchmarkTickers.length > 0 && (
+              <div className="flex flex-wrap justify-end gap-1.5 max-w-[420px]">
+                {benchmarkTickers.map((ticker, idx) => (
+                  <div
+                    key={ticker}
+                    className="flex items-center gap-1.5 rounded-md border border-border/50 bg-secondary/50 px-2.5 py-1 text-xs"
+                  >
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: `hsl(var(--chart-${(idx % 5) + 1}))` }}
+                    />
+                    <span className="font-medium">{ticker}</span>
+                    <button
+                      onClick={() => {
+                        setBenchmarkTickers((prev) => prev.filter((t) => t !== ticker));
+                      }}
+                      className="ml-0.5 rounded-sm hover:bg-accent p-0.5"
+                    >
+                      <X className="h-3 w-3 text-muted-foreground" />
+                    </button>
+                  </div>
+                ))}
                 <button
-                  onClick={() => { setBenchmarkTicker(null); setBenchSearch(""); }}
-                  className="ml-1 rounded-sm hover:bg-accent p-0.5"
-                >
-                  <X className="h-3 w-3 text-muted-foreground" />
-                </button>
-              </div>
-            ) : (
-              <div className="w-48">
-                <TickerSearch
-                  value={benchSearch}
-                  onChange={setBenchSearch}
-                  onSelect={(r) => {
-                    setBenchmarkTicker(r.symbol);
+                  onClick={() => {
+                    setBenchmarkTickers([]);
                     setBenchSearch("");
                   }}
-                />
+                  className="rounded-md border border-border/50 px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+                >
+                  Tout effacer
+                </button>
               </div>
             )}
           </div>
@@ -106,7 +158,7 @@ export default function Performance() {
           portfolios={portfolios}
           selectedId={selectedPortfolioId}
           onSelect={setSelectedPortfolioId}
-          onCreateClick={() => {}}
+          onCreateClick={() => undefined}
         />
 
         <PerformanceTab
@@ -114,10 +166,10 @@ export default function Performance() {
           historicalPrices={historicalPrices}
           portfolioId={selectedPortfolioId}
           portfolioName={selectedPortfolio?.name || "Vue globale"}
-          portfolioColor={(selectedPortfolio as any)?.color}
+          portfolioColor={selectedPortfolio?.color}
           loading={historicalLoading || historicalFetching}
-          benchmarkHistory={benchmarkHistory}
-          benchmarkTicker={benchmarkTicker}
+          benchmarkHistories={benchmarkHistories}
+          benchmarkTickers={benchmarkTickers}
         />
       </main>
     </div>
