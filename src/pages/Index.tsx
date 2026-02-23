@@ -9,7 +9,7 @@ import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { ImportTransactionsDialog } from "@/components/ImportTransactionsDialog";
 import { PositionsTable } from "@/components/PositionsTable";
 import { TransactionsTable } from "@/components/TransactionsTable";
-import { PerformanceTab } from "@/components/PerformanceTab";
+
 import { AllocationChart } from "@/components/AllocationChart";
 import { TopMovers } from "@/components/TopMovers";
 import { Button } from "@/components/ui/button";
@@ -382,7 +382,6 @@ export default function Index() {
           <TabsList>
             <TabsTrigger value="positions">Positions</TabsTrigger>
             <TabsTrigger value="transactions">Transactions</TabsTrigger>
-            <TabsTrigger value="performance">Performance</TabsTrigger>
           </TabsList>
           <TabsContent value="positions">
             <Card className="border-border/50">
@@ -407,16 +406,6 @@ export default function Index() {
                 <TransactionsTable transactions={filteredTransactions} portfolios={portfolios} />
               </CardContent>
             </Card>
-          </TabsContent>
-          <TabsContent value="performance">
-            <PerformanceTab
-              transactions={filteredTransactions}
-              historicalPrices={historicalPrices}
-              portfolioId={selectedPortfolioId}
-              portfolioName={selectedPortfolio?.name || "Vue globale"}
-              portfolioColor={(selectedPortfolio as any)?.color}
-              loading={historicalLoading || historicalFetching}
-            />
           </TabsContent>
         </Tabs>
       </main>
