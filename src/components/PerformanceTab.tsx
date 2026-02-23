@@ -151,7 +151,7 @@ export function PerformanceTab({
   onBenchmarkTickersChange,
   maxBenchmarks = 5,
 }: Props) {
-  const [range, setRange] = useState<TimeRange>("1Y");
+  const [range, setRange] = useState<TimeRange>("YTD");
   const [customFromStr, setCustomFromStr] = useState("");
   const [customToStr, setCustomToStr] = useState("");
   const [benchOpen, setBenchOpen] = useState(false);
