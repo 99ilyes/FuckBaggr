@@ -29,6 +29,7 @@ export default function Index() {
   const [livePriceMap, setLivePriceMap] = useState<Record<string, number>>({});
   const [liveChangeMap, setLiveChangeMap] = useState<Record<string, number>>({});
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
+  const [eurUsdRate, setEurUsdRate] = useState<{ price: number; change: number } | null>(null);
 
   const { data: portfolios = [] } = usePortfolios();
   const { data: allTransactions = [] } = useTransactions();
@@ -157,6 +158,11 @@ export default function Index() {
         // Persist live prices silently (fire-and-forget)
         persistPricesToCache(results);
       }
+      // Extract EUR/USD rate
+      const eurusd = results["EURUSD=X"];
+      if (eurusd?.price) {
+        setEurUsdRate({ price: eurusd.price, change: eurusd.changePercent ?? 0 });
+      }
     } catch (e) {
       console.warn("Price fetch failed:", e);
     }
@@ -174,6 +180,8 @@ export default function Index() {
         tickerSet.add(`${baseCurrency}${c}=X`);
       }
     });
+    // Always fetch EUR/USD
+    tickerSet.add("EURUSD=X");
 
     const tickerKey = Array.from(tickerSet).sort().join(",");
     if (tickerKey && tickerKey !== fetchedTickersRef.current) {
@@ -194,6 +202,8 @@ export default function Index() {
         tickers.push(`${c}${baseCurrency}=X`);
         tickers.push(`${baseCurrency}${c}=X`);
       });
+      // Always fetch EUR/USD
+      if (!tickers.includes("EURUSD=X")) tickers.push("EURUSD=X");
 
       if (tickers.length === 0) {
         setRefreshing(false);
@@ -317,12 +327,22 @@ export default function Index() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               {lastUpdate &&
                 <span className="text-[10px] text-muted-foreground tabular-nums hidden sm:inline-block">
                   {lastUpdate.toLocaleString()}
                 </span>
               }
+              {eurUsdRate && (
+                <div className="hidden sm:flex items-center gap-1.5 text-xs tabular-nums">
+                  <span className="text-muted-foreground font-medium">EUR/USD</span>
+                  <span className="font-semibold text-foreground">{eurUsdRate.price.toFixed(4)}</span>
+                  <span className={`text-[10px] font-medium ${eurUsdRate.change >= 0 ? "text-emerald-400" : "text-rose-400"
+                    }`}>
+                    {eurUsdRate.change >= 0 ? "+" : ""}{eurUsdRate.change.toFixed(2)}%
+                  </span>
+                </div>
+              )}
               <Button variant="outline" size="sm" onClick={() => handleRefreshPrices(false)} disabled={refreshing}>
                 <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
                 <span className="hidden sm:inline ml-1">Actualiser</span>
