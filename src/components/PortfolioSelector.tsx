@@ -4,6 +4,7 @@ import { EditPortfolioDialog } from "@/components/EditPortfolioDialog";
 import { Button } from "@/components/ui/button";
 import { SaxoLogo, IBKRLogo, getBrokerForPortfolio } from "@/components/BrokerLogos";
 import { Plus, Trash2, Pencil, Eraser } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -26,6 +27,8 @@ interface PortfolioSelectorProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onCreateClick: () => void;
+  showCreateButton?: boolean;
+  className?: string;
 }
 
 export function PortfolioSelector({
@@ -33,6 +36,8 @@ export function PortfolioSelector({
   selectedId,
   onSelect,
   onCreateClick,
+  showCreateButton = true,
+  className,
 }: PortfolioSelectorProps) {
   const deletePortfolio = useDeletePortfolio();
   const deleteTransactions = useDeleteTransactionsByPortfolio();
@@ -59,7 +64,7 @@ export function PortfolioSelector({
 
   return (
     <>
-      <div className="flex items-center gap-1 border-b border-white/5 w-full overflow-x-auto no-scrollbar mb-6">
+      <div className={cn("flex items-center gap-1 border-b border-white/5 w-full overflow-x-auto no-scrollbar mb-6", className)}>
         <button
           onClick={() => onSelect(null)}
           className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all duration-200 whitespace-nowrap ${selectedId === null
@@ -107,14 +112,16 @@ export function PortfolioSelector({
             </ContextMenuContent>
           </ContextMenu>
         ))}
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onCreateClick}
-          className="ml-auto text-muted-foreground hover:text-white hover:bg-transparent"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
+        {showCreateButton && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onCreateClick}
+            className="ml-auto text-muted-foreground hover:text-white hover:bg-transparent"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       <AlertDialog open={!!portfolioToDelete} onOpenChange={(open) => !open && setPortfolioToDelete(null)}>

@@ -2,9 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { usePortfolios, useTransactions, useHistoricalPrices } from "@/hooks/usePortfolios";
 import { PerformanceTab } from "@/components/PerformanceTab";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
-import { TickerSearch } from "@/components/TickerSearch";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { X } from "lucide-react";
 
 const BENCH_STORAGE_KEY = "perf_benchmark_tickers";
 const LEGACY_BENCH_STORAGE_KEY = "perf_benchmark_ticker";
@@ -93,74 +91,24 @@ export default function Performance() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-b border-border/50 px-4 py-3 md:px-6">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <SidebarTrigger className="-ml-1" />
-            <span className="text-lg font-semibold tracking-tight">Performance</span>
-          </div>
-
-          {/* Benchmark selector */}
-          <div className="flex flex-col items-end gap-2">
-            <div className="w-52 md:w-56">
-              <TickerSearch
-                value={benchSearch}
-                onChange={setBenchSearch}
-                onSelect={(r) => {
-                  const ticker = r.symbol.toUpperCase();
-                  setBenchmarkTickers((prev) => {
-                    if (prev.includes(ticker) || prev.length >= MAX_BENCHMARKS) return prev;
-                    return [...prev, ticker];
-                  });
-                  setBenchSearch("");
-                }}
-              />
-            </div>
-
-            {benchmarkTickers.length > 0 && (
-              <div className="flex flex-wrap justify-end gap-1.5 max-w-[420px]">
-                {benchmarkTickers.map((ticker, idx) => (
-                  <div
-                    key={ticker}
-                    className="flex items-center gap-1.5 rounded-md border border-border/50 bg-secondary/50 px-2.5 py-1 text-xs"
-                  >
-                    <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: `hsl(var(--chart-${(idx % 5) + 1}))` }}
-                    />
-                    <span className="font-medium">{ticker}</span>
-                    <button
-                      onClick={() => {
-                        setBenchmarkTickers((prev) => prev.filter((t) => t !== ticker));
-                      }}
-                      className="ml-0.5 rounded-sm hover:bg-accent p-0.5"
-                    >
-                      <X className="h-3 w-3 text-muted-foreground" />
-                    </button>
-                  </div>
-                ))}
-                <button
-                  onClick={() => {
-                    setBenchmarkTickers([]);
-                    setBenchSearch("");
-                  }}
-                  className="rounded-md border border-border/50 px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
-                >
-                  Tout effacer
-                </button>
-              </div>
-            )}
-          </div>
+        <div className="max-w-7xl mx-auto flex items-center gap-3">
+          <SidebarTrigger className="-ml-1" />
+          <h1 className="text-lg font-semibold tracking-tight">Performance</h1>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-6 md:px-6 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 pt-2 md:px-6">
         <PortfolioSelector
           portfolios={portfolios}
           selectedId={selectedPortfolioId}
           onSelect={setSelectedPortfolioId}
           onCreateClick={() => undefined}
+          showCreateButton={false}
+          className="mb-0 border-border/40"
         />
+      </div>
 
+      <main className="max-w-7xl mx-auto px-4 py-4 md:px-6">
         <PerformanceTab
           transactions={filteredTransactions}
           historicalPrices={historicalPrices}
@@ -170,6 +118,10 @@ export default function Performance() {
           loading={historicalLoading || historicalFetching}
           benchmarkHistories={benchmarkHistories}
           benchmarkTickers={benchmarkTickers}
+          benchSearch={benchSearch}
+          onBenchSearchChange={setBenchSearch}
+          onBenchmarkTickersChange={setBenchmarkTickers}
+          maxBenchmarks={MAX_BENCHMARKS}
         />
       </main>
     </div>
