@@ -462,20 +462,33 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
 
 // ─── Range filter & TWR rebase ────────────────────────────────────────────────
 
-export type TimeRange = "6M" | "1Y" | "2Y" | "5Y" | "MAX";
+export type TimeRange = "6M" | "1Y" | "2Y" | "5Y" | "MAX" | "CUSTOM";
 
-export function filterByRange(dataPoints: TWRDataPoint[], range: TimeRange): TWRDataPoint[] {
-  if (range === "MAX" || dataPoints.length === 0) return dataPoints;
+export function filterByRange(
+  dataPoints: TWRDataPoint[],
+  range: TimeRange,
+  customFrom?: string,
+  customTo?: string
+): TWRDataPoint[] {
+  if (dataPoints.length === 0) return dataPoints;
+
+  if (range === "CUSTOM" && customFrom) {
+    const fromSec = new Date(customFrom).getTime() / 1000;
+    const toSec = customTo ? new Date(customTo).getTime() / 1000 : Date.now() / 1000;
+    const filtered = dataPoints.filter((d) => d.time >= fromSec && d.time <= toSec);
+    return filtered.length === 0 ? dataPoints.slice(-1) : filtered;
+  }
+
+  if (range === "MAX") return dataPoints;
   const now = Date.now() / 1000;
-  const monthsMap: Record<TimeRange, number> = { "6M": 6, "1Y": 12, "2Y": 24, "5Y": 60, "MAX": 9999 };
-  const cutoff = now - monthsMap[range] * 30.44 * 24 * 3600;
+  const monthsMap: Record<string, number> = { "6M": 6, "1Y": 12, "2Y": 24, "5Y": 60 };
+  const cutoff = now - (monthsMap[range] ?? 12) * 30.44 * 24 * 3600;
   const filtered = dataPoints.filter((d) => d.time >= cutoff);
   return filtered.length === 0 ? dataPoints.slice(-1) : filtered;
 }
 
 /**
  * Rebase TWR so the first visible point starts at 0%.
- * This allows comparing performance over the selected range regardless of past history.
  */
 export function rebaseTWR(dataPoints: TWRDataPoint[]): TWRDataPoint[] {
   if (dataPoints.length === 0) return [];
@@ -485,4 +498,41 @@ export function rebaseTWR(dataPoints: TWRDataPoint[]): TWRDataPoint[] {
     ...d,
     twr: (1 + d.twr) / baseMultiplier - 1,
   }));
+}
+
+/**
+ * Rebase a benchmark price series to percentage returns starting from 0%,
+ * aligned with the given date range.
+ */
+export function rebaseBenchmark(
+  history: { time: number; price: number }[],
+  visibleDates: string[]
+): { date: string; benchPct: number }[] {
+  if (history.length === 0 || visibleDates.length === 0) return [];
+
+  const sorted = [...history].sort((a, b) => a.time - b.time);
+  const result: { date: string; benchPct: number }[] = [];
+
+  // Find initial price at or before first visible date
+  const firstVisibleSec = new Date(visibleDates[0]).getTime() / 1000;
+  let basePrice: number | null = null;
+  for (const p of sorted) {
+    if (p.time <= firstVisibleSec + 5 * 86400) basePrice = p.price;
+    else break;
+  }
+  if (!basePrice) return [];
+
+  for (const date of visibleDates) {
+    const sec = new Date(date).getTime() / 1000;
+    let price: number | null = null;
+    for (const p of sorted) {
+      if (p.time <= sec + 5 * 86400) price = p.price;
+      else break;
+    }
+    if (price !== null) {
+      result.push({ date, benchPct: ((price / basePrice) - 1) * 100 });
+    }
+  }
+
+  return result;
 }
