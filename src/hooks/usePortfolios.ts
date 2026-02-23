@@ -167,39 +167,58 @@ export interface AssetHistory {
 }
 
 const HISTORY_QUERY_VERSION = "v2-daily-history";
+const HISTORY_QUERY_VERSION_SAFE_PROD = "v3-safe-prod";
 
 export function useHistoricalPrices(tickers: string[], range = "5y", interval = "1wk") {
+  const isProd = import.meta.env.PROD;
+  // Some Yahoo combinations can be downsampled by the upstream API.
+  // For edge fallback, prefer a stable daily range in production.
+  const safeRangeForEdge = interval === "1d" && range === "max" ? "5y" : range;
+
   return useQuery({
-    queryKey: ["historical_prices", HISTORY_QUERY_VERSION, tickers.sort().join(","), range, interval],
+    queryKey: [
+      "historical_prices",
+      HISTORY_QUERY_VERSION,
+      HISTORY_QUERY_VERSION_SAFE_PROD,
+      tickers.sort().join(","),
+      range,
+      safeRangeForEdge,
+      interval,
+      isProd ? "prod" : "dev",
+    ],
     queryFn: async (): Promise<Record<string, AssetHistory>> => {
       if (tickers.length === 0) return {};
 
       const results: Record<string, AssetHistory> = {};
 
-      // 1) Browser direct Yahoo history first (per-user IP, avoids shared edge limits/downsampling)
-      try {
-        const browserHistories = await fetchHistoricalPricesClientSide(tickers);
-        for (const [ticker, info] of Object.entries(browserHistories)) {
-          const history = info.timestamps.map((time, idx) => ({
-            time,
-            price: info.closes[idx],
-          }));
-          if (history.length === 0) continue;
-          results[ticker] = {
-            symbol: info.symbol || ticker,
-            currency: info.currency || "USD",
-            history,
-          };
+      // In production, use a single deterministic source (edge function) to
+      // avoid browser-specific Yahoo behavior (CORS / rate-limit / region).
+      if (!isProd) {
+        // 1) Browser direct Yahoo history first (per-user IP)
+        try {
+          const browserHistories = await fetchHistoricalPricesClientSide(tickers);
+          for (const [ticker, info] of Object.entries(browserHistories)) {
+            const history = info.timestamps.map((time, idx) => ({
+              time,
+              price: info.closes[idx],
+            }));
+            if (history.length === 0) continue;
+            results[ticker] = {
+              symbol: info.symbol || ticker,
+              currency: info.currency || "USD",
+              history,
+            };
+          }
+        } catch (error) {
+          console.warn("Browser history fetch failed, falling back to edge function:", error);
         }
-      } catch (error) {
-        console.warn("Browser history fetch failed, falling back to edge function:", error);
       }
 
       // 2) Edge fallback for any missing tickers
-      const missingTickers = tickers.filter((ticker) => !results[ticker]);
+      const missingTickers = isProd ? tickers : tickers.filter((ticker) => !results[ticker]);
       if (missingTickers.length > 0) {
         const { data, error } = await supabase.functions.invoke("fetch-history", {
-          body: { tickers: missingTickers, range, interval },
+          body: { tickers: missingTickers, range: safeRangeForEdge, interval },
         });
 
         if (error) {
