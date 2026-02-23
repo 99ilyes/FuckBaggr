@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CalendarIcon, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -44,7 +45,9 @@ const BENCH_COLORS = [
 ];
 
 function fmtDate(date: string): string {
-  return new Date(date).toLocaleDateString("fr-FR", {
+  const parsedDate = new Date(date);
+  if (Number.isNaN(parsedDate.getTime())) return date || "-";
+  return parsedDate.toLocaleDateString("fr-FR", {
     year: "numeric",
     month: "short",
     day: "2-digit",
@@ -109,7 +112,7 @@ function ChartTooltip({ active, payload, label, formatter }: TooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-border/50 bg-card/95 backdrop-blur px-3 py-2 shadow-xl">
+    <div className="rounded-lg border border-border/50 bg-card/95 px-3 py-2 shadow-xl backdrop-blur">
       <p className="mb-1 text-[11px] text-muted-foreground">{fmtDate(String(label ?? ""))}</p>
       <div className="space-y-1">
         {payload.map((entry, idx) => (
@@ -146,6 +149,7 @@ export function PerformanceTab({
   const [range, setRange] = useState<TimeRange>("1Y");
   const [customFrom, setCustomFrom] = useState<Date | undefined>();
   const [customTo, setCustomTo] = useState<Date | undefined>();
+  const [activeTab, setActiveTab] = useState<"charts" | "stats">("charts");
 
   const accentColor = portfolioColor || "hsl(var(--chart-2))";
   const hasCustomDates = Boolean(customFrom || customTo);
@@ -158,11 +162,13 @@ export function PerformanceTab({
       if (tx.type !== "buy" && tx.type !== "sell" && tx.type !== "transfer_in" && tx.type !== "transfer_out") continue;
       map[tx.ticker] = (tx.currency || "EUR").toUpperCase();
     }
+
     for (const [ticker, history] of Object.entries(historicalPrices)) {
       if (!map[ticker] && !ticker.includes("=X")) {
         map[ticker] = (history.currency || "EUR").toUpperCase();
       }
     }
+
     return map;
   }, [transactions, historicalPrices]);
 
@@ -196,6 +202,23 @@ export function PerformanceTab({
     () => visiblePoints.map((point) => ({ date: point.date, value: point.valueEUR })),
     [visiblePoints]
   );
+
+  const dailyVariationData = useMemo(() => {
+    const rows: Array<{ date: string; dailyPct: number }> = [];
+
+    for (let idx = 1; idx < rebased.length; idx++) {
+      const prevMultiplier = 1 + rebased[idx - 1].twr;
+      const currentMultiplier = 1 + rebased[idx].twr;
+      if (prevMultiplier <= 0 || currentMultiplier <= 0) continue;
+
+      rows.push({
+        date: rebased[idx].date,
+        dailyPct: ((currentMultiplier / prevMultiplier) - 1) * 100,
+      });
+    }
+
+    return rows;
+  }, [rebased]);
 
   const benchmarkColorMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -267,40 +290,28 @@ export function PerformanceTab({
   }, [activeBenchmarkTickers, benchmarkSeriesByTicker]);
 
   const variationStats = useMemo(() => {
-    if (valueData.length < 2 || rebased.length < 2) return null;
+    if (valueData.length < 2) return null;
 
     const firstValue = valueData[0].value;
     const lastValue = valueData[valueData.length - 1].value;
     const deltaValue = lastValue - firstValue;
     const deltaValuePct = firstValue > 0 ? (deltaValue / firstValue) * 100 : 0;
 
-    const weeklyReturns: Array<{ date: string; value: number }> = [];
-    for (let idx = 1; idx < rebased.length; idx++) {
-      const prevMultiplier = 1 + rebased[idx - 1].twr;
-      const currentMultiplier = 1 + rebased[idx].twr;
-      if (prevMultiplier <= 0 || currentMultiplier <= 0) continue;
-
-      weeklyReturns.push({
-        date: rebased[idx].date,
-        value: ((currentMultiplier / prevMultiplier) - 1) * 100,
-      });
-    }
-
-    const avgWeeklyReturn =
-      weeklyReturns.length > 0
-        ? weeklyReturns.reduce((sum, week) => sum + week.value, 0) / weeklyReturns.length
+    const avgDailyReturn =
+      dailyVariationData.length > 0
+        ? dailyVariationData.reduce((sum, day) => sum + day.dailyPct, 0) / dailyVariationData.length
         : 0;
 
-    const weeklyVolatility = computeStdDev(weeklyReturns.map((week) => week.value));
+    const dailyVolatility = computeStdDev(dailyVariationData.map((day) => day.dailyPct));
 
     const bestWeek =
-      weeklyReturns.length > 0
-        ? weeklyReturns.reduce((best, week) => (week.value > best.value ? week : best))
+      dailyVariationData.length > 0
+        ? dailyVariationData.reduce((best, day) => (day.dailyPct > best.dailyPct ? day : best))
         : null;
 
     const worstWeek =
-      weeklyReturns.length > 0
-        ? weeklyReturns.reduce((worst, week) => (week.value < worst.value ? week : worst))
+      dailyVariationData.length > 0
+        ? dailyVariationData.reduce((worst, day) => (day.dailyPct < worst.dailyPct ? day : worst))
         : null;
 
     const maxDrawdown = computeMaxDrawdown(valueData);
@@ -310,16 +321,35 @@ export function PerformanceTab({
       lastValue,
       deltaValue,
       deltaValuePct,
-      avgWeeklyReturn,
-      weeklyVolatility,
+      avgDailyReturn,
+      dailyVolatility,
       bestWeek,
       worstWeek,
       maxDrawdown,
     };
-  }, [valueData, rebased]);
+  }, [valueData, dailyVariationData]);
+
+  const benchmarkStats = useMemo(
+    () =>
+      activeBenchmarkTickers.map((ticker) => {
+        const benchmarkReturn = rangeBenchmarkReturns[ticker] ?? 0;
+        const spread = (rangeTWR - benchmarkReturn) * 100;
+        return {
+          ticker,
+          benchmarkReturn,
+          spread,
+        };
+      }),
+    [activeBenchmarkTickers, rangeBenchmarkReturns, rangeTWR]
+  );
 
   const visiblePeriodStart = visiblePoints[0]?.date;
   const visiblePeriodEnd = visiblePoints[visiblePoints.length - 1]?.date;
+
+  const periodNetFlows = useMemo(
+    () => visiblePoints.reduce((sum, point) => sum + point.netFlow, 0),
+    [visiblePoints]
+  );
 
   if (transactions.length === 0) {
     return (
@@ -366,7 +396,7 @@ export function PerformanceTab({
                 <CardTitle className="text-base font-semibold text-foreground">{portfolioName}</CardTitle>
                 {visiblePeriodStart && visiblePeriodEnd && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {fmtDate(visiblePeriodStart)} - {fmtDate(visiblePeriodEnd)} ({visiblePoints.length} points hebdo)
+                    {fmtDate(visiblePeriodStart)} - {fmtDate(visiblePeriodEnd)} ({visiblePoints.length} points journaliers)
                   </p>
                 )}
               </div>
@@ -385,27 +415,23 @@ export function PerformanceTab({
                 <span className="tabular-nums font-medium text-foreground">{formatPercent(twr.annualisedTWR * 100)}</span>
               </div>
 
-              {activeBenchmarkTickers.map((ticker) => {
-                const benchReturn = rangeBenchmarkReturns[ticker] ?? 0;
-                const spread = (rangeTWR - benchReturn) * 100;
-                return (
-                  <div key={ticker} className="rounded-md border border-border/50 bg-muted/20 px-2.5 py-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: benchmarkColorMap[ticker] }} />
-                      <span className="font-medium text-foreground">{ticker}</span>
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">
-                      <span className={benchReturn >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]"}>
-                        {formatPercent(benchReturn * 100)}
-                      </span>
-                      <span className="mx-1">•</span>
-                      <span className={spread >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]"}>
-                        écart {fmtSignedPercent(spread)}
-                      </span>
-                    </div>
+              {benchmarkStats.map((benchmark) => (
+                <div key={benchmark.ticker} className="rounded-md border border-border/50 bg-muted/20 px-2.5 py-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: benchmarkColorMap[benchmark.ticker] }} />
+                    <span className="font-medium text-foreground">{benchmark.ticker}</span>
                   </div>
-                );
-              })}
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                    <span className={benchmark.benchmarkReturn >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]"}>
+                      {formatPercent(benchmark.benchmarkReturn * 100)}
+                    </span>
+                    <span className="mx-1">•</span>
+                    <span className={benchmark.spread >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]"}>
+                      écart {fmtSignedPercent(benchmark.spread)}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -499,181 +525,259 @@ export function PerformanceTab({
         </CardHeader>
       </Card>
 
-      {variationStats && (
-        <Card className="border-border/50">
-          <CardHeader className="pb-1">
-            <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Variations détaillées
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-md border border-border/50 bg-muted/10 p-3">
-              <p className="text-[11px] text-muted-foreground">Valeur début → fin</p>
-              <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">
-                {formatCurrency(variationStats.firstValue)} → {formatCurrency(variationStats.lastValue)}
-              </p>
-              <p className={cn("mt-1 text-xs tabular-nums", variationStats.deltaValue >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]")}>
-                {formatCurrency(variationStats.deltaValue)} ({fmtSignedPercent(variationStats.deltaValuePct)})
-              </p>
-            </div>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "charts" | "stats")} className="space-y-4">
+        <TabsList className="grid w-full max-w-[320px] grid-cols-2">
+          <TabsTrigger value="charts">Graphiques</TabsTrigger>
+          <TabsTrigger value="stats">Stats</TabsTrigger>
+        </TabsList>
 
-            <div className="rounded-md border border-border/50 bg-muted/10 p-3">
-              <p className="text-[11px] text-muted-foreground">Rythme hebdo</p>
-              <p className={cn("mt-1 text-sm font-semibold tabular-nums", variationStats.avgWeeklyReturn >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]")}>
-                {fmtSignedPercent(variationStats.avgWeeklyReturn)}
-              </p>
-              <p className="mt-1 text-xs tabular-nums text-muted-foreground">
-                Volatilité: {variationStats.weeklyVolatility.toFixed(2)}%
-              </p>
-            </div>
-
-            <div className="rounded-md border border-border/50 bg-muted/10 p-3">
-              <p className="text-[11px] text-muted-foreground">Meilleure / pire semaine</p>
-              <p className="mt-1 text-xs tabular-nums text-[hsl(var(--gain))]">
-                {variationStats.bestWeek ? `${fmtSignedPercent(variationStats.bestWeek.value)} (${fmtDate(variationStats.bestWeek.date)})` : "n/a"}
-              </p>
-              <p className="mt-1 text-xs tabular-nums text-[hsl(var(--loss))]">
-                {variationStats.worstWeek ? `${fmtSignedPercent(variationStats.worstWeek.value)} (${fmtDate(variationStats.worstWeek.date)})` : "n/a"}
-              </p>
-            </div>
-
-            <div className="rounded-md border border-border/50 bg-muted/10 p-3">
-              <p className="text-[11px] text-muted-foreground">Drawdown maximal</p>
-              <p className="mt-1 text-sm font-semibold tabular-nums text-[hsl(var(--loss))]">
-                {fmtSignedPercent(variationStats.maxDrawdown.value)}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Plus bas le {variationStats.maxDrawdown.date ? fmtDate(variationStats.maxDrawdown.date) : "n/a"}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card className="border-border/50">
-        <CardHeader className="pb-1">
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Performance TWR (%)
-            </CardTitle>
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-              <div className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-[hsl(var(--chart-1))]" />
-                <span>Portefeuille</span>
-              </div>
-              {activeBenchmarkTickers.map((ticker) => (
-                <div key={ticker} className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: benchmarkColorMap[ticker] }} />
-                  <span>{ticker}</span>
+        <TabsContent value="charts" className="space-y-4">
+          <Card className="border-border/50">
+            <CardHeader className="pb-1">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Performance TWR (%)
+                </CardTitle>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1">
+                    <span className="h-2 w-2 rounded-full bg-[hsl(var(--chart-1))]" />
+                    <span>Portefeuille</span>
+                  </div>
+                  {activeBenchmarkTickers.map((ticker) => (
+                    <div key={ticker} className="flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: benchmarkColorMap[ticker] }} />
+                      <span>{ticker}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="h-[360px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={twrData} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
-                <CartesianGrid stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  minTickGap={32}
-                  tickFormatter={(value) => new Date(value).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" })}
-                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tickFormatter={(value) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`}
-                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={64}
-                />
-                <RechartsTooltip
-                  content={<ChartTooltip formatter={(value) => fmtSignedPercent(value)} />}
-                />
-                <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.35} strokeDasharray="4 4" />
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="h-[380px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={twrData} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+                    <CartesianGrid stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      minTickGap={32}
+                      tickFormatter={(value) => new Date(value).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" })}
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tickFormatter={(value) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`}
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={64}
+                    />
+                    <RechartsTooltip content={<ChartTooltip formatter={(value) => fmtSignedPercent(value)} />} />
+                    <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeOpacity={0.35} strokeDasharray="4 4" />
 
-                <Line
-                  type="monotone"
-                  dataKey="twrPct"
-                  name="Portefeuille"
-                  stroke="hsl(var(--chart-1))"
-                  strokeWidth={2.2}
-                  dot={false}
-                  activeDot={{ r: 4, strokeWidth: 0, fill: "hsl(var(--chart-1))" }}
-                />
+                    <Line
+                      type="monotone"
+                      dataKey="twrPct"
+                      name="Portefeuille"
+                      stroke="hsl(var(--chart-1))"
+                      strokeWidth={2.2}
+                      dot={false}
+                      activeDot={{ r: 4, strokeWidth: 0, fill: "hsl(var(--chart-1))" }}
+                    />
 
-                {activeBenchmarkTickers.map((ticker) => (
-                  <Line
-                    key={ticker}
-                    type="monotone"
-                    dataKey={benchmarkDataKeys[ticker]}
-                    name={ticker}
-                    stroke={benchmarkColorMap[ticker]}
-                    strokeWidth={1.7}
-                    strokeDasharray="5 4"
-                    dot={false}
-                    activeDot={{ r: 3, strokeWidth: 0, fill: benchmarkColorMap[ticker] }}
-                  />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </CardContent>
-      </Card>
+                    {activeBenchmarkTickers.map((ticker) => (
+                      <Line
+                        key={ticker}
+                        type="monotone"
+                        dataKey={benchmarkDataKeys[ticker]}
+                        name={ticker}
+                        stroke={benchmarkColorMap[ticker]}
+                        strokeWidth={1.7}
+                        strokeDasharray="5 4"
+                        dot={false}
+                        activeDot={{ r: 3, strokeWidth: 0, fill: benchmarkColorMap[ticker] }}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
 
-      <Card className="border-border/50">
-        <CardHeader className="pb-1">
-          <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Évolution de la valeur (€)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <div className="h-[340px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={valueData} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
-                <defs>
-                  <linearGradient id="valueGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={accentColor} stopOpacity={0.28} />
-                    <stop offset="100%" stopColor={accentColor} stopOpacity={0.03} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  minTickGap={32}
-                  tickFormatter={(value) => new Date(value).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" })}
-                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tickFormatter={(value) => fmtCompactCurrency(value)}
-                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={64}
-                />
-                <RechartsTooltip
-                  content={<ChartTooltip formatter={(value) => formatCurrency(value, "EUR")} />}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  name="Valeur portefeuille"
-                  stroke={accentColor}
-                  strokeWidth={2}
-                  fill="url(#valueGradient)"
-                  dot={false}
-                  activeDot={{ r: 4, strokeWidth: 0, fill: accentColor }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </CardContent>
-      </Card>
+          <Card className="border-border/50">
+            <CardHeader className="pb-1">
+              <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Évolution de la valeur (€)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="h-[340px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={valueData} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+                    <defs>
+                      <linearGradient id="valueGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={accentColor} stopOpacity={0.28} />
+                        <stop offset="100%" stopColor={accentColor} stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      minTickGap={32}
+                      tickFormatter={(value) => new Date(value).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" })}
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tickFormatter={(value) => fmtCompactCurrency(value)}
+                      tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={64}
+                    />
+                    <RechartsTooltip content={<ChartTooltip formatter={(value) => formatCurrency(value, "EUR")} />} />
+                    <Area
+                      type="monotone"
+                      dataKey="value"
+                      name="Valeur portefeuille"
+                      stroke={accentColor}
+                      strokeWidth={2}
+                      fill="url(#valueGradient)"
+                      dot={false}
+                      activeDot={{ r: 4, strokeWidth: 0, fill: accentColor }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="stats" className="space-y-4">
+          <Card className="border-border/50">
+            <CardHeader className="pb-1">
+              <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                KPI clés
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+                <p className="text-[11px] text-muted-foreground">TWR période</p>
+                <p className={cn("mt-1 text-base font-semibold tabular-nums", rangeTWR >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]")}>{formatPercent(rangeTWR * 100)}</p>
+              </div>
+
+              <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+                <p className="text-[11px] text-muted-foreground">TWR annualisé</p>
+                <p className={cn("mt-1 text-base font-semibold tabular-nums", twr.annualisedTWR >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]")}>{formatPercent(twr.annualisedTWR * 100)}</p>
+              </div>
+
+              <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+                <p className="text-[11px] text-muted-foreground">Valeur actuelle</p>
+                <p className="mt-1 text-base font-semibold tabular-nums text-foreground">{formatCurrency(valueData[valueData.length - 1].value)}</p>
+              </div>
+
+              <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+                <p className="text-[11px] text-muted-foreground">Flux nets sur période</p>
+                <p className={cn("mt-1 text-base font-semibold tabular-nums", periodNetFlows >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]")}>{formatCurrency(periodNetFlows)}</p>
+              </div>
+
+              <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+                <p className="text-[11px] text-muted-foreground">Points observés</p>
+                <p className="mt-1 text-base font-semibold tabular-nums text-foreground">{visiblePoints.length}</p>
+              </div>
+
+              <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+                <p className="text-[11px] text-muted-foreground">Jours de variation</p>
+                <p className="mt-1 text-base font-semibold tabular-nums text-foreground">{dailyVariationData.length}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {variationStats && (
+            <Card className="border-border/50">
+              <CardHeader className="pb-1">
+                <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Variations détaillées
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+                  <p className="text-[11px] text-muted-foreground">Valeur début → fin</p>
+                  <p className="mt-1 text-sm font-semibold tabular-nums text-foreground">
+                    {formatCurrency(variationStats.firstValue)} → {formatCurrency(variationStats.lastValue)}
+                  </p>
+                  <p className={cn("mt-1 text-xs tabular-nums", variationStats.deltaValue >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]")}>
+                    {formatCurrency(variationStats.deltaValue)} ({fmtSignedPercent(variationStats.deltaValuePct)})
+                  </p>
+                </div>
+
+                <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+                  <p className="text-[11px] text-muted-foreground">Rythme quotidien moyen</p>
+                  <p className={cn("mt-1 text-sm font-semibold tabular-nums", variationStats.avgDailyReturn >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]")}>
+                    {fmtSignedPercent(variationStats.avgDailyReturn)}
+                  </p>
+                  <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                    Volatilité quotidienne: {variationStats.dailyVolatility.toFixed(2)}%
+                  </p>
+                </div>
+
+                <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+                  <p className="text-[11px] text-muted-foreground">Meilleur / pire jour</p>
+                  <p className="mt-1 text-xs tabular-nums text-[hsl(var(--gain))]">
+                    {variationStats.bestWeek ? `${fmtSignedPercent(variationStats.bestWeek.dailyPct)} (${fmtDate(variationStats.bestWeek.date)})` : "n/a"}
+                  </p>
+                  <p className="mt-1 text-xs tabular-nums text-[hsl(var(--loss))]">
+                    {variationStats.worstWeek ? `${fmtSignedPercent(variationStats.worstWeek.dailyPct)} (${fmtDate(variationStats.worstWeek.date)})` : "n/a"}
+                  </p>
+                </div>
+
+                <div className="rounded-md border border-border/50 bg-muted/10 p-3">
+                  <p className="text-[11px] text-muted-foreground">Drawdown maximal</p>
+                  <p className="mt-1 text-sm font-semibold tabular-nums text-[hsl(var(--loss))]">
+                    {fmtSignedPercent(variationStats.maxDrawdown.value)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Plus bas le {variationStats.maxDrawdown.date ? fmtDate(variationStats.maxDrawdown.date) : "n/a"}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="border-border/50">
+            <CardHeader className="pb-1">
+              <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Comparaison benchmarks
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {benchmarkStats.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Ajoute un benchmark pour voir la comparaison détaillée.</p>
+              ) : (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {benchmarkStats.map((benchmark) => (
+                    <div key={benchmark.ticker} className="rounded-md border border-border/50 bg-muted/10 p-3">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: benchmarkColorMap[benchmark.ticker] }} />
+                        <p className="text-sm font-medium text-foreground">{benchmark.ticker}</p>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">Performance benchmark</p>
+                      <p className={cn("text-sm font-semibold tabular-nums", benchmark.benchmarkReturn >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]")}>
+                        {formatPercent(benchmark.benchmarkReturn * 100)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">Écart portefeuille</p>
+                      <p className={cn("text-sm font-semibold tabular-nums", benchmark.spread >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]")}>
+                        {fmtSignedPercent(benchmark.spread)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

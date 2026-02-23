@@ -30,7 +30,12 @@ async function fetchYahooHistory(
   const { rangeStr, interval: resolvedInterval } = rangeToParams(range);
   const effectiveInterval = interval || resolvedInterval;
 
-  const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${effectiveInterval}&range=${rangeStr}&includePrePost=false`;
+  // Yahoo can downsample `range=max` even when interval=1d.
+  // Use explicit epoch bounds to force real daily points.
+  const url =
+    effectiveInterval === "1d" && rangeStr === "max"
+      ? `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&period1=0&period2=${Math.floor(Date.now() / 1000)}&includePrePost=false`
+      : `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${effectiveInterval}&range=${rangeStr}&includePrePost=false`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);

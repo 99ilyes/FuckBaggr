@@ -26,6 +26,8 @@ export interface YahooQuoteResult {
 export interface YahooHistoryResult {
   timestamps: number[]; // Epoch seconds at midnight roughly
   closes: number[];     // Daily close prices
+  currency?: string;
+  symbol?: string;
 }
 
 const YAHOO_TIMEOUT_MS = 5000;
@@ -93,7 +95,17 @@ async function fetchServerSideFallback(
     });
     if (error || !data?.results) return {};
     const results: Record<string, YahooQuoteResult> = {};
-    for (const [t, info] of Object.entries(data.results as Record<string, any>)) {
+    const raw = data.results as Record<
+      string,
+      {
+        price?: number | null;
+        previousClose?: number | null;
+        name?: string | null;
+        currency?: string | null;
+        fromCache?: boolean;
+      }
+    >;
+    for (const [t, info] of Object.entries(raw)) {
       if (info?.price != null) {
         const price = info.price as number;
         const previousClose = (info.previousClose ?? null) as number | null;
@@ -214,6 +226,8 @@ export async function fetchHistoricalPricesClientSide(
 
         const timestamps: number[] = result.timestamp;
         const closes: (number | null)[] = result.indicators.quote[0].close;
+        const currency: string | undefined = result.meta?.currency;
+        const symbol: string | undefined = result.meta?.symbol;
 
         // Filter out null closes to maintain parallel arrays cleanly
         const validTimestamps: number[] = [];
@@ -227,7 +241,12 @@ export async function fetchHistoricalPricesClientSide(
         }
 
         if (validTimestamps.length > 0) {
-          results[ticker] = { timestamps: validTimestamps, closes: validCloses };
+          results[ticker] = {
+            timestamps: validTimestamps,
+            closes: validCloses,
+            currency,
+            symbol,
+          };
         }
       } catch (e) {
         console.warn(`Failed to fetch history for ${ticker}`, e);

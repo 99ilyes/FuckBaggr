@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Tables, TablesInsert } from "@/integrations/supabase/types";
+import { fetchHistoricalPricesClientSide } from "@/lib/yahooFinance";
 
 export type Portfolio = Tables<"portfolios">;
 export type Transaction = Tables<"transactions">;
@@ -165,32 +166,59 @@ export interface AssetHistory {
   history: HistoricalPrice[];
 }
 
+const HISTORY_QUERY_VERSION = "v2-daily-history";
+
 export function useHistoricalPrices(tickers: string[], range = "5y", interval = "1wk") {
   return useQuery({
-    queryKey: ["historical_prices", tickers.sort().join(","), range, interval],
+    queryKey: ["historical_prices", HISTORY_QUERY_VERSION, tickers.sort().join(","), range, interval],
     queryFn: async (): Promise<Record<string, AssetHistory>> => {
       if (tickers.length === 0) return {};
 
-      // Use the dedicated fetch-history Edge Function (direct Yahoo HTTP calls)
-      const { data, error } = await supabase.functions.invoke("fetch-history", {
-        body: { tickers, range, interval },
-      });
-
-      if (error) {
-        console.error("Edge function error:", error);
-        return {};
-      }
-
-      const raw = data?.results || {};
       const results: Record<string, AssetHistory> = {};
 
-      for (const [ticker, info] of Object.entries(raw as Record<string, any>)) {
-        if (info.error || !info.history) continue;
-        results[ticker] = {
-          symbol: info.symbol || ticker,
-          currency: info.currency || "USD",
-          history: info.history,
-        };
+      // 1) Browser direct Yahoo history first (per-user IP, avoids shared edge limits/downsampling)
+      try {
+        const browserHistories = await fetchHistoricalPricesClientSide(tickers);
+        for (const [ticker, info] of Object.entries(browserHistories)) {
+          const history = info.timestamps.map((time, idx) => ({
+            time,
+            price: info.closes[idx],
+          }));
+          if (history.length === 0) continue;
+          results[ticker] = {
+            symbol: info.symbol || ticker,
+            currency: info.currency || "USD",
+            history,
+          };
+        }
+      } catch (error) {
+        console.warn("Browser history fetch failed, falling back to edge function:", error);
+      }
+
+      // 2) Edge fallback for any missing tickers
+      const missingTickers = tickers.filter((ticker) => !results[ticker]);
+      if (missingTickers.length > 0) {
+        const { data, error } = await supabase.functions.invoke("fetch-history", {
+          body: { tickers: missingTickers, range, interval },
+        });
+
+        if (error) {
+          console.error("Edge function error:", error);
+          return results;
+        }
+
+        const raw = (data?.results || {}) as Record<
+          string,
+          { error?: string; history?: HistoricalPrice[]; symbol?: string; currency?: string }
+        >;
+        for (const [ticker, info] of Object.entries(raw)) {
+          if (info.error || !Array.isArray(info.history) || results[ticker]) continue;
+          results[ticker] = {
+            symbol: info.symbol || ticker,
+            currency: info.currency || "USD",
+            history: info.history,
+          };
+        }
       }
 
       return results;
@@ -200,4 +228,3 @@ export function useHistoricalPrices(tickers: string[], range = "5y", interval = 
     retry: 1,
   });
 }
-

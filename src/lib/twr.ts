@@ -12,6 +12,12 @@
 import { Transaction } from "@/hooks/usePortfolios";
 import { AssetHistory } from "@/hooks/usePortfolios";
 
+const PRICE_FORWARD_TOLERANCE_SEC = 24 * 3600;
+const CREDIT_FREEZE_WINDOW = {
+  from: "2025-02-26",
+  to: "2025-10-31",
+} as const;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface TWRDataPoint {
@@ -59,10 +65,29 @@ function resolveTickerAlias(ticker: string): string {
   return ticker;
 }
 
+function normalizePortfolioName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function getFreezeWindowForPortfolio(portfolioName: string): { from: string; to: string } | null {
+  const normalized = normalizePortfolioName(portfolioName);
+  if (normalized.includes("credit")) return CREDIT_FREEZE_WINDOW;
+  return null;
+}
+
+function isWithinFreezeWindow(date: string, window: { from: string; to: string } | null): boolean {
+  if (!window) return false;
+  return date >= window.from && date <= window.to;
+}
+
 /**
- * Forward-fill lookup with ±5 day tolerance to handle timestamp misalignment
- * between our weekly Monday-00:00-UTC timeline and Yahoo's market-open timestamps.
- * Returns the last known price at or before (timestamp + 5 days).
+ * Forward-fill lookup with +1 day tolerance to handle timestamp misalignment
+ * between midnight UTC points and market-close timestamps.
+ * Returns the last known price at or before (timestamp + tolerance).
  */
 export function getPriceAt(
   sorted: { time: number; price: number }[],
@@ -70,9 +95,8 @@ export function getPriceAt(
 ): number | null {
   if (!sorted || sorted.length === 0) return null;
 
-  // 5-day forward tolerance: a price stamped at Monday 14:30 UTC still counts for Monday 00:00 UTC
-  const FORWARD_TOLERANCE = 5 * 24 * 3600;
-  const cutoff = timestamp + FORWARD_TOLERANCE;
+  // A close stamped later in the same UTC day still counts for that day.
+  const cutoff = timestamp + PRICE_FORWARD_TOLERANCE_SEC;
 
   let last: number | null = null;
   for (const p of sorted) {
@@ -182,7 +206,7 @@ function replayState(
         break;
       }
       case "transfer_in": {
-        if (!tx.ticker || qty === 0 || price === 0) break;
+        if (!tx.ticker || qty === 0) break;
         if (!positions[tx.ticker]) positions[tx.ticker] = { quantity: 0, currency };
         positions[tx.ticker].quantity += qty;
         break;
@@ -196,18 +220,18 @@ function replayState(
         break;
       }
       case "deposit": {
-        const amount = qty !== 0 ? qty * price : price;
+        const amount = resolveTransactionAmountAbs(tx);
         // Convert non-EUR deposits to EUR using a rough approximation;
         // explicit conversions below are more accurate.
-        if (currency === "EUR") {
+        if (currency === "EUR" && amount > 0) {
           cash["EUR"] = (cash["EUR"] ?? 0) + amount;
         }
         // Non-EUR deposits are handled via conversion transactions
         break;
       }
       case "withdrawal": {
-        const amount = qty !== 0 ? qty * price : price;
-        if (currency === "EUR") {
+        const amount = resolveTransactionAmountAbs(tx);
+        if (currency === "EUR" && amount > 0) {
           cash["EUR"] = (cash["EUR"] ?? 0) - amount;
         }
         break;
@@ -216,8 +240,8 @@ function replayState(
       case "interest":
       case "coupon": {
         // Track only EUR side; non-EUR flows are represented by conversion txs.
-        const amount = qty !== 0 ? qty * price : price;
-        if (currency === "EUR") {
+        const amount = resolveTransactionAmountAbs(tx);
+        if (currency === "EUR" && amount > 0) {
           cash["EUR"] = (cash["EUR"] ?? 0) + amount;
         }
         break;
@@ -245,10 +269,17 @@ function replayState(
   return { positions, cash };
 }
 
+function resolveTransactionAmountAbs(tx: Transaction): number {
+  const qty = Math.abs(tx.quantity ?? 0);
+  const price = Math.abs(tx.unit_price ?? 0);
+  if (qty > 0 && price > 0) return qty * price;
+  return price;
+}
+
 
 /**
  * Compute the total portfolio value in EUR at a given timestamp.
- * Uses forward-fill (getPriceAt with tolerance) for missing weekly data.
+ * Uses forward-fill (getPriceAt with tolerance) for timestamp alignment.
  *
  * Cash is always in EUR (see replayState), so no FX conversion needed for it.
  * Positions are converted from their native currency via historical FX rates.
@@ -279,25 +310,21 @@ function computeValueEUR(
   return total;
 }
 
-// ─── External flows per week ──────────────────────────────────────────────────
+// ─── External flows per period ────────────────────────────────────────────────
 
 /**
- * Returns net external EUR flows (deposits - withdrawals) strictly within
- * (fromSec, toSec].
- *
- * Only EUR deposits/withdrawals are counted as external cash flows.
- * Non-EUR deposits and all conversions are internal broker operations.
+ * Returns net external flows in EUR strictly within (fromSec, toSec].
  *
  * To avoid distortion from compensating intra-day broker movements
  * (e.g. broker temporarily depositing and withdrawing the same amount),
- * we compute the NET flow per calendar day and only count days where the
- * net is non-zero. This neutralises same-day deposit/withdrawal pairs.
+ * we compute day-level nets and ignore days with near-zero net flow.
  */
 function getNetFlowsEUR(
   transactions: Transaction[],
   fromSec: number,
   toSec: number,
-  priceLookup: Record<string, { time: number; price: number }[]>
+  priceLookup: Record<string, { time: number; price: number }[]>,
+  assetCurrencies: Record<string, string>
 ): number {
   // Aggregate flows by calendar day (UTC date string)
   const byDay: Record<string, number> = {};
@@ -312,41 +339,61 @@ function getNetFlowsEUR(
       tx.type !== "transfer_out"
     ) continue;
 
-    const currency = (tx.currency ?? "EUR").toUpperCase();
-    const qty = tx.quantity ?? 0;
-    const price = tx.unit_price ?? 0;
-    const amount = qty !== 0 ? qty * price : price;
-    const signedAmount =
-      tx.type === "deposit" || tx.type === "transfer_in"
-        ? amount
-        : -amount;
-    const amountEUR =
-      currency === "EUR"
-        ? signedAmount
-        : toEUR(signedAmount, currency, txSec, priceLookup);
+    let amountEUR = 0;
+
+    if (tx.type === "deposit" || tx.type === "withdrawal") {
+      // Keep external-flow logic consistent with replayState cash handling.
+      const currency = (tx.currency ?? "EUR").toUpperCase();
+      if (currency !== "EUR") continue;
+
+      const amount = resolveTransactionAmountAbs(tx);
+      if (amount <= 0) continue;
+      amountEUR = tx.type === "deposit" ? amount : -amount;
+    } else {
+      // transfer_in / transfer_out of positions are external flows:
+      // value them at market price on transfer date when possible.
+      const ticker = tx.ticker;
+      const qty = Math.abs(tx.quantity ?? 0);
+      if (!ticker || qty <= 0) continue;
+
+      const series = priceLookup[ticker] ?? priceLookup[resolveTickerAlias(ticker)];
+      const marketPrice = series ? getPriceAt(series, txSec) : null;
+      const txPrice = Math.abs(tx.unit_price ?? 0);
+      const unitPrice = marketPrice && marketPrice > 0 ? marketPrice : txPrice;
+      if (!unitPrice || unitPrice <= 0) continue;
+
+      const amount = qty * unitPrice;
+      const signed = tx.type === "transfer_in" ? amount : -amount;
+      const currency = (tx.currency ?? assetCurrencies[ticker] ?? "EUR").toUpperCase();
+      amountEUR = currency === "EUR" ? signed : toEUR(signed, currency, txSec, priceLookup);
+    }
 
     const day = new Date(tx.date).toISOString().split("T")[0];
     byDay[day] = (byDay[day] ?? 0) + amountEUR;
   }
 
-  // Sum daily nets — days where deposit == withdrawal cancel out to ~0
-  return Object.values(byDay).reduce((sum, v) => sum + v, 0);
+  let netFlow = 0;
+  for (const dayFlow of Object.values(byDay)) {
+    // Neutralize compensating same-day movements.
+    if (Math.abs(dayFlow) < 1e-6) continue;
+    netFlow += dayFlow;
+  }
+
+  return netFlow;
 }
 
-// ─── Weekly timeline ──────────────────────────────────────────────────────────
+// ─── Daily timeline ───────────────────────────────────────────────────────────
 
-function buildWeeklyTimeline(startDate: Date, endDate: Date): number[] {
+function buildDailyTimeline(startDate: Date, endDate: Date): number[] {
   const times: number[] = [];
   const d = new Date(startDate);
   d.setUTCHours(0, 0, 0, 0);
-  // Snap to previous Monday
-  const day = d.getUTCDay();
-  d.setUTCDate(d.getUTCDate() - (day === 0 ? 6 : day - 1));
 
-  const end = endDate.getTime();
-  while (d.getTime() <= end) {
+  const end = new Date(endDate);
+  end.setUTCHours(0, 0, 0, 0);
+  while (d.getTime() <= end.getTime()) {
     times.push(d.getTime() / 1000);
-    d.setUTCDate(d.getUTCDate() + 7);
+    d.setUTCDate(d.getUTCDate() + 1);
   }
   return times;
 }
@@ -373,28 +420,45 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
   if (txs.length === 0) return empty;
 
   const priceLookup = buildPriceLookup(historyMap);
+  const freezeWindow = getFreezeWindowForPortfolio(portfolioName);
 
   const firstTxDate = new Date(txs[0].date);
   const now = new Date();
-  const weeklyTimes = buildWeeklyTimeline(firstTxDate, now);
-  if (weeklyTimes.length < 2) return empty;
+  const dailyTimes = buildDailyTimeline(firstTxDate, now);
+  if (dailyTimes.length < 2) return empty;
 
   const dataPoints: TWRDataPoint[] = [];
 
   // TWR state
   let cumulativeFactor = 1; // product of (1 + R_i)
   let prevValueEUR = 0;
-  let prevTime = weeklyTimes[0] - 7 * 24 * 3600;
+  let prevTime = dailyTimes[0] - 24 * 3600;
   const MIN_CHAIN_BASE_EUR = 100;
 
-  for (let i = 0; i < weeklyTimes.length; i++) {
-    const t = weeklyTimes[i];
+  for (let i = 0; i < dailyTimes.length; i++) {
+    const t = dailyTimes[i];
+    const date = new Date(t * 1000).toISOString().split("T")[0];
+
+    // Business rule: for portfolio "Crédit", freeze value/performance during
+    // the known near-zero interval to avoid artificial spikes.
+    if (isWithinFreezeWindow(date, freezeWindow)) {
+      dataPoints.push({
+        time: t,
+        date,
+        valueEUR: 0,
+        twr: cumulativeFactor - 1,
+        netFlow: 0,
+      });
+      prevValueEUR = 0;
+      prevTime = t;
+      continue;
+    }
 
     const state = replayState(txs, t);
     const valueEUR = computeValueEUR(state.positions, state.cash, t, priceLookup, assetCurrencies);
 
-    // Net external flows during this week
-    const netFlow = getNetFlowsEUR(txs, prevTime, t, priceLookup);
+    // External flows during this period.
+    const netFlow = getNetFlowsEUR(txs, prevTime, t, priceLookup, assetCurrencies);
 
     // Determine if this point has meaningful data.
     // A zero value when positions exist likely means missing price data for a ticker
@@ -403,7 +467,7 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
     const hasMissingPrices = hasPositions && valueEUR <= 0;
 
     // Compute sub-period return.
-    // Weekly granularity can be unstable when the portfolio is nearly empty
+    // Daily granularity can be unstable when the portfolio is nearly empty
     // (tiny base, admin fee, then large redeposit). We skip chaining when the
     // base is too small and treat large inflows on tiny bases as restart points.
     if (i > 0 && !hasMissingPrices && valueEUR > 0) {
@@ -427,7 +491,7 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
     if (valueEUR > 0) {
       dataPoints.push({
         time: t,
-        date: new Date(t * 1000).toISOString().split("T")[0],
+        date,
         valueEUR,
         twr: cumulativeFactor - 1,
         netFlow,
@@ -517,7 +581,7 @@ export function rebaseBenchmark(
   const firstVisibleSec = new Date(visibleDates[0]).getTime() / 1000;
   let basePrice: number | null = null;
   for (const p of sorted) {
-    if (p.time <= firstVisibleSec + 5 * 86400) basePrice = p.price;
+    if (p.time <= firstVisibleSec + PRICE_FORWARD_TOLERANCE_SEC) basePrice = p.price;
     else break;
   }
   if (!basePrice) return [];
@@ -526,7 +590,7 @@ export function rebaseBenchmark(
     const sec = new Date(date).getTime() / 1000;
     let price: number | null = null;
     for (const p of sorted) {
-      if (p.time <= sec + 5 * 86400) price = p.price;
+      if (p.time <= sec + PRICE_FORWARD_TOLERANCE_SEC) price = p.price;
       else break;
     }
     if (price !== null) {

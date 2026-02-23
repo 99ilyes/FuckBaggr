@@ -79,7 +79,7 @@ export default function Performance() {
   }, [filteredTransactions, normalizePerformanceTicker, benchmarkTickers]);
 
   const { data: historicalPrices = {}, isLoading: historicalLoading, isFetching: historicalFetching } =
-    useHistoricalPrices(performanceTickers, "max", "1wk");
+    useHistoricalPrices(performanceTickers, "max", "1d");
 
   const benchmarkHistories = useMemo(() => {
     const byTicker: Record<string, { time: number; price: number }[]> = {};
