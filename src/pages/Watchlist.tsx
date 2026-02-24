@@ -165,18 +165,37 @@ async function fetchQuoteWithPE(ticker: string): Promise<TickerQuote | null> {
   }
 }
 
-/** Fetch PE + EPS ratios in batch via local yfinance Python server */
+/** Fetch PE + EPS ratios — via local yfinance in dev, Supabase Edge Function in prod */
 async function fetchFundamentals(tickers: string[]): Promise<Record<string, YFinanceData>> {
+  // DEV: use local Python yfinance server
+  if (import.meta.env.DEV) {
+    try {
+      const url = `/api/yfinance/pe?tickers=${tickers.map(encodeURIComponent).join(",")}`;
+      const resp = await fetch(url, {
+        signal: AbortSignal.timeout(15000),
+        headers: { Accept: "application/json" },
+      });
+      if (!resp.ok) return {};
+      return await resp.json();
+    } catch {
+      console.warn("[Watchlist] yfinance fetch failed — is the Python server running? (npm run yfinance)");
+      return {};
+    }
+  }
+
+  // PROD: use Supabase Edge Function (fetch-prices with mode=fundamentals)
   try {
-    const url = `/api/yfinance/pe?tickers=${tickers.map(encodeURIComponent).join(",")}`;
-    const resp = await fetch(url, {
-      signal: AbortSignal.timeout(15000),
-      headers: { Accept: "application/json" },
+    const { supabase } = await import("@/integrations/supabase/client");
+    const { data, error } = await supabase.functions.invoke("fetch-prices", {
+      body: { tickers, mode: "fundamentals" },
     });
-    if (!resp.ok) return {};
-    return await resp.json();
-  } catch {
-    console.warn("[Watchlist] yfinance fetch failed — is the Python server running? (npm run yfinance)");
+    if (error) {
+      console.warn("[Watchlist] Edge Function fundamentals error:", error);
+      return {};
+    }
+    return data ?? {};
+  } catch (err) {
+    console.warn("[Watchlist] Edge Function fundamentals failed:", err);
     return {};
   }
 }
@@ -203,15 +222,30 @@ async function fetchAllQuotes(tickers: string[]): Promise<Record<string, TickerQ
   return results;
 }
 
-/** Search tickers via local yfinance Python server */
+/** Search tickers — via local yfinance in dev, Supabase Edge Function in prod */
 async function searchTickers(query: string): Promise<SearchResult[]> {
+  // DEV: use local Python server
+  if (import.meta.env.DEV) {
+    try {
+      const resp = await fetch(`/api/yfinance/search?q=${encodeURIComponent(query)}`, {
+        signal: AbortSignal.timeout(5000),
+        headers: { Accept: "application/json" },
+      });
+      if (!resp.ok) return [];
+      return await resp.json();
+    } catch {
+      return [];
+    }
+  }
+
+  // PROD: use Supabase Edge Function
   try {
-    const resp = await fetch(`/api/yfinance/search?q=${encodeURIComponent(query)}`, {
-      signal: AbortSignal.timeout(5000),
-      headers: { Accept: "application/json" },
+    const { supabase } = await import("@/integrations/supabase/client");
+    const { data, error } = await supabase.functions.invoke("search-tickers", {
+      body: { query },
     });
-    if (!resp.ok) return [];
-    return await resp.json();
+    if (error || !data?.results) return [];
+    return data.results;
   } catch {
     return [];
   }

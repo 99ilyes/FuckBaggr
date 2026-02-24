@@ -113,9 +113,53 @@ serve(async (req) => {
       });
     }
 
-    // ── MODE: fundamentals (stub) ──────────────────────────────────────────────
+    // ── MODE: fundamentals ──────────────────────────────────────────────
     if (mode === "fundamentals") {
-      return new Response(JSON.stringify({ results: {} }), {
+      if (!Array.isArray(tickers) || tickers.length === 0) {
+        return new Response(JSON.stringify({ results: {} }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const fundResults: Record<string, any> = {};
+
+      await Promise.all(
+        tickers.map(async (t: string) => {
+          try {
+            const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(t)}?modules=defaultKeyStatistics,financialData,summaryDetail`;
+            const resp = await fetch(url, {
+              headers: YF_HEADERS,
+              signal: AbortSignal.timeout(6000),
+            });
+            if (!resp.ok) {
+              fundResults[t] = { trailingPE: null, forwardPE: null, trailingEps: null, forwardEps: null };
+              return;
+            }
+            const json = await resp.json();
+            const result = json?.quoteSummary?.result?.[0];
+            const summary = result?.summaryDetail ?? {};
+            const keyStats = result?.defaultKeyStatistics ?? {};
+            const financial = result?.financialData ?? {};
+
+            const trailingPE = summary?.trailingPE?.raw ?? null;
+            const forwardPE = summary?.forwardPE?.raw ?? keyStats?.forwardPE?.raw ?? null;
+            const trailingEps = keyStats?.trailingEps?.raw ?? financial?.earningsPerShare?.raw ?? null;
+            const forwardEps = keyStats?.forwardEps?.raw ?? null;
+
+            fundResults[t] = {
+              trailingPE: typeof trailingPE === "number" ? trailingPE : null,
+              forwardPE: typeof forwardPE === "number" ? forwardPE : null,
+              trailingEps: typeof trailingEps === "number" ? trailingEps : null,
+              forwardEps: typeof forwardEps === "number" ? forwardEps : null,
+            };
+          } catch (err) {
+            console.warn(`[fetch-prices] fundamentals error for ${t}:`, err);
+            fundResults[t] = { trailingPE: null, forwardPE: null, trailingEps: null, forwardEps: null };
+          }
+        })
+      );
+
+      return new Response(JSON.stringify(fundResults), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -199,7 +243,7 @@ serve(async (req) => {
       }));
 
     if (toUpsert.length > 0) {
-      supabase.from("assets_cache").upsert(toUpsert, { onConflict: "ticker" }).then(() => {});
+      supabase.from("assets_cache").upsert(toUpsert, { onConflict: "ticker" }).then(() => { });
     }
 
     return new Response(JSON.stringify({ results }), {
