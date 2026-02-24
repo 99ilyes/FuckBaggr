@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import EarningsTracker from "./pages/EarningsTracker";
 import Calculator from "./pages/Calculator";
 import Performance from "./pages/Performance";
+import Watchlist from "./pages/Watchlist";
 import NotFound from "./pages/NotFound";
 import TestImport from "./pages/TestImport";
 
@@ -23,6 +24,7 @@ const App = () => (
           <Route element={<AppLayout />}>
             <Route path="/" element={<Index />} />
             <Route path="/performance" element={<Performance />} />
+            <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/earnings" element={<EarningsTracker />} />
             <Route path="/calculator" element={<Calculator />} />
           </Route>
