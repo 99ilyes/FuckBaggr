@@ -165,25 +165,8 @@ async function fetchQuoteWithPE(ticker: string): Promise<TickerQuote | null> {
   }
 }
 
-/** Fetch PE + EPS ratios — via local yfinance in dev, Supabase Edge Function in prod */
+/** Fetch PE + EPS ratios via Edge Function (fetch-prices with mode=fundamentals) */
 async function fetchFundamentals(tickers: string[]): Promise<Record<string, YFinanceData>> {
-  // DEV: use local Python yfinance server
-  if (import.meta.env.DEV) {
-    try {
-      const url = `/api/yfinance/pe?tickers=${tickers.map(encodeURIComponent).join(",")}`;
-      const resp = await fetch(url, {
-        signal: AbortSignal.timeout(15000),
-        headers: { Accept: "application/json" },
-      });
-      if (!resp.ok) return {};
-      return await resp.json();
-    } catch {
-      console.warn("[Watchlist] yfinance fetch failed — is the Python server running? (npm run yfinance)");
-      return {};
-    }
-  }
-
-  // PROD: use Supabase Edge Function (fetch-prices with mode=fundamentals)
   try {
     const { supabase } = await import("@/integrations/supabase/client");
     const { data, error } = await supabase.functions.invoke("fetch-prices", {
