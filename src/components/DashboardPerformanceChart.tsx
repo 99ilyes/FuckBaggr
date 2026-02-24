@@ -232,19 +232,40 @@ export function DashboardPerformanceChart({
   }, [rebased, activeBenchmarkTickers, benchmarkDataKeys, benchmarkSeriesByTicker]);
 
   // Value evolution data: portfolio value + cumulative deposits
+  // For "Crédit" portfolio, reset cumulative deposits to 0 at the freeze window
+  // (Feb 2025 massive withdrawal = fresh restart)
+  const CREDIT_RESET_DATE = "2025-02-26";
+  const isCreditPortfolio = portfolioName
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .includes("credit");
+
   const valueData = useMemo(() => {
     if (visiblePoints.length === 0) return [];
     // Compute cumulative net deposits up to range start
     const allPoints = twr.dataPoints;
     const rangeStartTime = visiblePoints[0].time;
     let cumulativeFlowBefore = 0;
+
+    // For Crédit: only accumulate flows AFTER the reset date if range starts after it
+    const resetSec = new Date(CREDIT_RESET_DATE).getTime() / 1000;
+    const shouldResetBefore = isCreditPortfolio && rangeStartTime >= resetSec;
+
     for (const dp of allPoints) {
       if (dp.time >= rangeStartTime) break;
+      if (shouldResetBefore && dp.date < CREDIT_RESET_DATE) continue;
       cumulativeFlowBefore += dp.netFlow;
     }
 
     let cumulativeFlow = cumulativeFlowBefore;
+    let hasReset = shouldResetBefore; // already skipped pre-reset if range starts after
     return visiblePoints.map((dp) => {
+      // Reset cumulative deposits to 0 at the freeze date within the visible range
+      if (isCreditPortfolio && !hasReset && dp.date >= CREDIT_RESET_DATE) {
+        cumulativeFlow = 0;
+        hasReset = true;
+      }
       cumulativeFlow += dp.netFlow;
       return {
         date: dp.date,
@@ -252,7 +273,7 @@ export function DashboardPerformanceChart({
         cumulativeDeposits: Math.round(cumulativeFlow * 100) / 100,
       };
     });
-  }, [visiblePoints, twr.dataPoints]);
+  }, [visiblePoints, twr.dataPoints, isCreditPortfolio]);
 
   const rangeTWR = rebased.length > 0 ? rebased[rebased.length - 1].twr : 0;
   const visiblePeriodStart = visiblePoints[0]?.date;
