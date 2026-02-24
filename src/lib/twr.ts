@@ -441,13 +441,15 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
 
     // Business rule: for portfolio "Crédit", freeze value/performance during
     // the known near-zero interval to avoid artificial spikes.
+    // Still compute netFlow so cumulative deposits curve tracks cash movements.
     if (isWithinFreezeWindow(date, freezeWindow)) {
+      const freezeNetFlow = getNetFlowsEUR(txs, prevTime, t, priceLookup, assetCurrencies);
       dataPoints.push({
         time: t,
         date,
         valueEUR: 0,
         twr: cumulativeFactor - 1,
-        netFlow: 0,
+        netFlow: freezeNetFlow,
       });
       prevValueEUR = 0;
       prevTime = t;
