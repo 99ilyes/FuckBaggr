@@ -25,6 +25,7 @@ import { DEFAULT_MAX_BENCHMARKS, loadPerformanceBenchmarkTickers } from "@/lib/p
 export default function Index() {
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
   const [chartView, setChartView] = useState<"performance" | "allocation">("performance");
+  const [allocationMode, setAllocationMode] = useState<"account" | "asset">("account");
   const [createPortfolioOpen, setCreatePortfolioOpen] = useState(false);
   const [addTransactionOpen, setAddTransactionOpen] = useState(false);
   const [importTransactionsOpen, setImportTransactionsOpen] = useState(false);
@@ -446,7 +447,34 @@ export default function Index() {
                 benchmarkTickers={benchmarkTickers}
               />
             ) : (
-              <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
+              <div className="space-y-2">
+                {!selectedPortfolioId && (
+                  <div className="flex justify-end">
+                    <ToggleGroup
+                      type="single"
+                      value={allocationMode}
+                      onValueChange={(v) => {
+                        if (v === "account" || v === "asset") setAllocationMode(v);
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="gap-1"
+                    >
+                      <ToggleGroupItem value="account" aria-label="Par compte">
+                        Par compte
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value="asset" aria-label="Par actif">
+                        Par actif
+                      </ToggleGroupItem>
+                    </ToggleGroup>
+                  </div>
+                )}
+                {!selectedPortfolioId && allocationMode === "account" ? (
+                  <AllocationChart data={portfolioAllocation} title="Par compte" />
+                ) : (
+                  <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
+                )}
+              </div>
             )}
           </div>
           <div className="order-1 lg:order-2">
