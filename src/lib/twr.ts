@@ -15,7 +15,7 @@ import { AssetHistory } from "@/hooks/usePortfolios";
 const PRICE_FORWARD_TOLERANCE_SEC = 24 * 3600;
 const CREDIT_FREEZE_WINDOW = {
   from: "2025-02-26",
-  to: "2025-10-31",
+  to: "2025-10-29",
 } as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -441,15 +441,13 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
 
     // Business rule: for portfolio "Crédit", freeze value/performance during
     // the known near-zero interval to avoid artificial spikes.
-    // Still compute netFlow so cumulative deposits curve tracks cash movements.
     if (isWithinFreezeWindow(date, freezeWindow)) {
-      const freezeNetFlow = getNetFlowsEUR(txs, prevTime, t, priceLookup, assetCurrencies);
       dataPoints.push({
         time: t,
         date,
         valueEUR: 0,
         twr: cumulativeFactor - 1,
-        netFlow: freezeNetFlow,
+        netFlow: 0,
       });
       prevValueEUR = 0;
       prevTime = t;
