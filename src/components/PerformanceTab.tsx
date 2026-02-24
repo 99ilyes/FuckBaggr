@@ -36,7 +36,7 @@ interface Props {
   maxBenchmarks?: number;
 }
 
-const RANGES: TimeRange[] = ["1W", "1M", "YTD", "6M", "1Y", "2Y", "MAX"];
+const RANGES: TimeRange[] = ["YTD", "6M", "1Y", "2Y", "5Y", "MAX"];
 const BENCH_COLORS = [
   "hsl(var(--chart-3))",
   "hsl(var(--chart-4))",

@@ -526,7 +526,7 @@ export function computeTWR(opts: ComputeTWROptions): PortfolioTWRResult {
 
 // ─── Range filter & TWR rebase ────────────────────────────────────────────────
 
-export type TimeRange = "1W" | "1M" | "YTD" | "6M" | "1Y" | "2Y" | "MAX" | "CUSTOM";
+export type TimeRange = "YTD" | "6M" | "1Y" | "2Y" | "5Y" | "MAX" | "CUSTOM";
 
 export function filterByRange(
   dataPoints: TWRDataPoint[],
@@ -553,14 +553,7 @@ export function filterByRange(
   }
 
   const now = Date.now() / 1000;
-  const monthsMap: Record<string, number> = { "1M": 1, "6M": 6, "1Y": 12, "2Y": 24 };
-
-  if (range === "1W") {
-    const cutoff = now - 7 * 24 * 3600;
-    const filtered = dataPoints.filter((d) => d.time >= cutoff);
-    return filtered.length === 0 ? dataPoints.slice(-1) : filtered;
-  }
-
+  const monthsMap: Record<string, number> = { "6M": 6, "1Y": 12, "2Y": 24, "5Y": 60 };
   const cutoff = now - (monthsMap[range] ?? 12) * 30.44 * 24 * 3600;
   const filtered = dataPoints.filter((d) => d.time >= cutoff);
   return filtered.length === 0 ? dataPoints.slice(-1) : filtered;
