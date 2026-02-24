@@ -283,6 +283,23 @@ export function DashboardPerformanceChart({
 
   const lastValue = valueData.length > 0 ? valueData[valueData.length - 1].portfolioValue : 0;
 
+  // Compute Y-axis domain for the value chart to adapt to the visible data
+  const valueDomain = useMemo(() => {
+    if (valueData.length === 0) return [0, 100] as [number, number];
+    let min = Infinity;
+    let max = -Infinity;
+    for (const dp of valueData) {
+      const v = dp.portfolioValue;
+      const d = dp.cumulativeDeposits;
+      if (v < min) min = v;
+      if (d < min) min = d;
+      if (v > max) max = v;
+      if (d > max) max = d;
+    }
+    const padding = (max - min) * 0.05 || 100;
+    return [Math.floor(min - padding), Math.ceil(max + padding)] as [number, number];
+  }, [valueData]);
+
   const xTickFormatter = (value: string) => {
     const parsedDate = new Date(value);
     if (Number.isNaN(parsedDate.getTime())) return value;
@@ -495,6 +512,7 @@ export function DashboardPerformanceChart({
                   tickLine={false}
                 />
                 <YAxis
+                  domain={valueDomain}
                   tickFormatter={fmtEurCompact}
                   tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
                   axisLine={false}

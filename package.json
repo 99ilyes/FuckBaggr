@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "yfinance": "python3 scripts/yfinance_server.py"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
