@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { ReactNode, useState } from "react";
 import { Portfolio, useDeletePortfolio, useDeleteTransactionsByPortfolio } from "@/hooks/usePortfolios";
 import { EditPortfolioDialog } from "@/components/EditPortfolioDialog";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ interface PortfolioSelectorProps {
   onCreateClick: () => void;
   showCreateButton?: boolean;
   className?: string;
+  rightContent?: ReactNode;
 }
 
 export function PortfolioSelector({
@@ -38,6 +39,7 @@ export function PortfolioSelector({
   onCreateClick,
   showCreateButton = true,
   className,
+  rightContent,
 }: PortfolioSelectorProps) {
   const deletePortfolio = useDeletePortfolio();
   const deleteTransactions = useDeleteTransactionsByPortfolio();
@@ -122,6 +124,7 @@ export function PortfolioSelector({
             <Plus className="h-4 w-4" />
           </Button>
         )}
+        {rightContent}
       </div>
 
       <AlertDialog open={!!portfolioToDelete} onOpenChange={(open) => !open && setPortfolioToDelete(null)}>
