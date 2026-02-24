@@ -165,22 +165,110 @@ async function fetchQuoteWithPE(ticker: string): Promise<TickerQuote | null> {
   }
 }
 
-/** Fetch PE + EPS ratios via Edge Function (fetch-prices with mode=fundamentals) */
+/** Normalize fundamentals payload (supports both {ticker: data} and {results: {...}} shapes). */
+function normalizeFundamentalsPayload(payload: unknown): Record<string, YFinanceData> {
+  const source =
+    payload &&
+    typeof payload === "object" &&
+    "results" in (payload as Record<string, unknown>) &&
+    (payload as Record<string, unknown>).results &&
+    typeof (payload as Record<string, unknown>).results === "object"
+      ? ((payload as Record<string, unknown>).results as Record<string, unknown>)
+      : (payload as Record<string, unknown> | null);
+
+  if (!source || typeof source !== "object") return {};
+
+  const out: Record<string, YFinanceData> = {};
+  for (const [ticker, raw] of Object.entries(source)) {
+    const v = (raw ?? {}) as Record<string, unknown>;
+    out[ticker] = {
+      trailingPE: typeof v.trailingPE === "number" ? v.trailingPE : null,
+      trailingEps: typeof v.trailingEps === "number" ? v.trailingEps : null,
+    };
+  }
+  return out;
+}
+
+/** Browser fallback for fundamentals via Yahoo fundamentals-timeseries endpoint. */
+async function fetchFundamentalsBrowser(ticker: string): Promise<YFinanceData> {
+  try {
+    const baseUrl = import.meta.env.DEV ? "/api/yf" : "https://query1.finance.yahoo.com";
+    const period2 = Math.floor(Date.now() / 1000);
+    const period1 = period2 - 60 * 60 * 24 * 365 * 3;
+    const url = `${baseUrl}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=trailingPeRatio,trailingDilutedEPS,trailingBasicEPS&period1=${period1}&period2=${period2}`;
+
+    const resp = await fetch(url, {
+      signal: AbortSignal.timeout(YAHOO_TIMEOUT + 2000),
+      headers: { Accept: "application/json" },
+    });
+
+    if (!resp.ok) return { trailingPE: null, trailingEps: null };
+
+    const json = await resp.json();
+    const series = json?.timeseries?.result;
+    if (!Array.isArray(series)) return { trailingPE: null, trailingEps: null };
+
+    const getLatestRaw = (arr: unknown): number | null => {
+      if (!Array.isArray(arr) || arr.length === 0) return null;
+      for (let i = arr.length - 1; i >= 0; i--) {
+        const value = (arr[i] as { reportedValue?: { raw?: unknown } })?.reportedValue?.raw;
+        if (typeof value === "number") return value;
+      }
+      return null;
+    };
+
+    let trailingPE: number | null = null;
+    let trailingEps: number | null = null;
+
+    for (const item of series) {
+      const type = (item as { meta?: { type?: string[] } })?.meta?.type?.[0];
+
+      if (type === "trailingPeRatio") {
+        trailingPE = getLatestRaw((item as { trailingPeRatio?: unknown[] }).trailingPeRatio);
+      } else if (type === "trailingDilutedEPS") {
+        trailingEps = getLatestRaw((item as { trailingDilutedEPS?: unknown[] }).trailingDilutedEPS);
+      } else if (type === "trailingBasicEPS" && trailingEps == null) {
+        trailingEps = getLatestRaw((item as { trailingBasicEPS?: unknown[] }).trailingBasicEPS);
+      }
+    }
+
+    return { trailingPE, trailingEps };
+  } catch {
+    return { trailingPE: null, trailingEps: null };
+  }
+}
+
+/** Fetch PE + EPS ratios via backend, then fallback to browser Yahoo v10 if empty/missing. */
 async function fetchFundamentals(tickers: string[]): Promise<Record<string, YFinanceData>> {
+  const merged: Record<string, YFinanceData> = {};
+
   try {
     const { supabase } = await import("@/integrations/supabase/client");
     const { data, error } = await supabase.functions.invoke("fetch-prices", {
       body: { tickers, mode: "fundamentals" },
     });
-    if (error) {
+
+    if (!error) {
+      Object.assign(merged, normalizeFundamentalsPayload(data));
+    } else {
       console.warn("[Watchlist] Edge Function fundamentals error:", error);
-      return {};
     }
-    return data ?? {};
   } catch (err) {
     console.warn("[Watchlist] Edge Function fundamentals failed:", err);
-    return {};
   }
+
+  const missingTickers = tickers.filter((t) => !(t in merged));
+  if (missingTickers.length === 0) return merged;
+
+  const browserFallback = await Promise.all(
+    missingTickers.map(async (ticker) => [ticker, await fetchFundamentalsBrowser(ticker)] as const)
+  );
+
+  for (const [ticker, fund] of browserFallback) {
+    merged[ticker] = fund;
+  }
+
+  return merged;
 }
 
 async function fetchAllQuotes(tickers: string[]): Promise<Record<string, TickerQuote>> {
