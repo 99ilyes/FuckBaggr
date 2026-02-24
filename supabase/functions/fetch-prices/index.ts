@@ -121,45 +121,69 @@ serve(async (req) => {
         });
       }
 
-      const fundResults: Record<string, any> = {};
+      const uniqueTickers = [...new Set(tickers)] as string[];
+      const fundResults: Record<string, any> = Object.fromEntries(
+        uniqueTickers.map((t) => [t, { trailingPE: null, forwardPE: null, trailingEps: null, forwardEps: null }])
+      );
+
+      // 1) Fundamentals timeseries endpoint (works without crumb for PE/EPS)
+      const period2 = Math.floor(Date.now() / 1000);
+      const period1 = period2 - 60 * 60 * 24 * 365 * 3;
+
+      const getLatestRaw = (arr: any[] | undefined): number | null => {
+        if (!Array.isArray(arr) || arr.length === 0) return null;
+        for (let i = arr.length - 1; i >= 0; i--) {
+          const v = arr[i]?.reportedValue?.raw;
+          if (typeof v === "number") return v;
+        }
+        return null;
+      };
 
       await Promise.all(
-        tickers.map(async (t: string) => {
+        uniqueTickers.map(async (ticker: string) => {
           try {
-            const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(t)}?modules=defaultKeyStatistics,financialData,summaryDetail`;
-            const resp = await fetch(url, {
+            const tsUrl = `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=trailingPeRatio,trailingDilutedEPS,trailingBasicEPS&period1=${period1}&period2=${period2}`;
+            const tsResp = await fetch(tsUrl, {
               headers: YF_HEADERS,
-              signal: AbortSignal.timeout(6000),
+              signal: AbortSignal.timeout(7000),
             });
-            if (!resp.ok) {
-              fundResults[t] = { trailingPE: null, forwardPE: null, trailingEps: null, forwardEps: null };
-              return;
+
+            if (!tsResp.ok) return;
+
+            const tsJson = await tsResp.json();
+            const series = tsJson?.timeseries?.result;
+            if (!Array.isArray(series)) return;
+
+            let trailingPE: number | null = null;
+            let trailingEps: number | null = null;
+
+            for (const item of series) {
+              const type = item?.meta?.type?.[0];
+
+              if (type === "trailingPeRatio") {
+                trailingPE = getLatestRaw(item?.trailingPeRatio);
+              } else if (type === "trailingDilutedEPS") {
+                trailingEps = getLatestRaw(item?.trailingDilutedEPS);
+              } else if (type === "trailingBasicEPS" && trailingEps == null) {
+                trailingEps = getLatestRaw(item?.trailingBasicEPS);
+              }
             }
-            const json = await resp.json();
-            const result = json?.quoteSummary?.result?.[0];
-            const summary = result?.summaryDetail ?? {};
-            const keyStats = result?.defaultKeyStatistics ?? {};
-            const financial = result?.financialData ?? {};
 
-            const trailingPE = summary?.trailingPE?.raw ?? null;
-            const forwardPE = summary?.forwardPE?.raw ?? keyStats?.forwardPE?.raw ?? null;
-            const trailingEps = keyStats?.trailingEps?.raw ?? financial?.earningsPerShare?.raw ?? null;
-            const forwardEps = keyStats?.forwardEps?.raw ?? null;
-
-            fundResults[t] = {
-              trailingPE: typeof trailingPE === "number" ? trailingPE : null,
-              forwardPE: typeof forwardPE === "number" ? forwardPE : null,
-              trailingEps: typeof trailingEps === "number" ? trailingEps : null,
-              forwardEps: typeof forwardEps === "number" ? forwardEps : null,
+            fundResults[ticker] = {
+              trailingPE,
+              forwardPE: null,
+              trailingEps,
+              forwardEps: null,
             };
           } catch (err) {
-            console.warn(`[fetch-prices] fundamentals error for ${t}:`, err);
-            fundResults[t] = { trailingPE: null, forwardPE: null, trailingEps: null, forwardEps: null };
+            console.warn(`[fetch-prices] fundamentals timeseries error for ${ticker}:`, err);
           }
         })
       );
 
-      return new Response(JSON.stringify(fundResults), {
+      console.info(`[fetch-prices] fundamentals computed for ${Object.keys(fundResults).length}/${uniqueTickers.length} tickers`);
+
+      return new Response(JSON.stringify({ results: fundResults }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
