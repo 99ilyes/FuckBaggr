@@ -63,11 +63,32 @@ export function useTransactions(portfolioId?: string) {
   return useQuery({
     queryKey: ["transactions", portfolioId],
     queryFn: async () => {
-      let query = supabase.from("transactions").select("*").order("date", { ascending: false });
-      if (portfolioId) query = query.eq("portfolio_id", portfolioId);
-      const { data, error } = await query;
-      if (error) throw error;
-      return data as Transaction[];
+      // Supabase rows can be capped by API limits (commonly 1000 rows).
+      // Fetch all pages so portfolio totals are consistent everywhere.
+      const pageSize = 1000;
+      let from = 0;
+      const allRows: Transaction[] = [];
+
+      while (true) {
+        let query = supabase
+          .from("transactions")
+          .select("*")
+          .order("date", { ascending: false })
+          .range(from, from + pageSize - 1);
+
+        if (portfolioId) query = query.eq("portfolio_id", portfolioId);
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        const page = (data || []) as Transaction[];
+        allRows.push(...page);
+
+        if (page.length < pageSize) break;
+        from += pageSize;
+      }
+
+      return allRows;
     },
   });
 }

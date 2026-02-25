@@ -21,6 +21,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { fetchPricesClientSide } from "@/lib/yahooFinance";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -127,44 +128,6 @@ function calcImpliedReturn(
 
 // ─── API functions ───────────────────────────────────────────────────
 
-/** Fetch quote for a single ticker via Yahoo v8 */
-async function fetchQuoteWithPE(ticker: string): Promise<TickerQuote | null> {
-  try {
-    const baseUrl = import.meta.env.DEV
-      ? "/api/yf"
-      : "https://query2.finance.yahoo.com";
-    const url = `${baseUrl}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d&includePrePost=false`;
-
-    const resp = await fetch(url, {
-      signal: AbortSignal.timeout(YAHOO_TIMEOUT),
-      headers: { Accept: "application/json" },
-    });
-    if (!resp.ok) return null;
-
-    const data = await resp.json();
-    const meta = data?.chart?.result?.[0]?.meta;
-    if (!meta) return null;
-
-    const price = meta.regularMarketPrice ?? null;
-    const prevClose = meta.chartPreviousClose ?? meta.previousClose ?? null;
-    const change = price != null && prevClose != null && prevClose !== 0
-      ? ((price - prevClose) / prevClose) * 100
-      : null;
-
-    return {
-      price,
-      previousClose: prevClose,
-      name: meta.longName ?? meta.shortName ?? meta.symbol ?? ticker,
-      currency: meta.currency ?? "USD",
-      trailingPE: null,
-      trailingEps: null,
-      changePercent: change,
-    };
-  } catch {
-    return null;
-  }
-}
-
 /** Normalize fundamentals payload (supports both {ticker: data} and {results: {...}} shapes). */
 function normalizeFundamentalsPayload(payload: unknown): Record<string, YFinanceData> {
   const source =
@@ -259,6 +222,9 @@ async function fetchFundamentals(tickers: string[]): Promise<Record<string, YFin
 
   const missingTickers = tickers.filter((t) => !(t in merged));
   if (missingTickers.length === 0) return merged;
+  // In hosted previews, external Yahoo browser calls are often blocked.
+  // Keep production on edge-only fundamentals and skip browser fallback.
+  if (import.meta.env.PROD) return merged;
 
   const browserFallback = await Promise.all(
     missingTickers.map(async (ticker) => [ticker, await fetchFundamentalsBrowser(ticker)] as const)
@@ -275,20 +241,32 @@ async function fetchAllQuotes(tickers: string[]): Promise<Record<string, TickerQ
   const results: Record<string, TickerQuote> = {};
   if (tickers.length === 0) return results;
 
-  const [quotes, fundMap] = await Promise.all([
-    Promise.all(tickers.map((t) => fetchQuoteWithPE(t).then((q) => [t, q] as const))),
+  const [priceMap, fundMap] = await Promise.all([
+    fetchPricesClientSide(tickers),
     fetchFundamentals(tickers),
   ]);
 
-  for (const [ticker, quote] of quotes) {
-    if (quote) {
-      const fund = fundMap[ticker];
-      results[ticker] = {
-        ...quote,
-        trailingPE: fund?.trailingPE ?? null,
-        trailingEps: fund?.trailingEps ?? null,
-      };
-    }
+  for (const ticker of tickers) {
+    const quote = priceMap[ticker];
+    if (!quote) continue;
+
+    const fund = fundMap[ticker];
+    const computedChangePercent =
+      quote.price != null &&
+      quote.previousClose != null &&
+      quote.previousClose !== 0
+        ? ((quote.price - quote.previousClose) / quote.previousClose) * 100
+        : null;
+
+    results[ticker] = {
+      price: quote.price ?? null,
+      previousClose: quote.previousClose ?? null,
+      name: quote.name ?? ticker,
+      currency: quote.currency ?? "USD",
+      trailingPE: fund?.trailingPE ?? null,
+      trailingEps: fund?.trailingEps ?? null,
+      changePercent: quote.changePercent ?? computedChangePercent,
+    };
   }
   return results;
 }

@@ -136,18 +136,55 @@ export function calculateCashBalances(transactions: Transaction[]): CashBalances
   return balances;
 }
 
+function isValidRate(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function getDirectOrInverseRate(
+  from: string,
+  to: string,
+  cache: AssetCache[],
+  field: "last_price" | "previous_close"
+): number | null {
+  const directTicker = `${from}${to}=X`;
+  const inverseTicker = `${to}${from}=X`;
+
+  const direct = cache.find((a) => a.ticker.toUpperCase() === directTicker);
+  const directRate = direct?.[field];
+  if (isValidRate(directRate)) return directRate;
+
+  const inverse = cache.find((a) => a.ticker.toUpperCase() === inverseTicker);
+  const inverseRate = inverse?.[field];
+  if (isValidRate(inverseRate)) return 1 / inverseRate;
+
+  return null;
+}
+
+function getMarketExchangeRate(from: string, to: string, cache: AssetCache[]): number | null {
+  const source = (from || "EUR").toUpperCase();
+  const target = (to || "EUR").toUpperCase();
+  if (source === target) return 1;
+
+  const direct = getDirectOrInverseRate(source, target, cache, "last_price");
+  if (direct !== null) return direct;
+
+  // Bridge through EUR so cross-currency cash/positions are still converted
+  // even when the direct pair (e.g. GBPUSD=X) is not cached.
+  if (source !== "EUR" && target !== "EUR") {
+    const sourceToEur = getDirectOrInverseRate(source, "EUR", cache, "last_price");
+    const targetToEur = getDirectOrInverseRate(target, "EUR", cache, "last_price");
+    if (sourceToEur !== null && targetToEur !== null && targetToEur !== 0) {
+      return sourceToEur / targetToEur;
+    }
+  }
+
+  return null;
+}
+
 // Helper to get exchange rate from cache
 export function getExchangeRate(from: string, to: string, cache: AssetCache[]): number {
-  if (from === to) return 1;
-  // Try direct pair
-  const direct = cache.find(a => a.ticker === `${from}${to}=X`);
-  if (direct?.last_price) return direct.last_price;
-
-  // Try inverted pair
-  const inverted = cache.find(a => a.ticker === `${to}${from}=X`);
-  if (inverted?.last_price) return 1 / inverted.last_price;
-
-  return 1; // Fallback assumes 1:1 if rate missing (should ideally warn)
+  const marketRate = getMarketExchangeRate(from, to, cache);
+  return marketRate ?? 1; // Fallback assumes 1:1 if rate missing
 }
 
 function getExchangeRateFromConversions(
@@ -184,15 +221,70 @@ function getBestExchangeRate(
   cache: AssetCache[],
   transactions: Transaction[]
 ): number {
-  const marketRate = getExchangeRate(from, to, cache);
-  if (from === to || marketRate !== 1) return marketRate;
+  const source = (from || "EUR").toUpperCase();
+  const target = (to || "EUR").toUpperCase();
+  if (source === target) return 1;
 
-  const fallbackRate = getExchangeRateFromConversions(from, to, transactions);
+  const marketRate = getMarketExchangeRate(source, target, cache);
+  if (marketRate !== null) return marketRate;
+
+  const fallbackRate = getExchangeRateFromConversions(source, target, transactions);
   if (fallbackRate && isFinite(fallbackRate) && fallbackRate > 0) {
     return fallbackRate;
   }
 
-  return marketRate;
+  return 1;
+}
+
+function getPreviousDirectOrInverseRate(
+  from: string,
+  to: string,
+  cache: AssetCache[],
+  previousCloseMap: Record<string, number>
+): number | null {
+  const directTicker = `${from}${to}=X`;
+  const inverseTicker = `${to}${from}=X`;
+
+  const directMapRate = previousCloseMap[directTicker];
+  if (isValidRate(directMapRate)) return directMapRate;
+
+  const directCache = cache.find((a) => a.ticker.toUpperCase() === directTicker)?.previous_close;
+  if (isValidRate(directCache)) return directCache;
+
+  const inverseMapRate = previousCloseMap[inverseTicker];
+  if (isValidRate(inverseMapRate)) return 1 / inverseMapRate;
+
+  const inverseCache = cache.find((a) => a.ticker.toUpperCase() === inverseTicker)?.previous_close;
+  if (isValidRate(inverseCache)) return 1 / inverseCache;
+
+  return null;
+}
+
+function getPreviousExchangeRate(
+  from: string,
+  to: string,
+  cache: AssetCache[],
+  previousCloseMap: Record<string, number>,
+  transactions: Transaction[]
+): number {
+  const source = (from || "EUR").toUpperCase();
+  const target = (to || "EUR").toUpperCase();
+  if (source === target) return 1;
+
+  const direct = getPreviousDirectOrInverseRate(source, target, cache, previousCloseMap);
+  if (direct !== null) return direct;
+
+  if (source !== "EUR" && target !== "EUR") {
+    const sourceToEur = getPreviousDirectOrInverseRate(source, "EUR", cache, previousCloseMap);
+    const targetToEur = getPreviousDirectOrInverseRate(target, "EUR", cache, previousCloseMap);
+    if (sourceToEur !== null && targetToEur !== null && targetToEur !== 0) {
+      return sourceToEur / targetToEur;
+    }
+  }
+
+  // If we don't have a previous close for FX, use the best current conversion
+  // so the asset remains valued rather than dropped.
+  return getBestExchangeRate(source, target, cache, transactions);
 }
 
 export function calculatePortfolioStats(
@@ -371,7 +463,8 @@ export function calculateDailyPerformance(
   totalValue: number,
   baseCurrency = "EUR",
   previousCloseMap: Record<string, number> = {},
-  liveChangeMap: Record<string, number> = {}
+  liveChangeMap: Record<string, number> = {},
+  transactions: Transaction[] = []
 ) {
   let change = 0;
 
@@ -396,15 +489,20 @@ export function calculateDailyPerformance(
       // Diff = Price - Prev.
 
       const pct = liveChangeMap[pos.ticker] / 100;
-      const prevCloseCalculated = pos.currentPrice / (1 + pct);
-      const priceDiff = pos.currentPrice - prevCloseCalculated;
-      const rate = getExchangeRate(pos.currency, baseCurrency, assetsCache);
+      const denominator = 1 + pct;
+      const prevCloseCalculated = denominator > 0 ? pos.currentPrice / denominator : null;
+      const prevClose =
+        (prevCloseCalculated && Number.isFinite(prevCloseCalculated) && prevCloseCalculated > 0)
+          ? prevCloseCalculated
+          : (previousCloseMap[pos.ticker] ?? (cached as any)?.previous_close ?? pos.currentPrice);
+      const priceDiff = pos.currentPrice - prevClose;
+      const rate = getBestExchangeRate(pos.currency, baseCurrency, assetsCache, transactions);
       change += pos.quantity * priceDiff * rate;
     } else {
       // Priority 2: Fallback to previous close calculation
       const prevClose = previousCloseMap[pos.ticker] ?? (cached as any)?.previous_close ?? pos.currentPrice;
       const priceDiff = pos.currentPrice - prevClose;
-      const rate = getExchangeRate(pos.currency, baseCurrency, assetsCache);
+      const rate = getBestExchangeRate(pos.currency, baseCurrency, assetsCache, transactions);
       change += pos.quantity * priceDiff * rate;
     }
   }
@@ -412,14 +510,8 @@ export function calculateDailyPerformance(
   // FX impact on cash balances (FX trades 24/5, always included)
   for (const [cur, amount] of Object.entries(cashBalances || {})) {
     if (cur === baseCurrency || Math.abs(amount) < 0.01) continue;
-    const currentRate = getExchangeRate(cur, baseCurrency, assetsCache);
-    const fxTicker = `${cur}${baseCurrency}=X`;
-    const fxTickerInv = `${baseCurrency}${cur}=X`;
-    const cached = assetsCache.find(a => a.ticker === fxTicker);
-    const cachedInv = assetsCache.find(a => a.ticker === fxTickerInv);
-    const prevRate = previousCloseMap[fxTicker] ?? (cached as any)?.previous_close ??
-      (previousCloseMap[fxTickerInv] ? 1 / previousCloseMap[fxTickerInv] : null) ??
-      ((cachedInv as any)?.previous_close ? 1 / (cachedInv as any).previous_close : currentRate);
+    const currentRate = getBestExchangeRate(cur, baseCurrency, assetsCache, transactions);
+    const prevRate = getPreviousExchangeRate(cur, baseCurrency, assetsCache, previousCloseMap, transactions);
     change += amount * (currentRate - prevRate);
   }
 

@@ -64,9 +64,11 @@ export function KPICards({
       assetsCache,
       totalValue,
       baseCurrency,
-      previousCloseMap
+      previousCloseMap,
+      {},
+      transactions
     );
-  }, [positions, cashBalances, assetsCache, baseCurrency, previousCloseMap, totalValue]);
+  }, [positions, cashBalances, assetsCache, baseCurrency, previousCloseMap, totalValue, transactions]);
 
   const isDayPositive = dailyPerf.change >= 0;
 

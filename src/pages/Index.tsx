@@ -38,7 +38,6 @@ export default function Index() {
 
   const { data: portfolios = [] } = usePortfolios();
   const { data: allTransactions = [] } = useTransactions();
-  const { data: selectedPortfolioTransactions = [] } = useTransactions(selectedPortfolioId || undefined);
   const { data: assetsCache = [], refetch: refetchCache } = useAssetsCache();
   const benchmarkTickers = useMemo(
     () => loadPerformanceBenchmarkTickers(DEFAULT_MAX_BENCHMARKS),
@@ -67,8 +66,8 @@ export default function Index() {
   }, [assetsCache, lastRefreshTime]);
 
   const filteredTransactions = useMemo(
-    () => selectedPortfolioId ? selectedPortfolioTransactions : allTransactions,
-    [selectedPortfolioId, selectedPortfolioTransactions, allTransactions]
+    () => selectedPortfolioId ? allTransactions.filter((t) => t.portfolio_id === selectedPortfolioId) : allTransactions,
+    [selectedPortfolioId, allTransactions]
   );
 
   // Use EUR as base currency for now
@@ -302,15 +301,17 @@ export default function Index() {
       const pCurrency = (p as any)?.currency || "EUR";
       const pos = calculatePositions(txs, effectiveAssetsCache, pCurrency);
       const cash = calculateCashBalances(txs);
+      const stats = calculatePortfolioStats(pos, cash, effectiveAssetsCache, txs, pCurrency);
 
       const { change, changePct } = calculateDailyPerformance(
         pos,
         cash,
         effectiveAssetsCache,
-        calculatePortfolioStats(pos, cash, effectiveAssetsCache, txs, pCurrency).totalValue,
+        stats.totalValue,
         pCurrency, // Use portfolio currency for display consistency with totalValue
         previousCloseMap,
-        liveChangeMap
+        liveChangeMap,
+        txs
       );
 
       const portfolioMarkets = getMarketStatusForPositions(pos);
@@ -324,12 +325,12 @@ export default function Index() {
         dailyChange: change,
         dailyChangePct: changePct,
         currency: pCurrency,
-        totalValue: calculatePortfolioStats(pos, cash, effectiveAssetsCache, txs, pCurrency).totalValue,
+        totalValue: stats.totalValue,
         hasAnyOpenMarket: hasAnyOpen,
         marketsInfo: portfolioMarkets,
       } as PortfolioPerformance;
     });
-  }, [selectedPortfolioId, portfolios, allTransactions, effectiveAssetsCache, baseCurrency, previousCloseMap, liveChangeMap]);
+  }, [selectedPortfolioId, portfolios, allTransactions, effectiveAssetsCache, previousCloseMap, liveChangeMap]);
 
   return (
     <div className="min-h-screen bg-background">
