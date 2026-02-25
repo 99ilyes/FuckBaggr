@@ -13,7 +13,10 @@ const YF_HEADERS = {
 
 function rangeToParams(range: string): { rangeStr: string; interval: string } {
   const map: Record<string, { rangeStr: string; interval: string }> = {
-    "6mo": { rangeStr: "6mo", interval: "1wk" },
+    "5d": { rangeStr: "5d", interval: "15m" },
+    "1mo": { rangeStr: "1mo", interval: "1d" },
+    "3mo": { rangeStr: "3mo", interval: "1d" },
+    "6mo": { rangeStr: "6mo", interval: "1d" },
     "1y": { rangeStr: "1y", interval: "1wk" },
     "2y": { rangeStr: "2y", interval: "1wk" },
     "5y": { rangeStr: "5y", interval: "1wk" },
