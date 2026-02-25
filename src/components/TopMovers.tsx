@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AssetPosition } from "@/lib/calculations";
 import { AssetCache } from "@/hooks/usePortfolios";
@@ -5,6 +6,7 @@ import { formatPercent, formatCurrency, isMarketCurrentlyOpen } from "@/lib/calc
 import { ArrowUp, ArrowDown, TrendingUp } from "lucide-react";
 import { TickerLogo } from "@/components/TickerLogo";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { TickerChartPopup } from "@/components/TickerChartPopup";
 
 interface Props {
     positions: AssetPosition[];
@@ -23,14 +25,14 @@ interface AssetVariation {
 }
 
 export function TopMovers({ positions, assetsCache, liveChangeMap = {} }: Props) {
+    const [selectedTicker, setSelectedTicker] = useState<AssetVariation | null>(null);
+
     const variations: AssetVariation[] = positions
         .filter(p => p.quantity > 0)
         .map(p => {
             const asset = assetsCache.find(a => a.ticker === p.ticker);
             if (!asset || !asset.last_price || !asset.previous_close) return null;
 
-            // Priority: Live Change from Yahoo if available (most accurate)
-            // Fallback: Calculate from price/prevClose (which might be updated via effectiveAssetsCache)
             let change = 0;
             if (liveChangeMap[p.ticker] != null) {
                 change = liveChangeMap[p.ticker];
@@ -54,7 +56,7 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {} }: Props)
         .sort((a, b) => b.changePercent - a.changePercent);
 
     const MoverRow = ({ item }: { item: AssetVariation }) => (
-        <div className="flex items-center justify-between py-3 hover:bg-zinc-900/50 transition-colors px-2 rounded-md group">
+        <div className="flex items-center justify-between py-3 hover:bg-zinc-900/50 transition-colors px-2 rounded-md group cursor-pointer" onClick={() => setSelectedTicker(item)}>
             <div className="flex items-center gap-3">
                 <div className="relative">
                     <TickerLogo ticker={item.ticker} className="w-8 h-8 rounded-full" />
@@ -105,6 +107,18 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {} }: Props)
                     </div>
                 )}
             </CardContent>
+
+            <TickerChartPopup
+                open={!!selectedTicker}
+                onOpenChange={(open) => { if (!open) setSelectedTicker(null); }}
+                tickerInfo={selectedTicker ? {
+                    ticker: selectedTicker.ticker,
+                    name: selectedTicker.name,
+                    currentPrice: selectedTicker.currentPrice,
+                    changePercent: selectedTicker.changePercent,
+                    currency: selectedTicker.currency,
+                } : null}
+            />
         </Card>
     );
 }
