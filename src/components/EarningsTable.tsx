@@ -2,9 +2,11 @@ import { Fragment, useState, useMemo } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { TickerLogo } from "@/components/TickerLogo";
 import { Earning, calculateValidatedCriteria } from "@/hooks/useEarnings";
 import { Check, X, Pencil, Trash2, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, ChevronRight, ChevronDown, TrendingUp, TrendingDown, Minus } from "lucide-react";
@@ -192,6 +194,48 @@ function NotePopover({ earning, onUpdateNote }: { earning: Earning; onUpdateNote
   );
 }
 
+function NoteCell({ note, isMobile }: { note: string | null; isMobile: boolean }) {
+  if (!note) {
+    return <TableCell className="w-[230px] max-w-[230px] text-sm text-muted-foreground leading-relaxed">—</TableCell>;
+  }
+
+  if (isMobile) {
+    return (
+      <TableCell className="w-[230px] max-w-[230px] text-sm text-muted-foreground leading-relaxed">
+        <Dialog>
+          <DialogTrigger asChild>
+            <button type="button" className="block w-full truncate whitespace-nowrap text-left hover:text-foreground transition-colors">
+              {note}
+            </button>
+          </DialogTrigger>
+          <DialogContent className="w-[92vw] max-w-[92vw] sm:max-w-lg p-4">
+            <DialogHeader className="space-y-1">
+              <DialogTitle className="text-base">Note</DialogTitle>
+              <DialogDescription className="sr-only">Contenu complet de la note</DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[62vh] overflow-y-auto text-sm whitespace-pre-wrap break-words leading-relaxed">
+              {renderNoteWithLinks(note)}
+            </div>
+          </DialogContent>
+        </Dialog>
+      </TableCell>
+    );
+  }
+
+  return (
+    <TableCell className="w-[230px] max-w-[230px] text-sm text-muted-foreground leading-relaxed">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="block truncate whitespace-nowrap cursor-help hover:text-foreground transition-colors">{note}</span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[360px] whitespace-pre-wrap break-words leading-relaxed p-3">
+          {renderNoteWithLinks(note)}
+        </TooltipContent>
+      </Tooltip>
+    </TableCell>
+  );
+}
+
 const statusOrder: Record<string, number> = { hold: 0, renforcer: 1, alleger: 2, sell: 3 };
 
 function EarningRow({
@@ -206,6 +250,7 @@ function EarningRow({
   onUpdateNote,
   currentQuarter,
   tickerPortfolioMap,
+  isMobile,
 }: {
   earning: Earning;
   previousEarning: Earning | null;
@@ -218,6 +263,7 @@ function EarningRow({
   onUpdateNote: (id: string, notes: string | null) => void;
   currentQuarter: string;
   tickerPortfolioMap: Map<string, Set<string>>;
+  isMobile: boolean;
 }) {
   const score = calculateValidatedCriteria(earning);
   const previousScore = previousEarning ? calculateValidatedCriteria(previousEarning) : undefined;
@@ -269,20 +315,7 @@ function EarningRow({
         <ScoreBadge score={score} previousScore={!isHistorical ? previousScore : undefined} />
       </TableCell>
       <TableCell className="text-center"><StatusBadge status={earning.status} /></TableCell>
-      <TableCell className="w-[230px] max-w-[230px] text-sm text-muted-foreground leading-relaxed">
-        {earning.notes ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="block truncate whitespace-nowrap cursor-help hover:text-foreground transition-colors">{earning.notes}</span>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-[360px] whitespace-pre-wrap break-words leading-relaxed p-3">
-              {renderNoteWithLinks(earning.notes)}
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          "—"
-        )}
-      </TableCell>
+      <NoteCell note={earning.notes} isMobile={isMobile} />
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1">
           <NotePopover earning={earning} onUpdateNote={onUpdateNote} />
@@ -302,6 +335,7 @@ export function EarningsTable({ earnings, allEarnings, onEdit, onDelete, onUpdat
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [expandedTickers, setExpandedTickers] = useState<Set<string>>(new Set());
+  const isMobile = useIsMobile();
 
   // Build a map: ticker → sorted list of all earnings (newest first)
   const tickerHistory = useMemo(() => {
@@ -408,6 +442,7 @@ export function EarningsTable({ earnings, allEarnings, onEdit, onDelete, onUpdat
                   onUpdateNote={onUpdateNote}
                   currentQuarter={currentQuarter}
                   tickerPortfolioMap={tickerPortfolioMap}
+                  isMobile={isMobile}
                 />
                 {isExpanded && history.slice(1).map((histE, idx) => {
                   const prevOfHist = history[idx + 2] || null;
@@ -422,6 +457,7 @@ export function EarningsTable({ earnings, allEarnings, onEdit, onDelete, onUpdat
                       onUpdateNote={onUpdateNote}
                       currentQuarter={currentQuarter}
                       tickerPortfolioMap={tickerPortfolioMap}
+                      isMobile={isMobile}
                     />
                   );
                 })}
