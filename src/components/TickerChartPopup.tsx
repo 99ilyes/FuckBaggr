@@ -7,6 +7,7 @@ import { formatCurrency, formatPercent } from "@/lib/calculations";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowUp, ArrowDown } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { supabase } from "@/integrations/supabase/client";
 
 interface TickerInfo {
   ticker: string;
@@ -37,27 +38,43 @@ interface ChartPoint {
   label: string;
 }
 
+function makeLabel(timestamp: number, interval: string): string {
+  const d = new Date(timestamp * 1000);
+  return interval.includes("m")
+    ? d.toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "2-digit" });
+}
+
 async function fetchChartData(ticker: string, range: string, interval: string): Promise<ChartPoint[]> {
-  const baseUrl = import.meta.env.DEV ? "/api/yf" : "https://query2.finance.yahoo.com";
-  const url = `${baseUrl}/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=${interval}&events=history`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { Accept: "application/json" } });
-  if (!resp.ok) return [];
-  const data = await resp.json();
-  const result = data?.chart?.result?.[0];
-  if (!result?.timestamp || !result?.indicators?.quote?.[0]?.close) return [];
-  const timestamps: number[] = result.timestamp;
-  const closes: (number | null)[] = result.indicators.quote[0].close;
-  const points: ChartPoint[] = [];
-  for (let i = 0; i < timestamps.length; i++) {
-    if (closes[i] != null) {
-      const d = new Date(timestamps[i] * 1000);
-      const label = interval.includes("m")
-        ? d.toLocaleString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
-        : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "2-digit" });
-      points.push({ time: timestamps[i], price: closes[i] as number, label });
-    }
+  // In dev, try local proxy first for speed
+  if (import.meta.env.DEV) {
+    try {
+      const url = `/api/yf/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=${interval}&events=history`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { Accept: "application/json" } });
+      if (resp.ok) {
+        const data = await resp.json();
+        const result = data?.chart?.result?.[0];
+        if (result?.timestamp && result?.indicators?.quote?.[0]?.close) {
+          const ts: number[] = result.timestamp;
+          const cl: (number | null)[] = result.indicators.quote[0].close;
+          return ts.map((t, i) => cl[i] != null ? { time: t, price: cl[i] as number, label: makeLabel(t, interval) } : null)
+            .filter((p): p is ChartPoint => p !== null);
+        }
+      }
+    } catch { /* fall through */ }
   }
-  return points;
+
+  // Production: use Edge Function (no CORS issues)
+  try {
+    const { data, error } = await supabase.functions.invoke("fetch-history", {
+      body: { tickers: [ticker], range, interval },
+    });
+    if (error || !data?.results?.[ticker]?.history) return [];
+    return (data.results[ticker].history as { time: number; price: number }[])
+      .map(h => ({ time: h.time, price: h.price, label: makeLabel(h.time, interval) }));
+  } catch {
+    return [];
+  }
 }
 
 function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
