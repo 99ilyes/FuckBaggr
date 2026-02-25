@@ -1,9 +1,9 @@
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useEffect, useState } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector } from "recharts";
 import { AssetPosition, formatCurrency } from "@/lib/calculations";
 import { getAllocationColor } from "@/lib/allocationColors";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getLogoUrl } from "./TickerLogo";
+import { getLogoCandidates } from "./TickerLogo";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const DESKTOP_CHART_CENTER_Y = 240;
@@ -16,6 +16,35 @@ const DESKTOP_LABEL_MIN_Y = 18;
 const DESKTOP_LABEL_MAX_Y = 462;
 const MIN_INSIDE_PCT_LABEL = 5.5;
 const MIN_OUTER_LABEL_PCT = 1.8;
+
+function isGttTicker(name: string): boolean {
+  const normalized = name.trim().toUpperCase();
+  return normalized === "GTT" || normalized === "GTT.PA";
+}
+
+function loadFirstAvailableLogo(candidates: string[]): Promise<string | null> {
+  const urls = candidates.filter((url) => url.length > 0);
+  if (urls.length === 0) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    let index = 0;
+
+    const tryNext = () => {
+      if (index >= urls.length) {
+        resolve(null);
+        return;
+      }
+
+      const url = urls[index++];
+      const img = new Image();
+      img.onload = () => resolve(url);
+      img.onerror = () => tryNext();
+      img.src = url;
+    };
+
+    tryNext();
+  });
+}
 
 function hexToRgb(hex: string): [number, number, number] | null {
   const normalized = hex.replace("#", "").trim();
@@ -103,10 +132,18 @@ interface Props {
   positions?: AssetPosition[];
   title?: string;
   groupBy?: "asset" | "sector";
+  showLogos?: boolean;
 }
 
-export function AllocationChart({ data: externalData, positions, title = "Répartition", groupBy = "asset" }: Props) {
+export function AllocationChart({
+  data: externalData,
+  positions,
+  title = "Répartition",
+  groupBy = "asset",
+  showLogos = true,
+}: Props) {
   const isMobile = useIsMobile();
+  const [resolvedLogoUrls, setResolvedLogoUrls] = useState<Record<string, string>>({});
 
   const data: AllocationItem[] = externalData || (
     groupBy === "sector"
@@ -153,6 +190,44 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
       };
     });
   }, [chartData, total]);
+
+  useEffect(() => {
+    if (!showLogos) {
+      setResolvedLogoUrls({});
+      return;
+    }
+
+    const uniqueNames = Array.from(new Set(preparedData.map((item) => item.name)));
+    if (uniqueNames.length === 0) {
+      setResolvedLogoUrls({});
+      return;
+    }
+
+    let cancelled = false;
+
+    const resolveAll = async () => {
+      const entries = await Promise.all(
+        uniqueNames.map(async (name) => {
+          const resolved = await loadFirstAvailableLogo(getLogoCandidates(name));
+          return [name, resolved] as const;
+        })
+      );
+
+      if (cancelled) return;
+
+      const nextMap: Record<string, string> = {};
+      entries.forEach(([name, resolved]) => {
+        if (resolved) nextMap[name] = resolved;
+      });
+      setResolvedLogoUrls(nextMap);
+    };
+
+    resolveAll();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [preparedData, showLogos]);
 
   // Desktop: pre-calculate non-overlapping label positions in two clean columns.
   const layout = useMemo(() => {
@@ -244,14 +319,11 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
     return map;
   }, [isMobile, preparedData, total]);
 
-  // Minimum slice percentage to show a watermark logo inside the slice
-  const MIN_WATERMARK_PCT = 3.0;
-
-  // Render watermark logo inside each pie slice
+  // Custom slice renderer (without logo watermark inside slices).
   const renderActiveShape = useCallback((props: any) => {
     const {
       cx, cy, innerRadius, outerRadius, startAngle, endAngle,
-      fill, payload, index,
+      fill, payload,
     } = props;
 
     const item = payload as PreparedAllocationItem;
@@ -259,62 +331,21 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
     const sliceStroke = dark ? "rgba(248, 250, 252, 0.55)" : "hsl(var(--background))";
     const sliceStrokeWidth = dark ? 1.8 : 1.4;
 
-    // Get logo for watermark
-    const logoUrl = item.pct >= MIN_WATERMARK_PCT ? getLogoUrl(item.name) : null;
-    const midAngle = (startAngle + endAngle) / 2;
-    const rad = Math.PI / 180;
-    const ringMidRadius = (innerRadius + outerRadius) / 2;
-    const wmX = cx + ringMidRadius * Math.cos(-midAngle * rad);
-    const wmY = cy + ringMidRadius * Math.sin(-midAngle * rad);
-    // Scale logo size proportionally to the slice – bigger slices get bigger logos
-    const baseLogoSize = Math.min(38, Math.max(20, item.pct * 1.6));
-    const wmClipId = `wm-clip-${index}`;
-
     return (
-      <g>
-        <Sector
-          cx={cx}
-          cy={cy}
-          innerRadius={innerRadius}
-          outerRadius={outerRadius}
-          startAngle={startAngle}
-          endAngle={endAngle}
-          fill={fill}
-          cornerRadius={6}
-          stroke={sliceStroke}
-          strokeWidth={sliceStrokeWidth}
-        />
-        {logoUrl && (
-          <>
-            <defs>
-              <clipPath id={wmClipId}>
-                <Sector
-                  cx={cx}
-                  cy={cy}
-                  innerRadius={innerRadius + 2}
-                  outerRadius={outerRadius - 2}
-                  startAngle={startAngle + 0.5}
-                  endAngle={endAngle - 0.5}
-                  cornerRadius={4}
-                />
-              </clipPath>
-            </defs>
-            <image
-              x={wmX - baseLogoSize / 2}
-              y={wmY - baseLogoSize / 2}
-              width={baseLogoSize}
-              height={baseLogoSize}
-              href={logoUrl}
-              clipPath={`url(#${wmClipId})`}
-              preserveAspectRatio="xMidYMid slice"
-              opacity={0.18}
-              style={{ pointerEvents: "none" }}
-            />
-          </>
-        )}
-      </g>
+      <Sector
+        cx={cx}
+        cy={cy}
+        innerRadius={innerRadius}
+        outerRadius={outerRadius}
+        startAngle={startAngle}
+        endAngle={endAngle}
+        fill={fill}
+        cornerRadius={6}
+        stroke={sliceStroke}
+        strokeWidth={sliceStrokeWidth}
+      />
     );
-  }, [preparedData]);
+  }, []);
 
   if (preparedData.length === 0) {
     return (
@@ -362,8 +393,11 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
     const connectorColor = dark ? "rgba(248, 250, 252, 0.7)" : withAlpha(item.color, 0.55);
     const dotColor = dark ? "rgba(248, 250, 252, 0.95)" : item.color;
 
-    const logoUrl = getLogoUrl(name);
-    const logoSize = 22;
+    const logoUrl = showLogos ? (resolvedLogoUrls[name] ?? null) : null;
+    const isGtt = isGttTicker(name);
+    const logoSize = isGtt ? 20 : 22;
+    const logoOffsetY = isGtt ? -1.2 : 0;
+    const logoPreserve = isGtt ? "xMidYMid meet" : "xMidYMid slice";
     const logoCenterX = item.isRight ? finalX + 18 : finalX - 18;
     const imageX = logoCenterX - logoSize / 2;
     const clipId = `allocation-logo-clip-${index}`;
@@ -390,17 +424,25 @@ export function AllocationChart({ data: externalData, positions, title = "Répar
         />
         {logoUrl && (
           <>
+            <circle
+              cx={logoCenterX}
+              cy={finalY}
+              r={logoSize / 2 + 1}
+              fill={logoCircleBg}
+              stroke={logoCircleBorder}
+              strokeWidth={1}
+            />
             <clipPath id={clipId}>
               <circle cx={logoCenterX} cy={finalY} r={logoSize / 2} />
             </clipPath>
             <image
               x={imageX}
-              y={finalY - logoSize / 2}
+              y={finalY - logoSize / 2 + logoOffsetY}
               width={logoSize}
               height={logoSize}
               href={logoUrl}
               clipPath={`url(#${clipId})`}
-              preserveAspectRatio="xMidYMid slice"
+              preserveAspectRatio={logoPreserve}
             />
           </>
         )}

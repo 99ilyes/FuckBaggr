@@ -3,7 +3,6 @@ import { useEarnings, useAddEarning, useUpdateEarning, useDeleteEarning, Earning
 import { useTransactions, usePortfolios } from "@/hooks/usePortfolios";
 import { EarningsTable } from "@/components/EarningsTable";
 import { AddEarningsDialog } from "@/components/AddEarningsDialog";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus } from "lucide-react";
@@ -39,7 +38,6 @@ export default function EarningsTracker() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editData, setEditData] = useState<Earning | null>(null);
-  const [filterTicker, setFilterTicker] = useState<string>("all");
 
   const quarterOptions = useMemo(() => generateQuarterOptions(), []);
 
@@ -103,10 +101,7 @@ export default function EarningsTracker() {
     return Array.from(best.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [earnings]);
 
-  const filtered = useMemo(() => {
-    if (filterTicker === "all") return latestEarnings;
-    return latestEarnings.filter((e) => e.ticker === filterTicker);
-  }, [latestEarnings, filterTicker]);
+  const filtered = latestEarnings;
 
   const handleSubmit = (data: EarningInsert) => {
     if (editData) {
@@ -131,56 +126,50 @@ export default function EarningsTracker() {
   };
 
   return (
-    <div className="w-full px-4 py-6 md:px-6 space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <SidebarTrigger className="-ml-1 md:hidden" />
-          <h1 className="text-2xl font-bold tracking-tight">Earnings Tracker</h1>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 bg-background border px-2 py-1 rounded-md">
-            <span className="text-xs text-muted-foreground whitespace-nowrap">Trimestre actuel :</span>
-            <Select value={currentQuarter} onValueChange={setCurrentQuarter}>
-              <SelectTrigger className="w-[100px] h-7 text-xs border-0 shadow-none focus:ring-0">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {quarterOptions.map((q) => (
-                  <SelectItem key={q} value={q}>{q}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+    <div className="w-full px-4 py-5 md:px-6">
+      <div className="mx-auto max-w-[1700px] space-y-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-2">
+            <SidebarTrigger className="-ml-1 mt-0.5 md:hidden" />
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Earnings Tracker</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Suivi des derniers résultats par titre avec comparaison historique.
+              </p>
+            </div>
           </div>
-
-          <Select value={filterTicker} onValueChange={setFilterTicker}>
-            <SelectTrigger className="w-[140px] h-9 text-sm">
-              <SelectValue placeholder="Filtrer..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tous</SelectItem>
-              {portfolioTickers.map((t) => (
-                <SelectItem key={t} value={t}>{t}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Button size="sm" onClick={() => { setEditData(null); setDialogOpen(true); }}>
-            <Plus className="h-4 w-4 mr-1" />
-            Ajouter
-          </Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-background/80 border border-border/60 px-2.5 py-1.5 rounded-md">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Trimestre :</span>
+              <Select value={currentQuarter} onValueChange={setCurrentQuarter}>
+                <SelectTrigger className="w-[100px] h-7 text-xs border-0 shadow-none focus:ring-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {quarterOptions.map((q) => (
+                    <SelectItem key={q} value={q}>{q}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button size="sm" onClick={() => { setEditData(null); setDialogOpen(true); }}>
+              <Plus className="h-4 w-4 mr-1" />
+              Ajouter un résultat
+            </Button>
+          </div>
         </div>
-      </div>
 
-      <div className="w-full">
-        <EarningsTable
-          earnings={filtered}
-          allEarnings={earnings}
-          onEdit={handleEdit}
-          onDelete={handleDelete}
-          onUpdateNote={handleUpdateNote}
-          currentQuarter={currentQuarter}
-          tickerPortfolioMap={tickerPortfolioMap}
-        />
+        <div className="w-full rounded-xl border border-border/60 bg-card/70 shadow-sm">
+          <EarningsTable
+            earnings={filtered}
+            allEarnings={earnings}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onUpdateNote={handleUpdateNote}
+            currentQuarter={currentQuarter}
+            tickerPortfolioMap={tickerPortfolioMap}
+          />
+        </div>
       </div>
 
       <AddEarningsDialog

@@ -472,7 +472,7 @@ export default function Index() {
                   </div>
                 )}
                 {!selectedPortfolioId && allocationMode === "account" ? (
-                  <AllocationChart data={portfolioAllocation} title="Par compte" />
+                  <AllocationChart data={portfolioAllocation} title="Par compte" showLogos={false} />
                 ) : (
                   <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
                 )}
