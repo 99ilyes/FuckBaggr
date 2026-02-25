@@ -1,71 +1,54 @@
 
 
-## Import IBKR -- Mapping coherent vers la base de donnees et reconstruction des KPIs
+# Mini-graphique au clic sur un titre dans "Variations du jour"
 
-### Probleme actuel
+## Objectif
+Quand l'utilisateur clique sur un titre dans la liste "Variations du jour", afficher une popup/drawer contenant un graphique du cours historique du titre avec un selecteur de periode (1S, 1M, 3M, 6M, 1A, 5A). Sur mobile, utiliser un Drawer (bottom sheet) au lieu d'un Dialog pour une meilleure ergonomie tactile.
 
-Le mapping IBKR vers la base de donnees presente plusieurs incoherences :
+## Approche
 
-1. **FOREX mappe en deposit/withdrawal** : Les 411 transactions FOREX (conversions EUR/USD) sont actuellement transformees en `deposit`/`withdrawal`, ce qui **gonfle artificiellement le montant "Investi"** dans les KPIs (72k EUR de depots fictifs au lieu de ~72k reels)
-2. **Dividendes negatifs (retenues d'impots)** mappe en `withdrawal` -- devrait rester `dividend` avec montant negatif
-3. **Interets et frais** melanges avec les depots/retraits reels
-4. **`calculateCashBalances`** ne gere pas le type `interest`
+### 1. Nouveau composant `TickerChartPopup`
+- Responsive : utilise `Dialog` sur desktop, `Drawer` (vaul) sur mobile via le hook `useIsMobile()`
+- Contenu identique dans les deux cas :
+  - Header : logo du ticker + nom + prix actuel + variation du jour
+  - Selecteur de periode : boutons `1S | 1M | 3M | 6M | 1A | 5A`
+  - Graphique : `AreaChart` recharts avec gradient, affichant le cours de cloture historique
+  - Tooltip personnalise sur hover avec date + prix
+- Donnees : appel direct a Yahoo Finance v8 (`/v8/finance/chart/{ticker}?range=X&interval=Y`) via `fetchHistoricalPricesClientSide` ou un appel direct similaire
+- Mapping des periodes vers les parametres Yahoo :
+  ```text
+  1S  -> range=5d,  interval=15m
+  1M  -> range=1mo, interval=1d
+  3M  -> range=3mo, interval=1d
+  6M  -> range=6mo, interval=1d
+  1A  -> range=1y,  interval=1wk
+  5A  -> range=5y,  interval=1wk
+  ```
 
-### Solution
+### 2. Modification de `TopMovers`
+- Ajouter un state `selectedTicker` (string | null)
+- Rendre chaque `MoverRow` cliquable (cursor-pointer + onClick)
+- Afficher `TickerChartPopup` quand `selectedTicker` est set
+- Passer les infos du ticker selectionne (ticker, nom, prix, variation, devise) au popup
 
-Transformer les FOREX en `conversion` (type deja supporte par la DB et par `calculateCashBalances`) et corriger le mapping des dividendes/interets.
+### 3. Fichiers concernes
 
----
-
-### Fichiers modifies
-
-| Fichier | Changement |
+| Fichier | Action |
 |---|---|
-| `src/lib/ibkrParser.ts` | Distinguer `INTEREST` des depots/retraits dans la section "interet" |
-| `src/components/ImportTransactionsDialog.tsx` | Recrire `mapTestTransactionToParsed` pour grouper les FOREX en `conversion` |
-| `src/lib/calculations.ts` | Ajouter le type `interest` dans `calculateCashBalances` |
+| `src/components/TickerChartPopup.tsx` | Creer - composant popup/drawer avec graphique |
+| `src/components/TopMovers.tsx` | Modifier - ajouter onClick + state + affichage du popup |
 
----
+## Details techniques
 
-### Details techniques
+### Fetching des donnees historiques dans le popup
+- Appel direct a Yahoo v8 depuis le navigateur (meme pattern que `fetchTickerBrowser` dans `yahooFinance.ts`)
+- Utilisation de `useState` + `useEffect` pour charger les donnees au changement de periode
+- Skeleton/spinner pendant le chargement
+- Le graphique colore en vert si le cours est en hausse sur la periode, en rouge sinon
 
-#### 1. Parser IBKR (`ibkrParser.ts`)
-
-- Ajouter le type `INTEREST` dans `TestTransaction.type`
-- Section "interet" : mapper en `INTEREST` au lieu de `DEPOSIT`/`WITHDRAWAL`
-- Section "frais" : garder en `WITHDRAWAL` (ce sont bien des sorties de cash)
-
-#### 2. Mapping FOREX vers conversion (`ImportTransactionsDialog.tsx`)
-
-Post-traitement des paires FOREX consecutives :
-- Grouper les transactions FOREX par date (paires positif/negatif)
-- Pour chaque paire : creer UNE transaction `conversion` avec :
-  - `ticker` = devise source (celle avec montant negatif, ex: "USD")
-  - `currency` = devise cible (celle avec montant positif, ex: "EUR")
-  - `quantity` = montant recu (positif)
-  - `unit_price` = taux de change (montant source / montant cible)
-  - `fees` = commissions associees
-- Les transactions FOREX de commission (3eme ligne) sont absorbees dans les frais
-
-Exemple concret du fichier :
-```text
-FOREX: -49,182 EUR  +  51,580.61 USD  +  -1.91 USD commission
-  --> conversion: ticker="EUR", currency="USD", quantity=51580.61, unit_price=0.9535 (49182/51580.61), fees=1.91
-```
-
-#### 3. Calcul cash (`calculations.ts`)
-
-Ajouter dans `calculateCashBalances` :
-```text
-interest : balances[currency] += quantity * unit_price
-```
-
-#### 4. Impact sur les KPIs du dashboard
-
-Avec ces changements :
-- **"Investi"** ne comptera que les vrais DEPOSIT/WITHDRAWAL (pas les conversions)
-- **Cash par devise** sera correctement calcule via les conversions
-- **Performance** sera correcte car basee sur vrais flux entrants/sortants
-- Les positions (BUY/SELL) restent inchangees
-- Les dividendes (positifs et negatifs/taxes) alimentent correctement le cash
+### Design du graphique
+- `AreaChart` recharts avec fond gradient (vert ou rouge selon la tendance)
+- Axes minimalistes (dates en bas, prix a droite)
+- Tooltip sombre avec date formatee + prix + devise
+- Hauteur fixe ~250px sur mobile, ~300px sur desktop
 
