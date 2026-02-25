@@ -1,16 +1,29 @@
 import { ReactNode, useState } from "react";
-import { Portfolio, useDeletePortfolio, useDeleteTransactionsByPortfolio } from "@/hooks/usePortfolios";
+import {
+  Portfolio,
+  useDeletePortfolio,
+  useDeleteTransactionsByPortfolio,
+  useUpdatePortfolio,
+} from "@/hooks/usePortfolios";
 import { EditPortfolioDialog } from "@/components/EditPortfolioDialog";
 import { Button } from "@/components/ui/button";
 import { SaxoLogo, IBKRLogo, getBrokerForPortfolio } from "@/components/BrokerLogos";
-import { Plus, Trash2, Pencil, Eraser } from "lucide-react";
+import { Plus, Trash2, Pencil, Eraser, Palette } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "@/hooks/use-toast";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,6 +34,39 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+const PRESET_COLORS = [
+  "#3b82f6",
+  "#ef4444",
+  "#10b981",
+  "#f59e0b",
+  "#8b5cf6",
+  "#06b6d4",
+  "#ec4899",
+  "#84cc16",
+];
+
+const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{6})$/;
+const SHORT_HEX_COLOR_REGEX = /^#([0-9a-fA-F]{3})$/;
+
+function normalizeHexColor(value?: string | null): string | null {
+  if (!value) return null;
+
+  const trimmed = value.trim();
+  if (HEX_COLOR_REGEX.test(trimmed)) return trimmed.toLowerCase();
+
+  const shortHex = trimmed.match(SHORT_HEX_COLOR_REGEX);
+  if (!shortHex) return null;
+
+  const [r, g, b] = shortHex[1].split("");
+  return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+}
+
+function getSafeHexColor(value?: string | null): string {
+  return normalizeHexColor(value) || "#3b82f6";
+}
 
 interface PortfolioSelectorProps {
   portfolios: Portfolio[];
@@ -43,9 +89,12 @@ export function PortfolioSelector({
 }: PortfolioSelectorProps) {
   const deletePortfolio = useDeletePortfolio();
   const deleteTransactions = useDeleteTransactionsByPortfolio();
+  const updatePortfolio = useUpdatePortfolio();
   const [portfolioToDelete, setPortfolioToDelete] = useState<string | null>(null);
   const [portfolioToEmpty, setPortfolioToEmpty] = useState<string | null>(null);
   const [portfolioToEdit, setPortfolioToEdit] = useState<Portfolio | null>(null);
+  const [portfolioToColor, setPortfolioToColor] = useState<Portfolio | null>(null);
+  const [colorDraft, setColorDraft] = useState("#3b82f6");
 
   const handleDelete = () => {
     if (portfolioToDelete) {
@@ -62,6 +111,37 @@ export function PortfolioSelector({
       deleteTransactions.mutate(portfolioToEmpty);
       setPortfolioToEmpty(null);
     }
+  };
+
+  const handleColorSubmit = () => {
+    if (!portfolioToColor) return;
+
+    const nextColor = normalizeHexColor(colorDraft);
+    if (!nextColor) {
+      toast({
+        title: "Couleur invalide",
+        description: "Utilise un code hexadécimal du type #3b82f6.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    updatePortfolio.mutate(
+      { id: portfolioToColor.id, color: nextColor },
+      {
+        onSuccess: () => {
+          toast({ title: "Couleur de courbe mise à jour" });
+          setPortfolioToColor(null);
+        },
+        onError: (error) => {
+          toast({
+            title: "Erreur",
+            description: error.message,
+            variant: "destructive",
+          });
+        },
+      }
+    );
   };
 
   return (
@@ -99,6 +179,15 @@ export function PortfolioSelector({
               <ContextMenuItem onClick={() => setPortfolioToEdit(p)}>
                 <Pencil className="mr-2 h-4 w-4" />
                 Renommer
+              </ContextMenuItem>
+              <ContextMenuItem
+                onClick={() => {
+                  setPortfolioToColor(p);
+                  setColorDraft(getSafeHexColor(p.color));
+                }}
+              >
+                <Palette className="mr-2 h-4 w-4" />
+                Couleur de courbe
               </ContextMenuItem>
               <ContextMenuItem onClick={() => setPortfolioToEmpty(p.id)}>
                 <Eraser className="mr-2 h-4 w-4" />
@@ -160,6 +249,71 @@ export function PortfolioSelector({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={!!portfolioToColor} onOpenChange={(open) => !open && setPortfolioToColor(null)}>
+        <DialogContent className="sm:max-w-[420px] border-border bg-card">
+          <DialogHeader>
+            <DialogTitle>Couleur de courbe</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-sm text-muted-foreground">Portefeuille</Label>
+              <p className="mt-1 text-sm font-semibold text-foreground">{portfolioToColor?.name}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="portfolio-curve-color">Couleur</Label>
+              <div className="flex items-center gap-3">
+                <input
+                  id="portfolio-curve-color"
+                  type="color"
+                  value={getSafeHexColor(colorDraft)}
+                  onChange={(e) => setColorDraft(e.target.value)}
+                  className="h-10 w-14 cursor-pointer rounded border border-border bg-transparent p-1"
+                />
+                <Input
+                  value={colorDraft}
+                  onChange={(e) => setColorDraft(e.target.value)}
+                  placeholder="#3b82f6"
+                  className="font-mono uppercase"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Couleurs rapides</Label>
+              <div className="grid grid-cols-8 gap-2">
+                {PRESET_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setColorDraft(color)}
+                    className={cn(
+                      "h-7 rounded border transition-all",
+                      getSafeHexColor(colorDraft) === color
+                        ? "border-white/90 ring-2 ring-white/50"
+                        : "border-white/20 hover:border-white/60"
+                    )}
+                    style={{ backgroundColor: color }}
+                    aria-label={`Choisir la couleur ${color}`}
+                    title={color}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPortfolioToColor(null)}>
+              Annuler
+            </Button>
+            <Button onClick={handleColorSubmit} disabled={updatePortfolio.isPending}>
+              {updatePortfolio.isPending ? "Enregistrement..." : "Enregistrer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <EditPortfolioDialog
         open={!!portfolioToEdit}

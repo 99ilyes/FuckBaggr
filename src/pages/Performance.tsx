@@ -138,6 +138,7 @@ export default function Performance() {
               historicalPrices={historicalPrices}
               portfolioId={selectedPortfolioId}
               portfolioName={selectedPortfolio?.name || "Vue globale"}
+              portfolioColor={selectedPortfolio?.color}
               loading={historicalLoading || historicalFetching}
               benchmarkHistories={benchmarkHistories}
               benchmarkTickers={benchmarkTickers}

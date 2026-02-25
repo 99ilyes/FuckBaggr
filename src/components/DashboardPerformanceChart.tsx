@@ -4,6 +4,7 @@ import { computeTWR, filterByRange, rebaseBenchmark, rebaseTWR, TimeRange } from
 import { formatPercent, formatCurrency } from "@/lib/calculations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import {
@@ -27,6 +28,8 @@ interface Props {
   portfolioId: string | null;
   portfolioName: string;
   portfolioColor?: string | null;
+  currentTotalValue?: number;
+  displayCurrency?: string;
   loading?: boolean;
   benchmarkHistories?: Record<string, { time: number; price: number }[]>;
   benchmarkTickers?: string[];
@@ -55,6 +58,10 @@ function fmtDate(date: string): string {
 
 function fmtSignedPercent(value: number): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function fmtSignedCurrency(value: number): string {
+  return `${value >= 0 ? "+" : ""}${formatCurrency(value)}`;
 }
 
 interface TooltipEntry {
@@ -128,12 +135,15 @@ export function DashboardPerformanceChart({
   portfolioId,
   portfolioName,
   portfolioColor,
+  currentTotalValue,
+  displayCurrency = "EUR",
   loading = false,
   benchmarkHistories = {},
   benchmarkTickers = [],
 }: Props) {
   const [range, setRange] = useState<DashboardRange>("YTD");
   const [perfMode, setPerfMode] = useState<PerformanceMode>("twr");
+  const [showCumulativeDeposits, setShowCumulativeDeposits] = useState(false);
 
   const accentColor = portfolioColor || "hsl(var(--chart-1))";
 
@@ -282,6 +292,13 @@ export function DashboardPerformanceChart({
   const showDailyDots = twrData.length <= 240;
 
   const lastValue = valueData.length > 0 ? valueData[valueData.length - 1].portfolioValue : 0;
+  const displayedTotalValue = currentTotalValue ?? lastValue;
+  const firstValue = valueData.length > 0 ? valueData[0].portfolioValue : 0;
+  const firstDeposits = valueData.length > 0 ? valueData[0].cumulativeDeposits : 0;
+  const lastDeposits = valueData.length > 0 ? valueData[valueData.length - 1].cumulativeDeposits : 0;
+  const periodNetDeposits = lastDeposits - firstDeposits;
+  const periodGainLoss = lastValue - firstValue - periodNetDeposits;
+  const periodGainLossPct = rangeTWR * 100;
 
   // Compute Y-axis domain for the value chart to adapt to the visible data
   const valueDomain = useMemo(() => {
@@ -289,16 +306,17 @@ export function DashboardPerformanceChart({
     let min = Infinity;
     let max = -Infinity;
     for (const dp of valueData) {
-      const v = dp.portfolioValue;
-      const d = dp.cumulativeDeposits;
-      if (v < min) min = v;
-      if (d < min) min = d;
-      if (v > max) max = v;
-      if (d > max) max = d;
+      const values = showCumulativeDeposits
+        ? [dp.portfolioValue, dp.cumulativeDeposits]
+        : [dp.portfolioValue];
+      for (const currentValue of values) {
+        if (currentValue < min) min = currentValue;
+        if (currentValue > max) max = currentValue;
+      }
     }
     const padding = (max - min) * 0.05 || 100;
     return [Math.floor(min - padding), Math.ceil(max + padding)] as [number, number];
-  }, [valueData]);
+  }, [valueData, showCumulativeDeposits]);
 
   const xTickFormatter = (value: string) => {
     const parsedDate = new Date(value);
@@ -410,9 +428,19 @@ export function DashboardPerformanceChart({
                 {formatPercent(rangeTWR * 100)}
               </span>
             ) : (
-              <span className="rounded-md border border-border/60 px-2 py-1 text-xs font-semibold tabular-nums text-foreground">
-                {formatCurrency(lastValue)}
-              </span>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <span className="rounded-md border border-border/60 px-2 py-1 text-xs font-semibold tabular-nums text-foreground">
+                  {formatCurrency(displayedTotalValue, displayCurrency)}
+                </span>
+                <span
+                  className={cn(
+                    "rounded-md border border-border/60 px-2 py-1 text-xs font-semibold tabular-nums",
+                    periodGainLoss >= 0 ? "text-[hsl(var(--gain))]" : "text-[hsl(var(--loss))]"
+                  )}
+                >
+                  Période {fmtSignedCurrency(periodGainLoss)} ({formatPercent(periodGainLossPct)})
+                </span>
+              </div>
             )}
           </div>
         </div>
@@ -436,10 +464,22 @@ export function DashboardPerformanceChart({
                 <span className="h-2 w-2 rounded-full" style={{ backgroundColor: valueColor }} />
                 <span>Valeur du portefeuille</span>
               </div>
-              <div className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: depositsColor }} />
-                <span>Dépôts cumulés</span>
-              </div>
+              <label className="inline-flex cursor-pointer items-center gap-2 select-none">
+                <Switch
+                  checked={showCumulativeDeposits}
+                  onCheckedChange={setShowCumulativeDeposits}
+                  aria-label="Afficher la courbe des dépôts cumulés"
+                />
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 transition-opacity",
+                    !showCumulativeDeposits && "opacity-60"
+                  )}
+                >
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: depositsColor }} />
+                  <span>Dépôts cumulés</span>
+                </span>
+              </label>
             </>
           )}
         </div>
@@ -532,16 +572,18 @@ export function DashboardPerformanceChart({
                   activeDot={{ r: 4, strokeWidth: 0, fill: valueColor }}
                 />
 
-                <Line
-                  type="stepAfter"
-                  dataKey="cumulativeDeposits"
-                  name="Dépôts cumulés"
-                  stroke={depositsColor}
-                  strokeWidth={1.75}
-                  strokeDasharray="6 3"
-                  dot={false}
-                  activeDot={{ r: 3, strokeWidth: 0, fill: depositsColor }}
-                />
+                {showCumulativeDeposits && (
+                  <Line
+                    type="stepAfter"
+                    dataKey="cumulativeDeposits"
+                    name="Dépôts cumulés"
+                    stroke={depositsColor}
+                    strokeWidth={1.75}
+                    strokeDasharray="6 3"
+                    dot={false}
+                    activeDot={{ r: 3, strokeWidth: 0, fill: depositsColor }}
+                  />
+                )}
               </ComposedChart>
             </ResponsiveContainer>
           )}

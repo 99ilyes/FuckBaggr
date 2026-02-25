@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AssetHistory, Portfolio, Transaction } from "@/hooks/usePortfolios";
 import { computeTWR, filterByRange, rebaseBenchmark, rebaseTWR, TWRDataPoint } from "@/lib/twr";
+import { getAllocationColor, isVeryDarkAllocationColor } from "@/lib/allocationColors";
 import { formatPercent } from "@/lib/calculations";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +30,7 @@ interface Props {
   historicalPrices: Record<string, AssetHistory>;
   portfolioId: string | null;
   portfolioName: string;
+  portfolioColor?: string | null;
   loading?: boolean;
   benchmarkHistories?: Record<string, { time: number; price: number }[]>;
   benchmarkTickers?: string[];
@@ -83,9 +85,9 @@ const BENCH_COLORS = [
   "hsl(var(--chart-1))",
 ];
 
-const TITLE_COLOR = "hsl(var(--chart-2))";
-const PORTFOLIO_COLOR = "hsl(var(--chart-1))";
-const PORTFOLIO_BENCH_COLOR = "hsl(var(--chart-5))";
+const DEFAULT_TITLE_COLOR = "hsl(var(--chart-2))";
+const DEFAULT_PORTFOLIO_COLOR = "hsl(var(--chart-1))";
+const DEFAULT_PORTFOLIO_BENCH_COLOR = "hsl(var(--chart-5))";
 const OP_TYPE_LABELS: Record<string, string> = {
   buy: "Achat",
   sell: "Vente",
@@ -257,6 +259,7 @@ export function TitlesPerformanceTab({
   historicalPrices,
   portfolioId,
   portfolioName,
+  portfolioColor,
   loading = false,
   benchmarkHistories = {},
   benchmarkTickers = [],
@@ -377,6 +380,16 @@ export function TitlesPerformanceTab({
     if (benchmarkPortfolioId === "global") return "Vue globale";
     return portfolios.find((portfolio) => portfolio.id === benchmarkPortfolioId)?.name || "Benchmark portefeuille";
   }, [benchmarkPortfolioId, portfolios]);
+  const benchmarkPortfolioColor = useMemo(() => {
+    if (benchmarkPortfolioId === "none" || benchmarkPortfolioId === "global") {
+      return DEFAULT_PORTFOLIO_BENCH_COLOR;
+    }
+
+    return (
+      portfolios.find((portfolio) => portfolio.id === benchmarkPortfolioId)?.color ||
+      DEFAULT_PORTFOLIO_BENCH_COLOR
+    );
+  }, [benchmarkPortfolioId, portfolios]);
 
   const selectedOperationFrom = useMemo(
     () => tickerOperations.find((operation) => operation.id === operationFromId) || null,
@@ -402,6 +415,13 @@ export function TitlesPerformanceTab({
     () => openTickerInfos.find((info) => info.ticker === selectedTicker) || null,
     [openTickerInfos, selectedTicker]
   );
+  const selectedTickerColor = useMemo(() => {
+    if (!selectedTicker) return DEFAULT_TITLE_COLOR;
+    const tickerIndex = openTickerInfos.findIndex((info) => info.ticker === selectedTicker);
+    const allocationColor = getAllocationColor(selectedTicker, tickerIndex >= 0 ? tickerIndex : 0);
+    return isVeryDarkAllocationColor(allocationColor) ? "#F8FAFC" : allocationColor;
+  }, [selectedTicker, openTickerInfos]);
+  const selectedPortfolioColor = portfolioColor || DEFAULT_PORTFOLIO_COLOR;
 
   const selectedRangeFrom =
     dateMode === "transactions"
@@ -450,9 +470,9 @@ export function TitlesPerformanceTab({
         assetCurrencies: allAssetCurrencies,
         portfolioId: portfolioId || "global",
         portfolioName,
-        color: PORTFOLIO_COLOR,
+        color: selectedPortfolioColor,
       }),
-    [transactions, historicalPrices, allAssetCurrencies, portfolioId, portfolioName]
+    [transactions, historicalPrices, allAssetCurrencies, portfolioId, portfolioName, selectedPortfolioColor]
   );
 
   const benchmarkPortfolioTwr = useMemo(() => {
@@ -464,7 +484,7 @@ export function TitlesPerformanceTab({
       assetCurrencies: allAssetCurrencies,
       portfolioId: benchmarkPortfolioId,
       portfolioName: benchmarkPortfolioName,
-      color: PORTFOLIO_BENCH_COLOR,
+      color: benchmarkPortfolioColor,
     });
   }, [
     benchmarkPortfolioTransactions,
@@ -472,6 +492,7 @@ export function TitlesPerformanceTab({
     allAssetCurrencies,
     benchmarkPortfolioId,
     benchmarkPortfolioName,
+    benchmarkPortfolioColor,
   ]);
 
   const filterPointsForRange = useCallback((dataPoints: TWRDataPoint[], from?: string, to?: string): TWRDataPoint[] => {
@@ -968,16 +989,16 @@ export function TitlesPerformanceTab({
             </CardTitle>
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
               <div className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: TITLE_COLOR }} />
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: selectedTickerColor }} />
                 <span>{selectedTicker || "Titre"}</span>
               </div>
               <div className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: PORTFOLIO_COLOR }} />
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: selectedPortfolioColor }} />
                 <span>{portfolioName}</span>
               </div>
               {benchmarkPortfolioId !== "none" && (
                 <div className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: PORTFOLIO_BENCH_COLOR }} />
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: benchmarkPortfolioColor }} />
                   <span>{benchmarkPortfolioName}</span>
                 </div>
               )}
@@ -1030,7 +1051,7 @@ export function TitlesPerformanceTab({
                     type="monotone"
                     dataKey="tickerPct"
                     name={selectedTicker || "Titre"}
-                    stroke={TITLE_COLOR}
+                    stroke={selectedTickerColor}
                     strokeWidth={2.1}
                     dot={false}
                     connectNulls
@@ -1040,7 +1061,7 @@ export function TitlesPerformanceTab({
                     type="monotone"
                     dataKey="portfolioPct"
                     name={portfolioName}
-                    stroke={PORTFOLIO_COLOR}
+                    stroke={selectedPortfolioColor}
                     strokeWidth={2}
                     dot={false}
                     connectNulls
@@ -1051,7 +1072,7 @@ export function TitlesPerformanceTab({
                       type="monotone"
                       dataKey="benchmarkPortfolioPct"
                       name={benchmarkPortfolioName}
-                      stroke={PORTFOLIO_BENCH_COLOR}
+                      stroke={benchmarkPortfolioColor}
                       strokeWidth={1.8}
                       strokeDasharray="7 4"
                       dot={false}

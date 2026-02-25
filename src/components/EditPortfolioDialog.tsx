@@ -44,11 +44,8 @@ export function EditPortfolioDialog({ open, onOpenChange, portfolio }: Props) {
         e.preventDefault();
         if (!name.trim() || !portfolio) return;
 
-        const selectedBrokerInfo = BROKERS.find(b => b.value === broker);
-        const color = selectedBrokerInfo?.color || portfolio.color;
-
         updatePortfolio.mutate(
-            { id: portfolio.id, name: name.trim(), description: broker, color },
+            { id: portfolio.id, name: name.trim(), description: broker, color: portfolio.color },
             {
                 onSuccess: () => {
                     toast({ title: "Portefeuille mis à jour" });

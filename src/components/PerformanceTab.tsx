@@ -381,6 +381,30 @@ export function PerformanceTab({
   const showDailyDots = twrData.length <= 240;
   const showValueDots = valueData.length <= 240;
   const showVariationDots = dailyVariationData.length <= 240;
+  const valueDomain = useMemo<[number, number]>(() => {
+    if (valueData.length === 0) return [0, 100];
+
+    let minValue = Number.POSITIVE_INFINITY;
+    let maxValue = Number.NEGATIVE_INFINITY;
+
+    for (const point of valueData) {
+      if (point.value < minValue) minValue = point.value;
+      if (point.value > maxValue) maxValue = point.value;
+    }
+
+    if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) return [0, 100];
+
+    if (minValue === maxValue) {
+      const singlePointPadding = Math.max(Math.abs(minValue) * 0.02, 10);
+      return [minValue - singlePointPadding, maxValue + singlePointPadding];
+    }
+
+    const isZoomedView = effectiveRange === "1S" || effectiveRange === "1M" || effectiveRange === "CUSTOM";
+    const paddingRatio = isZoomedView ? 0.08 : 0.05;
+    const padding = (maxValue - minValue) * paddingRatio;
+
+    return [Math.floor(minValue - padding), Math.ceil(maxValue + padding)];
+  }, [valueData, effectiveRange]);
 
   const xTickFormatter = (value: string) => {
     const parsedDate = new Date(value);
@@ -652,7 +676,7 @@ export function PerformanceTab({
             </CardTitle>
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
               <div className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-[hsl(var(--chart-1))]" />
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: accentColor }} />
                 <span>Portefeuille</span>
               </div>
               {activeBenchmarkTickers.map((ticker) => (
@@ -691,10 +715,10 @@ export function PerformanceTab({
                   type="monotone"
                   dataKey="twrPct"
                   name="Portefeuille"
-                  stroke="hsl(var(--chart-1))"
+                  stroke={accentColor}
                   strokeWidth={2.25}
-                  dot={showDailyDots ? { r: 1.7, fill: "hsl(var(--chart-1))", strokeWidth: 0 } : false}
-                  activeDot={{ r: 4, strokeWidth: 0, fill: "hsl(var(--chart-1))" }}
+                  dot={showDailyDots ? { r: 1.7, fill: accentColor, strokeWidth: 0 } : false}
+                  activeDot={{ r: 4, strokeWidth: 0, fill: accentColor }}
                 />
 
                 {activeBenchmarkTickers.map((ticker) => (
@@ -743,6 +767,7 @@ export function PerformanceTab({
                   tickLine={false}
                 />
                 <YAxis
+                  domain={valueDomain}
                   tickFormatter={(value) => fmtCompactCurrency(value)}
                   tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
                   axisLine={false}

@@ -442,6 +442,8 @@ export default function Index() {
                 portfolioId={selectedPortfolioId}
                 portfolioName={selectedPortfolio?.name || "Vue globale"}
                 portfolioColor={selectedPortfolio?.color}
+                currentTotalValue={totalValue}
+                displayCurrency={baseCurrency}
                 loading={historicalLoading || historicalFetching}
                 benchmarkHistories={benchmarkHistories}
                 benchmarkTickers={benchmarkTickers}
