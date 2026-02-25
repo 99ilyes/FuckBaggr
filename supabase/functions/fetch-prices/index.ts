@@ -130,13 +130,23 @@ serve(async (req) => {
       const period2 = Math.floor(Date.now() / 1000);
       const period1 = period2 - 60 * 60 * 24 * 365 * 3;
 
-      const getLatestRaw = (arr: any[] | undefined): number | null => {
+      const getLatestRaw = (arr: any[] | undefined, requireTTM = false): number | null => {
         if (!Array.isArray(arr) || arr.length === 0) return null;
-        for (let i = arr.length - 1; i >= 0; i--) {
-          const v = arr[i]?.reportedValue?.raw;
-          if (typeof v === "number") return v;
-        }
-        return null;
+
+        const rows = arr
+          .map((item) => ({
+            asOfDate: typeof item?.asOfDate === "string" ? item.asOfDate : "",
+            periodType: typeof item?.periodType === "string" ? item.periodType : "",
+            raw: typeof item?.reportedValue?.raw === "number" ? item.reportedValue.raw : null,
+          }))
+          .filter((row) => typeof row.raw === "number");
+
+        if (rows.length === 0) return null;
+
+        rows.sort((a, b) => b.asOfDate.localeCompare(a.asOfDate));
+        const ttmRow = rows.find((r) => r.periodType.toUpperCase().includes("TTM"));
+        if (requireTTM) return ttmRow?.raw ?? null;
+        return (ttmRow ?? rows[0]).raw;
       };
 
       await Promise.all(
@@ -163,9 +173,9 @@ serve(async (req) => {
               if (type === "trailingPeRatio") {
                 trailingPE = getLatestRaw(item?.trailingPeRatio);
               } else if (type === "trailingDilutedEPS") {
-                trailingEps = getLatestRaw(item?.trailingDilutedEPS);
+                trailingEps = getLatestRaw(item?.trailingDilutedEPS, true);
               } else if (type === "trailingBasicEPS" && trailingEps == null) {
-                trailingEps = getLatestRaw(item?.trailingBasicEPS);
+                trailingEps = getLatestRaw(item?.trailingBasicEPS, true);
               }
             }
 
