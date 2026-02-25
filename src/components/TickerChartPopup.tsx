@@ -23,15 +23,25 @@ interface Props {
   tickerInfo: TickerInfo | null;
 }
 
-const PERIODS = [
-  { label: "1D", range: "1d", interval: "5m" },
+interface PeriodConfig {
+  label: string;
+  range: string;
+  interval: string;
+  windowSeconds?: number;
+}
+
+const DAY_SECONDS = 24 * 60 * 60;
+
+const PERIODS: readonly PeriodConfig[] = [
+  // 1D uses 5d/15m for broad compatibility, then gets trimmed to the last 24h of points.
+  { label: "1D", range: "5d", interval: "15m", windowSeconds: DAY_SECONDS },
   { label: "1S", range: "5d", interval: "15m" },
   { label: "1M", range: "1mo", interval: "1d" },
   { label: "3M", range: "3mo", interval: "1d" },
   { label: "6M", range: "6mo", interval: "1d" },
   { label: "1A", range: "1y", interval: "1wk" },
   { label: "5A", range: "5y", interval: "1wk" },
-] as const;
+];
 
 interface ChartPoint {
   time: number;
@@ -46,7 +56,16 @@ function makeLabel(timestamp: number, interval: string): string {
     : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "2-digit" });
 }
 
-async function fetchChartData(ticker: string, range: string, interval: string): Promise<ChartPoint[]> {
+function trimToWindow(points: ChartPoint[], windowSeconds?: number): ChartPoint[] {
+  if (!windowSeconds || points.length === 0) return points;
+
+  const latestTime = points[points.length - 1].time;
+  const cutoff = latestTime - windowSeconds;
+  const trimmed = points.filter((p) => p.time >= cutoff);
+  return trimmed.length > 1 ? trimmed : points;
+}
+
+async function fetchChartData(ticker: string, range: string, interval: string, windowSeconds?: number): Promise<ChartPoint[]> {
   // In dev, try local proxy first for speed
   if (import.meta.env.DEV) {
     try {
@@ -58,8 +77,9 @@ async function fetchChartData(ticker: string, range: string, interval: string): 
         if (result?.timestamp && result?.indicators?.quote?.[0]?.close) {
           const ts: number[] = result.timestamp;
           const cl: (number | null)[] = result.indicators.quote[0].close;
-          return ts.map((t, i) => cl[i] != null ? { time: t, price: cl[i] as number, label: makeLabel(t, interval) } : null)
+          const points = ts.map((t, i) => cl[i] != null ? { time: t, price: cl[i] as number, label: makeLabel(t, interval) } : null)
             .filter((p): p is ChartPoint => p !== null);
+          return trimToWindow(points, windowSeconds);
         }
       }
     } catch { /* fall through */ }
@@ -71,25 +91,26 @@ async function fetchChartData(ticker: string, range: string, interval: string): 
       body: { tickers: [ticker], range, interval },
     });
     if (error || !data?.results?.[ticker]?.history) return [];
-    return (data.results[ticker].history as { time: number; price: number }[])
+    const points = (data.results[ticker].history as { time: number; price: number }[])
       .map(h => ({ time: h.time, price: h.price, label: makeLabel(h.time, interval) }));
+    return trimToWindow(points, windowSeconds);
   } catch {
     return [];
   }
 }
 
 function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
-  const [period, setPeriod] = useState<typeof PERIODS[number]>(PERIODS[0]);
+  const [period, setPeriod] = useState<PeriodConfig>(PERIODS[0]);
   const [data, setData] = useState<ChartPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
 
   const load = useCallback(async () => {
     setLoading(true);
-    const pts = await fetchChartData(tickerInfo.ticker, period.range, period.interval);
+    const pts = await fetchChartData(tickerInfo.ticker, period.range, period.interval, period.windowSeconds);
     setData(pts);
     setLoading(false);
-  }, [tickerInfo.ticker, period]);
+  }, [tickerInfo.ticker, period.range, period.interval, period.windowSeconds]);
 
   useEffect(() => { load(); }, [load]);
 

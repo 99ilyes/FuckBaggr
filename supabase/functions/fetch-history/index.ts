@@ -13,6 +13,7 @@ const YF_HEADERS = {
 
 function rangeToParams(range: string): { rangeStr: string; interval: string } {
   const map: Record<string, { rangeStr: string; interval: string }> = {
+    "1d": { rangeStr: "1d", interval: "5m" },
     "5d": { rangeStr: "5d", interval: "15m" },
     "1mo": { rangeStr: "1mo", interval: "1d" },
     "3mo": { rangeStr: "3mo", interval: "1d" },
@@ -25,11 +26,15 @@ function rangeToParams(range: string): { rangeStr: string; interval: string } {
   return map[range] ?? { rangeStr: "5y", interval: "1wk" };
 }
 
+type HistoryPoint = { time: number; price: number };
+type HistorySuccess = { history: HistoryPoint[]; currency: string; symbol: string };
+type HistoryResult = HistorySuccess | { error: string };
+
 async function fetchYahooHistory(
   ticker: string,
   range: string,
   interval: string
-): Promise<{ history: { time: number; price: number }[]; currency: string; symbol: string } | null> {
+): Promise<HistorySuccess | null> {
   const { rangeStr, interval: resolvedInterval } = rangeToParams(range);
   const effectiveInterval = interval || resolvedInterval;
 
@@ -66,7 +71,7 @@ async function fetchYahooHistory(
 
     if (timestamps.length === 0) return null;
 
-    const history: { time: number; price: number }[] = [];
+    const history: HistoryPoint[] = [];
     for (let i = 0; i < timestamps.length; i++) {
       const price = closes[i];
       if (price !== null && price !== undefined && !isNaN(price)) {
@@ -98,7 +103,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const results: Record<string, any> = {};
+    const results: Record<string, HistoryResult> = {};
 
     // Fetch all tickers in parallel (with concurrency limit)
     const BATCH_SIZE = 5;
