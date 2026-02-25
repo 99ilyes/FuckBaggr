@@ -24,6 +24,7 @@ interface Props {
 }
 
 const PERIODS = [
+  { label: "1D", range: "1d", interval: "5m" },
   { label: "1S", range: "5d", interval: "15m" },
   { label: "1M", range: "1mo", interval: "1d" },
   { label: "3M", range: "3mo", interval: "1d" },
@@ -78,7 +79,7 @@ async function fetchChartData(ticker: string, range: string, interval: string): 
 }
 
 function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
-  const [period, setPeriod] = useState<typeof PERIODS[number]>(PERIODS[1]);
+  const [period, setPeriod] = useState<typeof PERIODS[number]>(PERIODS[0]);
   const [data, setData] = useState<ChartPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
@@ -92,7 +93,14 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const isUp = data.length >= 2 ? data[data.length - 1].price >= data[0].price : tickerInfo.changePercent >= 0;
+  const firstPrice = data[0]?.price ?? null;
+  const lastPrice = data.length > 0 ? data[data.length - 1].price : null;
+  const periodChangePercent =
+    firstPrice && lastPrice != null
+      ? ((lastPrice - firstPrice) / firstPrice) * 100
+      : null;
+  const displayedChangePercent = periodChangePercent ?? tickerInfo.changePercent;
+  const isUp = displayedChangePercent >= 0;
   const color = isUp ? "hsl(142, 71%, 45%)" : "hsl(0, 84%, 60%)";
   const gradientId = `chart-grad-${tickerInfo.ticker}`;
 
@@ -104,17 +112,17 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-3 px-1 pr-8">
+      <div className="flex w-full items-start gap-3 px-1 pr-2 sm:pr-8">
         <TickerLogo ticker={tickerInfo.ticker} className="w-10 h-10 rounded-full shrink-0" />
-        <div className="flex-1 min-w-0 overflow-hidden">
-          <div className="font-semibold text-sm truncate">{tickerInfo.name}</div>
+        <div className="flex-1 min-w-0 overflow-hidden pr-1">
+          <div className="font-semibold text-sm leading-tight line-clamp-2 break-words">{tickerInfo.name}</div>
           <div className="text-xs text-muted-foreground truncate">{tickerInfo.ticker}</div>
         </div>
         <div className="text-right shrink-0">
           <div className="font-bold text-sm">{formatCurrency(tickerInfo.currentPrice, tickerInfo.currency)}</div>
-          <div className={`flex items-center justify-end gap-0.5 text-xs font-semibold ${tickerInfo.changePercent >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
-            {tickerInfo.changePercent >= 0 ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
-            {formatPercent(tickerInfo.changePercent)}
+          <div className={`flex items-center justify-end gap-0.5 text-xs font-semibold ${displayedChangePercent >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+            {displayedChangePercent >= 0 ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
+            {formatPercent(displayedChangePercent)}
           </div>
         </div>
       </div>

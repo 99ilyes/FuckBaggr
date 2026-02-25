@@ -34,7 +34,7 @@ interface Props {
 
 type DashboardRange = Exclude<TimeRange, "CUSTOM">;
 
-const RANGES: DashboardRange[] = ["YTD", "6M", "1Y", "2Y", "5Y", "MAX"];
+const RANGES: DashboardRange[] = ["1S", "1M", "YTD", "6M", "1Y", "2Y", "MAX"];
 const BENCH_COLORS = [
   "hsl(var(--chart-3))",
   "hsl(var(--chart-4))",
