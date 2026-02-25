@@ -1249,7 +1249,7 @@ export default function Watchlist() {
 
                     const returnColor =
                       impliedReturn != null
-                        ? impliedReturn > 15
+                        ? impliedReturn > 12
                           ? COLOR_POSITIVE
                           : impliedReturn > 8
                             ? COLOR_WARNING
