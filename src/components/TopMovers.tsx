@@ -116,16 +116,18 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
             const preMarketPrice = marketQuote?.preMarketPrice ?? null;
             const postMarketPrice = marketQuote?.postMarketPrice ?? null;
             const marketState = marketQuote?.marketState ?? null;
-            const currentPrice = resolveCurrentPrice(asset.last_price, marketState, preMarketPrice, postMarketPrice);
+            const regularPrice = asset.last_price;
+            const currentPrice = resolveCurrentPrice(regularPrice, marketState, preMarketPrice, postMarketPrice);
 
+            // Daily change is based on regular close vs previous close only (not pre/post market)
             let change = 0;
             if (asset.previous_close !== 0) {
-                change = ((currentPrice - asset.previous_close) / asset.previous_close) * 100;
+                change = ((regularPrice - asset.previous_close) / asset.previous_close) * 100;
             } else if (liveChangeMap[p.ticker] != null) {
                 change = liveChangeMap[p.ticker];
             }
 
-            const valueVariation = currentPrice - asset.previous_close;
+            const valueVariation = regularPrice - asset.previous_close;
             const indicator = resolveMarketIndicator(p.ticker, marketState);
             const isMarketOpen = indicator.phase === "open" || isMarketCurrentlyOpen(p.ticker);
             const sessionPrice =
