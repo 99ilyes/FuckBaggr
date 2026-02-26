@@ -194,7 +194,7 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
                         )}
                     </div>
                     {!item.isMarketOpen && item.sessionPhase && item.sessionPrice != null && (
-                        <div className="flex items-baseline gap-2 text-[10px] tabular-nums">
+                        <div className="flex items-baseline gap-2 text-[11px] tabular-nums">
                             <span className={`font-medium ${item.sessionPhase === "pre" ? "text-yellow-300/90" : "text-blue-300/90"}`}>
                                 {formatCurrency(item.sessionPrice, item.currency)}
                             </span>
