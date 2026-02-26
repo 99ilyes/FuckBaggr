@@ -216,6 +216,8 @@ serve(async (req) => {
             forwardEps: null,
             trailingFcfPerShare: null,
             trailingRevenuePerShare: null,
+            trailingTotalRevenue: null,
+            trailingRevenueShares: null,
           },
         ]),
       );
@@ -298,6 +300,8 @@ serve(async (req) => {
               forwardEps: null,
               trailingFcfPerShare,
               trailingRevenuePerShare,
+              trailingTotalRevenue,
+              trailingRevenueShares: shares,
             };
           } catch (err) {
             console.warn(`[fetch-prices] fundamentals timeseries error for ${ticker}:`, err);

@@ -36,6 +36,8 @@ interface TickerQuote {
   trailingEps: number | null;
   trailingFcfPerShare: number | null;
   trailingRevenuePerShare: number | null;
+  trailingTotalRevenue: number | null;
+  trailingRevenueShares: number | null;
   changePercent: number | null;
 }
 
@@ -57,10 +59,12 @@ interface YFinanceData {
   trailingEps: number | null;
   trailingFcfPerShare: number | null;
   trailingRevenuePerShare: number | null;
+  trailingTotalRevenue: number | null;
+  trailingRevenueShares: number | null;
 }
 
 type ImpliedReturnSort = "none" | "desc" | "asc";
-type ValuationModel = "pe" | "pfcf" | "ps";
+type ValuationModel = "pe" | "fcf_per_share" | "ps";
 
 // ─── Constants ───────────────────────────────────────────────────────
 
@@ -283,20 +287,21 @@ function toDecimalPercent(value: number): number {
 }
 
 function parseValuationModel(value: unknown): ValuationModel | null {
-  if (value === "pe" || value === "pfcf" || value === "ps") return value;
+  if (value === "pfcf") return "fcf_per_share";
+  if (value === "pe" || value === "fcf_per_share" || value === "ps") return value;
   return null;
 }
 
-function modelLabel(model: ValuationModel): string {
-  if (model === "pfcf") return "P/FCF";
-  if (model === "ps") return "P/S";
-  return "PER";
-}
-
 function metricLabel(model: ValuationModel): string {
-  if (model === "pfcf") return "FCF ann./action";
+  if (model === "fcf_per_share") return "FCF ann./action";
   if (model === "ps") return "Ventes ann./action";
   return "EPS ann.";
+}
+
+function currentRatioLabel(model: ValuationModel): string {
+  if (model === "fcf_per_share") return "FCF/Action";
+  if (model === "ps") return "P/S";
+  return "PER";
 }
 
 function parseTickerMeta(notes: string | null): WatchlistTickerMeta {
@@ -409,6 +414,8 @@ function normalizeFundamentalsPayload(payload: unknown): Record<string, YFinance
       trailingEps: typeof v.trailingEps === "number" ? v.trailingEps : null,
       trailingFcfPerShare: typeof v.trailingFcfPerShare === "number" ? v.trailingFcfPerShare : null,
       trailingRevenuePerShare: typeof v.trailingRevenuePerShare === "number" ? v.trailingRevenuePerShare : null,
+      trailingTotalRevenue: typeof v.trailingTotalRevenue === "number" ? v.trailingTotalRevenue : null,
+      trailingRevenueShares: typeof v.trailingRevenueShares === "number" ? v.trailingRevenueShares : null,
     };
   }
   return out;
@@ -432,6 +439,8 @@ async function fetchFundamentalsBrowser(ticker: string): Promise<YFinanceData> {
         trailingEps: null,
         trailingFcfPerShare: null,
         trailingRevenuePerShare: null,
+        trailingTotalRevenue: null,
+        trailingRevenueShares: null,
       };
     }
 
@@ -443,6 +452,8 @@ async function fetchFundamentalsBrowser(ticker: string): Promise<YFinanceData> {
         trailingEps: null,
         trailingFcfPerShare: null,
         trailingRevenuePerShare: null,
+        trailingTotalRevenue: null,
+        trailingRevenueShares: null,
       };
     }
 
@@ -509,13 +520,22 @@ async function fetchFundamentalsBrowser(ticker: string): Promise<YFinanceData> {
         ? trailingTotalRevenue / shares
         : null;
 
-    return { trailingPE, trailingEps, trailingFcfPerShare, trailingRevenuePerShare };
+    return {
+      trailingPE,
+      trailingEps,
+      trailingFcfPerShare,
+      trailingRevenuePerShare,
+      trailingTotalRevenue,
+      trailingRevenueShares: shares,
+    };
   } catch {
     return {
       trailingPE: null,
       trailingEps: null,
       trailingFcfPerShare: null,
       trailingRevenuePerShare: null,
+      trailingTotalRevenue: null,
+      trailingRevenueShares: null,
     };
   }
 }
@@ -546,7 +566,9 @@ async function fetchFundamentals(tickers: string[]): Promise<Record<string, YFin
       !fund ||
       fund.trailingEps == null ||
       fund.trailingFcfPerShare == null ||
-      fund.trailingRevenuePerShare == null
+      fund.trailingRevenuePerShare == null ||
+      fund.trailingTotalRevenue == null ||
+      fund.trailingRevenueShares == null
     );
   });
 
@@ -563,6 +585,8 @@ async function fetchFundamentals(tickers: string[]): Promise<Record<string, YFin
       trailingEps: current?.trailingEps ?? fallback.trailingEps,
       trailingFcfPerShare: current?.trailingFcfPerShare ?? fallback.trailingFcfPerShare,
       trailingRevenuePerShare: current?.trailingRevenuePerShare ?? fallback.trailingRevenuePerShare,
+      trailingTotalRevenue: current?.trailingTotalRevenue ?? fallback.trailingTotalRevenue,
+      trailingRevenueShares: current?.trailingRevenueShares ?? fallback.trailingRevenueShares,
     };
   }
 
@@ -603,6 +627,8 @@ async function fetchAllQuotes(tickers: string[]): Promise<Record<string, TickerQ
       trailingEps: annualizedEps,
       trailingFcfPerShare: annualizedFcfPerShare,
       trailingRevenuePerShare: annualizedRevenuePerShare,
+      trailingTotalRevenue: fund?.trailingTotalRevenue ?? null,
+      trailingRevenueShares: fund?.trailingRevenueShares ?? null,
       changePercent: quote.changePercent ?? computedChangePercent,
     };
   }
@@ -816,7 +842,7 @@ function InlineModel({
       className="h-7 rounded border border-border/60 bg-background px-2 text-xs text-foreground/85 outline-none focus:ring-1 focus:ring-primary"
     >
       <option value="pe">PER</option>
-      <option value="pfcf">P/FCF</option>
+      <option value="fcf_per_share">FCF/Action</option>
       <option value="ps">P/S</option>
     </select>
   );
@@ -1310,7 +1336,7 @@ export default function Watchlist() {
   };
 
   const updateManualMetric = (ticker: string, model: ValuationModel, value: number | null) => {
-    if (model === "pfcf") {
+    if (model === "fcf_per_share") {
       updateManualMetricMap(setManualFcfPerShare, ticker, value);
       return;
     }
@@ -1336,21 +1362,40 @@ export default function Watchlist() {
       const params = fvParams[ticker] ?? null;
       const valuationModel = valuationModelByTicker[ticker] ?? DEFAULT_VALUATION_MODEL;
       const autoMetric =
-        valuationModel === "pfcf"
+        valuationModel === "fcf_per_share"
           ? resolveAnnualizedMetric(q?.trailingFcfPerShare ?? null)
           : valuationModel === "ps"
             ? resolveAnnualizedMetric(q?.trailingRevenuePerShare ?? null)
             : resolveAnnualizedMetric(q?.trailingEps ?? null);
       const manualMetric =
-        valuationModel === "pfcf"
+        valuationModel === "fcf_per_share"
           ? (manualFcfPerShare[ticker] ?? null)
           : valuationModel === "ps"
             ? (manualRevenuePerShare[ticker] ?? null)
             : (manualEps[ticker] ?? null);
       const effectiveMetric = manualMetric ?? autoMetric;
-      const currentMultiple =
-        calcCurrentMultiple(q?.price ?? null, effectiveMetric) ??
-        (valuationModel === "pe" ? (q?.trailingPE ?? null) : null);
+      const psMarketCap =
+        q?.price != null &&
+          q.trailingRevenueShares != null &&
+          q.trailingRevenueShares > 0
+          ? q.price * q.trailingRevenueShares
+          : null;
+      const psFromTotals =
+        psMarketCap != null &&
+          q?.trailingTotalRevenue != null &&
+          q.trailingTotalRevenue > 0
+          ? psMarketCap / q.trailingTotalRevenue
+          : null;
+      const currentRatio =
+        valuationModel === "fcf_per_share"
+          ? effectiveMetric
+          : valuationModel === "ps"
+            ? (
+              psFromTotals ??
+              (manualMetric != null ? calcCurrentMultiple(q?.price ?? null, manualMetric) : null)
+            )
+          : calcCurrentMultiple(q?.price ?? null, effectiveMetric) ??
+          (valuationModel === "pe" ? (q?.trailingPE ?? null) : null);
       const futurePrice = params ? calcFuturePrice(effectiveMetric, params) : null;
       const fairPrice = params ? calcFairPrice(futurePrice, targetReturn, params.years) : null;
       const impliedReturn = params ? calcImpliedReturn(q?.price ?? null, futurePrice, params.years) : null;
@@ -1378,11 +1423,11 @@ export default function Watchlist() {
         params,
         hasValuation: params != null,
         valuationModel,
-        modelLabel: modelLabel(valuationModel),
+        ratioLabel: currentRatioLabel(valuationModel),
         metricLabel: metricLabel(valuationModel),
         autoMetric,
         manualMetric,
-        currentMultiple,
+        currentRatio,
         fairPrice,
         impliedReturn,
         changeColor,
@@ -1482,9 +1527,9 @@ export default function Watchlist() {
                 const params = row.params;
                 const hasValuation = row.hasValuation;
                 const valuationModel = row.valuationModel;
-                const modelLabelText = row.modelLabel;
+                const ratioLabelText = row.ratioLabel;
                 const metricLabelText = row.metricLabel;
-                const currentMultiple = row.currentMultiple;
+                const currentRatio = row.currentRatio;
                 const fairPrice = row.fairPrice;
                 const impliedReturn = row.impliedReturn;
                 const changeColor = row.changeColor;
@@ -1558,12 +1603,12 @@ export default function Watchlist() {
                         </div>
                       </div>
                       <div className="rounded-md bg-muted/20 px-2.5 py-2">
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{modelLabelText}</p>
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{ratioLabelText}</p>
                         <div className="mt-1 tabular-nums text-sm text-foreground/90">
                           {quotesLoading && !q ? (
                             <Skeleton className="h-4 w-10" />
-                          ) : currentMultiple != null ? (
-                            currentMultiple.toFixed(1)
+                          ) : currentRatio != null ? (
+                            currentRatio.toFixed(2)
                           ) : (
                             "—"
                           )}
@@ -1670,7 +1715,7 @@ export default function Watchlist() {
                   <TableHead className="text-right">Cours</TableHead>
                   <TableHead className="text-right">Var.</TableHead>
                   <TableHead className="text-center">Modèle</TableHead>
-                  <TableHead className="text-right">Multiple (Px/métrique)</TableHead>
+                  <TableHead className="text-right">Ratio courant</TableHead>
                   <TableHead className="text-right border-r border-border/30">Métrique ann.</TableHead>
                   <TableHead className="text-center">
                     <Tooltip>
@@ -1756,8 +1801,9 @@ export default function Watchlist() {
                     const params = row.params;
                     const hasValuation = row.hasValuation;
                     const valuationModel = row.valuationModel;
+                    const ratioLabelText = row.ratioLabel;
                     const metricLabelText = row.metricLabel;
-                    const currentMultiple = row.currentMultiple;
+                    const currentRatio = row.currentRatio;
                     const fairPrice = row.fairPrice;
                     const impliedReturn = row.impliedReturn;
                     const changeColor = row.changeColor;
@@ -1804,7 +1850,10 @@ export default function Watchlist() {
                         </TableCell>
 
                         {/* Cours */}
-                        <TableCell className="text-right tabular-nums text-sm text-foreground/90">
+                        <TableCell
+                          className="text-right tabular-nums text-sm text-foreground/90"
+                          title={ratioLabelText}
+                        >
                           {quotesLoading && !q ? (
                             <Skeleton className="h-4 w-16 ml-auto" />
                           ) : (
@@ -1831,12 +1880,12 @@ export default function Watchlist() {
                           />
                         </TableCell>
 
-                        {/* Multiple */}
+                        {/* Ratio courant */}
                         <TableCell className="text-right tabular-nums text-sm text-foreground/90">
                           {quotesLoading && !q ? (
                             <Skeleton className="h-4 w-12 ml-auto" />
-                          ) : currentMultiple != null ? (
-                            currentMultiple.toFixed(1)
+                          ) : currentRatio != null ? (
+                            currentRatio.toFixed(2)
                           ) : (
                             "—"
                           )}
