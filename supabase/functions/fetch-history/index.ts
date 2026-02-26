@@ -26,24 +26,87 @@ function rangeToParams(range: string): { rangeStr: string; interval: string } {
   return map[range] ?? { rangeStr: "5y", interval: "1wk" };
 }
 
-type HistoryPoint = { time: number; price: number };
+type SessionType = "pre" | "regular" | "post";
+type HistoryPoint = { time: number; price: number; session?: SessionType };
 type HistorySuccess = { history: HistoryPoint[]; currency: string; symbol: string };
 type HistoryResult = HistorySuccess | { error: string };
+
+type TradingPeriod = { start: number; end: number };
+type SessionPeriods = {
+  pre: TradingPeriod[];
+  regular: TradingPeriod[];
+  post: TradingPeriod[];
+};
+
+function flattenTradingPeriods(input: unknown): TradingPeriod[] {
+  const periods: TradingPeriod[] = [];
+
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
+
+    if (node && typeof node === "object") {
+      const maybeStart = (node as { start?: unknown }).start;
+      const maybeEnd = (node as { end?: unknown }).end;
+      const start = typeof maybeStart === "number" ? maybeStart : null;
+      const end = typeof maybeEnd === "number" ? maybeEnd : null;
+
+      if (start !== null && end !== null && Number.isFinite(start) && Number.isFinite(end) && end > start) {
+        periods.push({ start, end });
+      }
+    }
+  };
+
+  walk(input);
+  return periods;
+}
+
+function extractSessionPeriods(metaTradingPeriods: unknown): SessionPeriods {
+  const raw = (metaTradingPeriods ?? {}) as {
+    pre?: unknown;
+    regular?: unknown;
+    post?: unknown;
+  };
+
+  return {
+    pre: flattenTradingPeriods(raw.pre),
+    regular: flattenTradingPeriods(raw.regular),
+    post: flattenTradingPeriods(raw.post),
+  };
+}
+
+function isInTradingPeriods(timestamp: number, periods: TradingPeriod[]): boolean {
+  for (const p of periods) {
+    if (timestamp >= p.start && timestamp < p.end) return true;
+  }
+  return false;
+}
+
+function resolveSession(timestamp: number, periods: SessionPeriods): SessionType | null {
+  if (isInTradingPeriods(timestamp, periods.regular)) return "regular";
+  if (isInTradingPeriods(timestamp, periods.pre)) return "pre";
+  if (isInTradingPeriods(timestamp, periods.post)) return "post";
+  return null;
+}
 
 async function fetchYahooHistory(
   ticker: string,
   range: string,
-  interval: string
+  interval: string,
+  includePrePost = false
 ): Promise<HistorySuccess | null> {
   const { rangeStr, interval: resolvedInterval } = rangeToParams(range);
   const effectiveInterval = interval || resolvedInterval;
+  const includePrePostValue = includePrePost ? "true" : "false";
 
   // Yahoo can downsample `range=max` even when interval=1d.
   // Use explicit epoch bounds to force real daily points.
   const url =
     effectiveInterval === "1d" && rangeStr === "max"
-      ? `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&period1=0&period2=${Math.floor(Date.now() / 1000)}&includePrePost=false`
-      : `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${effectiveInterval}&range=${rangeStr}&includePrePost=false`;
+      ? `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&period1=0&period2=${Math.floor(Date.now() / 1000)}&includePrePost=${includePrePostValue}`
+      : `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${effectiveInterval}&range=${rangeStr}&includePrePost=${includePrePostValue}`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
@@ -68,14 +131,23 @@ async function fetchYahooHistory(
     const closes: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
     const currency: string = result.meta?.currency ?? "USD";
     const symbol: string = result.meta?.symbol ?? ticker;
+    const sessionPeriods = includePrePost
+      ? extractSessionPeriods(result?.meta?.tradingPeriods)
+      : null;
 
     if (timestamps.length === 0) return null;
 
     const history: HistoryPoint[] = [];
     for (let i = 0; i < timestamps.length; i++) {
+      const timestamp = timestamps[i];
       const price = closes[i];
       if (price !== null && price !== undefined && !isNaN(price)) {
-        history.push({ time: timestamps[i], price });
+        const point: HistoryPoint = { time: timestamp, price };
+        if (sessionPeriods) {
+          const session = resolveSession(timestamp, sessionPeriods);
+          if (session) point.session = session;
+        }
+        history.push(point);
       }
     }
 
@@ -94,7 +166,8 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { tickers, range = "5y", interval = "1wk" } = body;
+    const { tickers, range = "5y", interval = "1wk", includePrePost = false } = body;
+    const includePrePostBool = includePrePost === true || includePrePost === "true";
 
     if (!tickers || !Array.isArray(tickers) || tickers.length === 0) {
       return new Response(JSON.stringify({ error: "tickers array required" }), {
@@ -111,7 +184,7 @@ Deno.serve(async (req) => {
       const batch = tickers.slice(i, i + BATCH_SIZE);
       await Promise.all(
         batch.map(async (ticker: string) => {
-          const data = await fetchYahooHistory(ticker, range, interval);
+          const data = await fetchYahooHistory(ticker, range, interval, includePrePostBool);
           if (data) {
             results[ticker] = data;
           } else {

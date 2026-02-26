@@ -773,7 +773,7 @@ export default function Watchlist() {
   const [fvParams, setFvParams] = useState<Record<string, FairValueParams>>(loadFVParams);
   const [targetReturn, setTargetReturn] = useState<number>(loadTargetReturn);
   const [manualEps, setManualEps] = useState<Record<string, number>>(loadManualEps);
-  const [impliedSort, setImpliedSort] = useState<ImpliedReturnSort>("none");
+  const [impliedSort, setImpliedSort] = useState<ImpliedReturnSort>("desc");
   const [cloudLoaded, setCloudLoaded] = useState(false);
   const cloudTickersRef = useRef<Set<string>>(new Set());
 
@@ -1080,6 +1080,22 @@ export default function Watchlist() {
       const futurePrice = params ? calcFuturePrice(effectiveEps, params) : null;
       const fairPrice = params ? calcFairPrice(futurePrice, targetReturn, params.years) : null;
       const impliedReturn = params ? calcImpliedReturn(q?.price ?? null, futurePrice, params.years) : null;
+      const changeColor =
+        q?.changePercent != null
+          ? q.changePercent > 0
+            ? COLOR_POSITIVE
+            : q.changePercent < 0
+              ? COLOR_NEGATIVE
+              : COLOR_NEUTRAL
+          : COLOR_NEUTRAL;
+      const returnColor =
+        impliedReturn != null
+          ? impliedReturn > 12
+            ? COLOR_POSITIVE
+            : impliedReturn > 8
+              ? COLOR_WARNING
+              : COLOR_NEGATIVE
+          : COLOR_NEUTRAL;
 
       return {
         ticker,
@@ -1092,6 +1108,8 @@ export default function Watchlist() {
         currentPE,
         fairPrice,
         impliedReturn,
+        changeColor,
+        returnColor,
       };
     });
 
@@ -1111,7 +1129,6 @@ export default function Watchlist() {
   }, [allTickers, quotes, holdingSet, fvParams, manualEps, targetReturn, impliedSort]);
 
   const impliedSortLabel = impliedSort === "desc" ? "↓" : impliedSort === "asc" ? "↑" : "↕";
-
   const allTickersSet = useMemo(() => new Set(allTickers), [allTickers]);
   const valuedCount = useMemo(
     () => allTickers.reduce((count, ticker) => count + (fvParams[ticker] ? 1 : 0), 0),
@@ -1122,11 +1139,11 @@ export default function Watchlist() {
     <TooltipProvider delayDuration={200}>
       <div className="flex flex-col min-h-screen w-full">
         {/* Header */}
-        <header className="flex items-center gap-3 border-b px-4 py-3 md:px-6">
+        <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3 md:px-6">
           <SidebarTrigger />
           <Eye className="h-5 w-5 text-primary" />
           <h1 className="text-lg font-semibold tracking-tight">Watchlist</h1>
-          <span className="text-sm text-muted-foreground ml-auto">
+          <span className="ml-auto text-xs text-muted-foreground sm:text-sm">
             {allTickers.length} titre{allTickers.length > 1 ? "s" : ""} · {valuedCount} valorisé{valuedCount > 1 ? "s" : ""}
           </span>
         </header>
@@ -1135,21 +1152,217 @@ export default function Watchlist() {
         <div className="px-4 py-3 md:px-6 border-b">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <TickerSearchBar onAdd={addTicker} existingTickers={allTickersSet} />
-            <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 w-fit">
-              <span className="text-sm text-muted-foreground">Rendement cible</span>
-              <InlineNum
-                value={targetReturn}
-                onChange={updateTargetReturn}
-                min={0}
-                max={80}
-              />
+            <div className="w-full sm:w-auto">
+              <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2">
+                <span className="text-sm text-muted-foreground">Rendement cible</span>
+                <InlineNum
+                  value={targetReturn}
+                  onChange={updateTargetReturn}
+                  min={0}
+                  max={80}
+                />
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Table */}
-        <main className="flex-1 overflow-auto p-4 md:p-6">
-          <div className="rounded-lg border bg-card">
+        <main className="flex-1 p-4 md:p-6">
+          {/* Mobile cards */}
+          <div className="space-y-3 md:hidden">
+            {loading && allTickers.length === 0 ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="rounded-xl border bg-card p-3 space-y-3">
+                  <Skeleton className="h-5 w-28" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Skeleton className="h-14 w-full" />
+                    <Skeleton className="h-14 w-full" />
+                    <Skeleton className="h-14 w-full" />
+                    <Skeleton className="h-14 w-full" />
+                  </div>
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ))
+            ) : allTickers.length === 0 ? (
+              <div className="rounded-xl border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
+                Aucun titre — utilisez la barre de recherche pour en ajouter
+              </div>
+            ) : (
+              rows.map((row) => {
+                const ticker = row.ticker;
+                const q = row.q;
+                const isCustom = row.isCustom;
+                const params = row.params;
+                const hasValuation = row.hasValuation;
+                const currentPE = row.currentPE;
+                const fairPrice = row.fairPrice;
+                const impliedReturn = row.impliedReturn;
+                const changeColor = row.changeColor;
+                const returnColor = row.returnColor;
+
+                return (
+                  <div key={ticker} className="rounded-xl border bg-card p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex items-start gap-2">
+                        <TickerLogo ticker={ticker} className="h-7 w-7 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-sm">{ticker}</span>
+                            {!isCustom && <Briefcase className="h-3 w-3 text-primary" />}
+                            <span
+                              className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
+                                hasValuation
+                                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                                  : "border-border/60 bg-muted/30 text-foreground/70"
+                              }`}
+                            >
+                              {hasValuation ? "valorise" : "sans valo"}
+                            </span>
+                          </div>
+                          {q?.name && (
+                            <p className={`text-xs ${COLOR_SUBTLE} truncate max-w-[180px] mt-0.5`}>
+                              {q.name}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeTicker(ticker)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <div className="rounded-md bg-muted/20 px-2.5 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Cours</p>
+                        <div className="mt-1 tabular-nums text-sm text-foreground/90">
+                          {quotesLoading && !q ? (
+                            <Skeleton className="h-4 w-16" />
+                          ) : (
+                            formatCurrency(q?.price ?? null, q?.currency ?? "EUR")
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-muted/20 px-2.5 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Var.</p>
+                        <div className={`mt-1 tabular-nums text-sm ${changeColor}`}>
+                          {quotesLoading && !q ? (
+                            <Skeleton className="h-4 w-12" />
+                          ) : q?.changePercent != null ? (
+                            `${q.changePercent > 0 ? "+" : ""}${q.changePercent.toFixed(2)}%`
+                          ) : (
+                            "—"
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-muted/20 px-2.5 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">PER</p>
+                        <div className="mt-1 tabular-nums text-sm text-foreground/90">
+                          {quotesLoading && !q ? (
+                            <Skeleton className="h-4 w-10" />
+                          ) : currentPE != null ? (
+                            currentPE.toFixed(1)
+                          ) : (
+                            "—"
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-muted/20 px-2.5 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Rdt. impl.</p>
+                        <div className={`mt-1 tabular-nums text-sm font-semibold ${returnColor}`}>
+                          {quotesLoading && !q ? (
+                            <Skeleton className="h-4 w-12" />
+                          ) : impliedReturn != null ? (
+                            `${impliedReturn > 0 ? "+" : ""}${impliedReturn.toFixed(1)}%`
+                          ) : (
+                            "—"
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-muted/20 px-2.5 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Prix juste</p>
+                        <div className="mt-1 tabular-nums text-sm font-semibold text-foreground">
+                          {quotesLoading && !q ? (
+                            <Skeleton className="h-4 w-16" />
+                          ) : fairPrice != null ? (
+                            formatCurrency(fairPrice, q?.currency ?? "EUR")
+                          ) : (
+                            "—"
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border/60 px-2.5 py-2">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">EPS ann.</p>
+                        <div className="mt-1 flex justify-end">
+                          {quotesLoading && !q ? (
+                            <Skeleton className="h-4 w-12" />
+                          ) : (
+                            <InlineEps
+                              autoValue={row.autoEps}
+                              manualValue={row.manualEps}
+                              onChange={(v) => updateManualEps(ticker, v)}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 rounded-md border border-border/60 p-2.5">
+                      {params ? (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="flex flex-col items-center rounded bg-muted/20 px-2 py-1.5">
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Horizon</span>
+                            <InlineNum
+                              value={params.years}
+                              onChange={(v) => updateFVParam(ticker, "years", v)}
+                              suffix="a"
+                              min={1}
+                              max={30}
+                            />
+                          </div>
+                          <div className="flex flex-col items-center rounded bg-muted/20 px-2 py-1.5">
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">CAGR</span>
+                            <InlineNum
+                              value={params.growth}
+                              onChange={(v) => updateFVParam(ticker, "growth", v)}
+                              min={-50}
+                              max={200}
+                            />
+                          </div>
+                          <div className="flex flex-col items-center rounded bg-muted/20 px-2 py-1.5">
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">PER cible</span>
+                            <InlineNum
+                              value={params.terminalPE}
+                              onChange={(v) => updateFVParam(ticker, "terminalPE", v)}
+                              suffix="x"
+                              min={1}
+                              max={200}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 w-full text-xs"
+                          onClick={() => createValuation(ticker)}
+                        >
+                          Valoriser ce titre
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden md:block rounded-lg border bg-card overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -1243,24 +1456,8 @@ export default function Watchlist() {
                     const currentPE = row.currentPE;
                     const fairPrice = row.fairPrice;
                     const impliedReturn = row.impliedReturn;
-
-                    const changeColor =
-                      q?.changePercent != null
-                        ? q.changePercent > 0
-                          ? COLOR_POSITIVE
-                          : q.changePercent < 0
-                            ? COLOR_NEGATIVE
-                            : COLOR_NEUTRAL
-                        : COLOR_NEUTRAL;
-
-                    const returnColor =
-                      impliedReturn != null
-                        ? impliedReturn > 12
-                          ? COLOR_POSITIVE
-                          : impliedReturn > 8
-                            ? COLOR_WARNING
-                            : COLOR_NEGATIVE
-                        : COLOR_NEUTRAL;
+                    const changeColor = row.changeColor;
+                    const returnColor = row.returnColor;
 
                     return (
                       <TableRow key={ticker} className="group even:bg-muted/10 hover:bg-muted/20 transition-colors">
