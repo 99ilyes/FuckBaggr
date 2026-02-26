@@ -126,23 +126,23 @@ export default function EarningsTracker() {
   };
 
   return (
-    <div className="w-full px-4 py-5 md:px-6">
-      <div className="mx-auto max-w-[1700px] space-y-5">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="w-full px-3 py-4 sm:px-4 sm:py-5 md:px-6">
+      <div className="mx-auto max-w-[1700px] space-y-4 sm:space-y-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-start gap-2">
             <SidebarTrigger className="-ml-1 mt-0.5 md:hidden" />
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Earnings Tracker</h1>
-              <p className="text-sm text-muted-foreground mt-1">
+              <h1 className="text-xl sm:text-2xl font-semibold tracking-tight">Earnings Tracker</h1>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1">
                 Suivi des derniers résultats par titre avec comparaison historique.
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex w-full sm:w-auto items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5 bg-background/80 border border-border/60 px-2.5 py-1.5 rounded-md">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Trimestre :</span>
               <Select value={currentQuarter} onValueChange={setCurrentQuarter}>
-                <SelectTrigger className="w-[100px] h-7 text-xs border-0 shadow-none focus:ring-0">
+                <SelectTrigger className="w-[102px] h-7 text-xs border-0 shadow-none focus:ring-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -152,7 +152,7 @@ export default function EarningsTracker() {
                 </SelectContent>
               </Select>
             </div>
-            <Button size="sm" onClick={() => { setEditData(null); setDialogOpen(true); }}>
+            <Button size="sm" className="w-full sm:w-auto" onClick={() => { setEditData(null); setDialogOpen(true); }}>
               <Plus className="h-4 w-4 mr-1" />
               Ajouter un résultat
             </Button>

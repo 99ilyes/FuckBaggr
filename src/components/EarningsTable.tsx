@@ -1,4 +1,4 @@
-import { Fragment, useState, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -159,7 +159,31 @@ function PortfolioBadges({ portfolios }: { portfolios: Set<string> | undefined }
   );
 }
 
-function NotePopover({ earning, onUpdateNote }: { earning: Earning; onUpdateNote: (id: string, notes: string | null) => void }) {
+function PortfolioPills({ portfolios }: { portfolios: Set<string> | undefined }) {
+  if (!portfolios || portfolios.size === 0) {
+    return <p className="text-xs text-muted-foreground">Aucun portefeuille</p>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {Array.from(portfolios).map((name) => (
+        <Badge key={name} variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+          {name}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function NotePopover({
+  earning,
+  onUpdateNote,
+  isMobile = false,
+}: {
+  earning: Earning;
+  onUpdateNote: (id: string, notes: string | null) => void;
+  isMobile?: boolean;
+}) {
   const [value, setValue] = useState(earning.notes ?? "");
   const [open, setOpen] = useState(false);
 
@@ -168,17 +192,44 @@ function NotePopover({ earning, onUpdateNote }: { earning: Earning; onUpdateNote
     setOpen(false);
   };
 
+  const trigger = (
+    <Button
+      variant="ghost"
+      size="icon"
+      className={`h-7 w-7 rounded-md ${earning.notes ? "text-foreground hover:bg-muted" : "text-muted-foreground/40 hover:text-muted-foreground"}`}
+    >
+      <MessageSquare className="h-3.5 w-3.5" />
+    </Button>
+  );
+
+  if (isMobile) {
+    return (
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (o) setValue(earning.notes ?? ""); }}>
+        <DialogTrigger asChild>{trigger}</DialogTrigger>
+        <DialogContent className="w-[94vw] max-w-md p-4">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-base">Modifier la note</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {earning.ticker} · {earning.quarter}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Textarea
+              className="text-sm min-h-[110px] resize-none"
+              placeholder="Ajouter une note..."
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+            />
+            <Button size="sm" onClick={handleSave}>Enregistrer</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (o) setValue(earning.notes ?? ""); }}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={`h-7 w-7 rounded-md ${earning.notes ? "text-foreground hover:bg-muted" : "text-muted-foreground/40 hover:text-muted-foreground"}`}
-        >
-          <MessageSquare className="h-3.5 w-3.5" />
-        </Button>
-      </PopoverTrigger>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       <PopoverContent side="left" className="w-64 p-3">
         <div className="grid gap-2">
           <Textarea
@@ -191,6 +242,14 @@ function NotePopover({ earning, onUpdateNote }: { earning: Earning; onUpdateNote
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function QuarterBadge({ quarter, isOutdated }: { quarter: string; isOutdated: boolean }) {
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded font-medium text-xs ${isOutdated ? "text-amber-400 bg-amber-500/15" : "text-emerald-400 bg-emerald-500/15"}`}>
+      {quarter}
+    </span>
   );
 }
 
@@ -236,7 +295,154 @@ function NoteCell({ note, isMobile }: { note: string | null; isMobile: boolean }
   );
 }
 
+function CriteriaMetric({
+  label,
+  value,
+  threshold,
+  inverse,
+  previousValue,
+}: {
+  label: string;
+  value: number | null;
+  threshold: number;
+  inverse?: boolean;
+  previousValue?: number | null;
+}) {
+  if (value == null) {
+    return (
+      <div className="rounded-md border border-border/60 bg-background/60 px-2.5 py-2">
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="mt-1 text-xs text-muted-foreground tabular-nums">—</p>
+      </div>
+    );
+  }
+
+  const pass = inverse ? value <= threshold : value >= threshold;
+
+  return (
+    <div className="rounded-md border border-border/60 bg-background/60 px-2.5 py-2">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <span className={`mt-1 inline-flex items-center gap-1 text-xs font-medium tabular-nums ${pass ? "text-emerald-500" : "text-rose-500"}`}>
+        {pass ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+        {value.toFixed(1)}{inverse ? "x" : "%"}
+        {previousValue !== undefined && <TrendIndicator current={value} previous={previousValue} inverse={inverse} />}
+      </span>
+    </div>
+  );
+}
+
+function MoatMetric({ value, className }: { value: boolean; className?: string }) {
+  return (
+    <div className={`rounded-md border border-border/60 bg-background/60 px-2.5 py-2 ${className || ""}`}>
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Moat</p>
+      <span className={`mt-1 inline-flex items-center gap-1 text-xs font-medium ${value ? "text-emerald-500" : "text-rose-500"}`}>
+        {value ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+        {value ? "Oui" : "Non"}
+      </span>
+    </div>
+  );
+}
+
+function NotePreview({ note }: { note: string | null }) {
+  if (!note) {
+    return <p className="text-xs text-muted-foreground">Aucune note.</p>;
+  }
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button type="button" className="block w-full truncate whitespace-nowrap text-left text-xs text-muted-foreground hover:text-foreground transition-colors">
+          {note}
+        </button>
+      </DialogTrigger>
+      <DialogContent className="w-[92vw] max-w-[92vw] sm:max-w-lg p-4">
+        <DialogHeader className="space-y-1">
+          <DialogTitle className="text-base">Note</DialogTitle>
+          <DialogDescription className="sr-only">Contenu complet de la note</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[62vh] overflow-y-auto text-sm whitespace-pre-wrap break-words leading-relaxed">
+          {renderNoteWithLinks(note)}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const statusOrder: Record<string, number> = { hold: 0, renforcer: 1, alleger: 2, sell: 3 };
+
+function MobileEarningCard({
+  earning,
+  previousEarning,
+  onEdit,
+  onDelete,
+  onUpdateNote,
+  currentQuarter,
+  portfolios,
+  isHistorical,
+}: {
+  earning: Earning;
+  previousEarning: Earning | null;
+  onEdit: (e: Earning) => void;
+  onDelete: (id: string) => void;
+  onUpdateNote: (id: string, notes: string | null) => void;
+  currentQuarter: string;
+  portfolios?: Set<string>;
+  isHistorical?: boolean;
+}) {
+  const score = calculateValidatedCriteria(earning);
+  const previousScore = previousEarning ? calculateValidatedCriteria(previousEarning) : undefined;
+  const currentQValue = quarterToSortValue(currentQuarter);
+  const earningQValue = quarterToSortValue(earning.quarter);
+  const isOutdated = earningQValue < currentQValue;
+
+  return (
+    <div className={`rounded-lg border px-3 py-3 ${isHistorical ? "bg-muted/20 border-border/50" : "bg-card/70 border-border/60"} ${isOutdated && !isHistorical ? "border-amber-500/40" : ""}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            {!isHistorical && <TickerLogo ticker={earning.ticker} />}
+            {isHistorical && <span className="text-xs text-muted-foreground">↳</span>}
+            <span className="font-semibold text-sm tracking-tight">{earning.ticker}</span>
+            <QuarterBadge quarter={earning.quarter} isOutdated={isOutdated} />
+          </div>
+          {!isHistorical && (
+            <div className="mt-1.5">
+              <PortfolioPills portfolios={portfolios} />
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <ScoreBadge score={score} previousScore={!isHistorical ? previousScore : undefined} />
+          <StatusBadge status={earning.status} />
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <CriteriaMetric label="CA" value={earning.revenue_growth} threshold={10} previousValue={!isHistorical ? previousEarning?.revenue_growth : undefined} />
+        <CriteriaMetric label="Marge OP" value={earning.operating_margin} threshold={20} previousValue={!isHistorical ? previousEarning?.operating_margin : undefined} />
+        <CriteriaMetric label="ROE" value={earning.roe} threshold={30} previousValue={!isHistorical ? previousEarning?.roe : undefined} />
+        <CriteriaMetric label="Dette/EBITDA" value={earning.debt_ebitda} threshold={1.5} inverse previousValue={!isHistorical ? previousEarning?.debt_ebitda : undefined} />
+        <MoatMetric value={earning.moat} className="col-span-2" />
+      </div>
+
+      <div className="mt-3 rounded-md border border-border/60 bg-background/40 px-2.5 py-2">
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Notes</p>
+        <div className="mt-1">
+          <NotePreview note={earning.notes} />
+        </div>
+        <div className="mt-2 flex items-center justify-end gap-1">
+          <NotePopover earning={earning} onUpdateNote={onUpdateNote} isMobile />
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(earning)}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(earning.id)}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function EarningRow({
   earning,
@@ -300,11 +506,7 @@ function EarningRow({
         <TableCell />
       )}
       <TableCell className="whitespace-nowrap">
-        {isOutdated ? (
-          <span className="inline-block px-2 py-0.5 rounded text-amber-400 bg-amber-500/15 font-medium text-xs">{earning.quarter}</span>
-        ) : (
-          <span className="inline-block px-2 py-0.5 rounded text-emerald-400 bg-emerald-500/15 font-medium text-xs">{earning.quarter}</span>
-        )}
+        <QuarterBadge quarter={earning.quarter} isOutdated={isOutdated} />
       </TableCell>
       <CriteriaCell value={earning.revenue_growth} threshold={10} previousValue={!isHistorical ? previousEarning?.revenue_growth : undefined} />
       <CriteriaCell value={earning.operating_margin} threshold={20} previousValue={!isHistorical ? previousEarning?.operating_margin : undefined} />
@@ -318,7 +520,7 @@ function EarningRow({
       <NoteCell note={earning.notes} isMobile={isMobile} />
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1">
-          <NotePopover earning={earning} onUpdateNote={onUpdateNote} />
+          <NotePopover earning={earning} onUpdateNote={onUpdateNote} isMobile={isMobile} />
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(earning)}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
@@ -397,32 +599,17 @@ export function EarningsTable({ earnings, allEarnings, onEdit, onDelete, onUpdat
     <div className="overflow-hidden">
       <div className="flex flex-col gap-2 border-b border-border/60 px-4 py-3 bg-muted/20 md:flex-row md:items-center md:justify-between">
         <p className="text-xs text-muted-foreground">
-          Cliquez sur les en-têtes pour trier. Dépliez un ticker pour voir l&apos;historique.
+          {isMobile
+            ? "Vue mobile simplifiée. Dépliez un ticker pour consulter l'historique."
+            : "Cliquez sur les en-têtes pour trier. Dépliez un ticker pour voir l'historique."}
         </p>
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
           <span className="inline-flex items-center gap-1 rounded-sm bg-amber-500/10 text-amber-400 px-1.5 py-0.5">Hors trimestre</span>
           <span className="inline-flex items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5">Historique</span>
         </div>
       </div>
-      <TooltipProvider delayDuration={120}>
-      <Table className="min-w-[1280px] text-[13px] [&_th]:px-3 [&_th]:py-2 [&_td]:px-3 [&_td]:py-2.5 [&_td]:align-middle">
-        <TableHeader>
-          <TableRow>
-            <SortableHead label="Ticker" sortKey="ticker" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-            <TableHead className={tableHeadClass}>Portefeuille(s)</TableHead>
-            <SortableHead label="Trimestre" sortKey="quarter" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
-            <SortableHead label="CA (>=10%)" sortKey="revenue_growth" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
-            <SortableHead label="Marge OP (>=20%)" sortKey="operating_margin" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
-            <SortableHead label="ROE (>=30%)" sortKey="roe" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
-            <SortableHead label="Dette/EBITDA (<=1.5)" sortKey="debt_ebitda" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
-            <TableHead className={`${tableHeadClass} text-center`}>Moat</TableHead>
-            <SortableHead label="Score" sortKey="score" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
-            <SortableHead label="Statut" sortKey="status" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
-            <TableHead className={`${tableHeadClass} w-[230px]`}>Notes</TableHead>
-            <TableHead className={`${tableHeadClass} text-right`}>Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody className="[&_tr:nth-child(even)]:bg-muted/[0.12]">
+      {isMobile ? (
+        <div className="space-y-3 p-3">
           {sorted.map((e) => {
             const history = tickerHistory.get(e.ticker) || [];
             const previousEarning = history.length > 1 ? history[1] : null;
@@ -430,28 +617,81 @@ export function EarningsTable({ earnings, allEarnings, onEdit, onDelete, onUpdat
             const hasHistory = history.length > 1;
 
             return (
-              <Fragment key={e.id}>
-                <EarningRow
+              <div key={e.id} className="space-y-2">
+                <MobileEarningCard
                   earning={e}
                   previousEarning={previousEarning}
-                  isExpanded={isExpanded}
-                  hasHistory={hasHistory}
-                  onToggle={() => toggleExpand(e.ticker)}
                   onEdit={onEdit}
                   onDelete={onDelete}
                   onUpdateNote={onUpdateNote}
                   currentQuarter={currentQuarter}
-                  tickerPortfolioMap={tickerPortfolioMap}
-                  isMobile={isMobile}
+                  portfolios={tickerPortfolioMap.get(e.ticker)}
                 />
-                {isExpanded && history.slice(1).map((histE, idx) => {
-                  const prevOfHist = history[idx + 2] || null;
-                  return (
+
+                {hasHistory && (
+                  <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground" onClick={() => toggleExpand(e.ticker)}>
+                    {isExpanded ? <ChevronDown className="h-3.5 w-3.5 mr-1" /> : <ChevronRight className="h-3.5 w-3.5 mr-1" />}
+                    {isExpanded ? "Masquer l'historique" : `Voir l'historique (${history.length - 1})`}
+                  </Button>
+                )}
+
+                {isExpanded && (
+                  <div className="space-y-2 border-l border-border/60 pl-3">
+                    {history.slice(1).map((histE, idx) => {
+                      const prevOfHist = history[idx + 2] || null;
+                      return (
+                        <MobileEarningCard
+                          key={histE.id}
+                          earning={histE}
+                          previousEarning={prevOfHist}
+                          onEdit={onEdit}
+                          onDelete={onDelete}
+                          onUpdateNote={onUpdateNote}
+                          currentQuarter={currentQuarter}
+                          isHistorical
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <TooltipProvider delayDuration={120}>
+          <Table className="min-w-[1280px] text-[13px] [&_th]:px-3 [&_th]:py-2 [&_td]:px-3 [&_td]:py-2.5 [&_td]:align-middle">
+            <TableHeader>
+              <TableRow>
+                <SortableHead label="Ticker" sortKey="ticker" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                <TableHead className={tableHeadClass}>Portefeuille(s)</TableHead>
+                <SortableHead label="Trimestre" sortKey="quarter" currentKey={sortKey} dir={sortDir} onSort={handleSort} />
+                <SortableHead label="CA (>=10%)" sortKey="revenue_growth" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+                <SortableHead label="Marge OP (>=20%)" sortKey="operating_margin" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+                <SortableHead label="ROE (>=30%)" sortKey="roe" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+                <SortableHead label="Dette/EBITDA (<=1.5)" sortKey="debt_ebitda" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+                <TableHead className={`${tableHeadClass} text-center`}>Moat</TableHead>
+                <SortableHead label="Score" sortKey="score" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+                <SortableHead label="Statut" sortKey="status" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="text-center" />
+                <TableHead className={`${tableHeadClass} w-[230px]`}>Notes</TableHead>
+                <TableHead className={`${tableHeadClass} text-right`}>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className="[&_tr:nth-child(even)]:bg-muted/[0.12]">
+              {sorted.map((e) => {
+                const history = tickerHistory.get(e.ticker) || [];
+                const previousEarning = history.length > 1 ? history[1] : null;
+                const isExpanded = expandedTickers.has(e.ticker);
+                const hasHistory = history.length > 1;
+
+                return (
+                  <Fragment key={e.id}>
                     <EarningRow
-                      key={histE.id}
-                      earning={histE}
-                      previousEarning={prevOfHist}
-                      isHistorical
+                      earning={e}
+                      previousEarning={previousEarning}
+                      isExpanded={isExpanded}
+                      hasHistory={hasHistory}
+                      onToggle={() => toggleExpand(e.ticker)}
                       onEdit={onEdit}
                       onDelete={onDelete}
                       onUpdateNote={onUpdateNote}
@@ -459,14 +699,30 @@ export function EarningsTable({ earnings, allEarnings, onEdit, onDelete, onUpdat
                       tickerPortfolioMap={tickerPortfolioMap}
                       isMobile={isMobile}
                     />
-                  );
-                })}
-              </Fragment>
-            );
-          })}
-        </TableBody>
-      </Table>
-      </TooltipProvider>
+                    {isExpanded && history.slice(1).map((histE, idx) => {
+                      const prevOfHist = history[idx + 2] || null;
+                      return (
+                        <EarningRow
+                          key={histE.id}
+                          earning={histE}
+                          previousEarning={prevOfHist}
+                          isHistorical
+                          onEdit={onEdit}
+                          onDelete={onDelete}
+                          onUpdateNote={onUpdateNote}
+                          currentQuarter={currentQuarter}
+                          tickerPortfolioMap={tickerPortfolioMap}
+                          isMobile={isMobile}
+                        />
+                      );
+                    })}
+                  </Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TooltipProvider>
+      )}
     </div>
   );
 }

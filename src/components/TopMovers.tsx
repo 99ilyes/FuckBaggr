@@ -33,7 +33,6 @@ interface AssetVariation {
     marketIndicatorPulseClass: string | null;
     isMarketOpen: boolean;
     sessionPhase: "pre" | "post" | null;
-    sessionLabel: string | null;
     sessionChangePercent: number;
     sessionChangeValue: number;
     sessionPrice: number | null;
@@ -145,12 +144,6 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
                     : postMarketPrice != null
                         ? "post"
                         : "pre";
-            const sessionLabel =
-                sessionPhase === "post"
-                    ? "Après clôture"
-                    : sessionPhase === "pre"
-                        ? "Pré-marché"
-                        : null;
             const sessionChangeValue = sessionPrice != null ? sessionPrice - asset.last_price : 0;
             const sessionChangePercent = asset.last_price !== 0 && sessionPrice != null
                 ? (sessionChangeValue / asset.last_price) * 100
@@ -170,7 +163,6 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
                 marketIndicatorPulseClass: indicator.pulseClass,
                 isMarketOpen,
                 sessionPhase,
-                sessionLabel,
                 sessionChangePercent,
                 sessionChangeValue,
                 sessionPrice,
@@ -201,10 +193,10 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
                             </>
                         )}
                     </div>
-                    {!item.isMarketOpen && item.sessionPhase && item.sessionPrice != null && item.sessionLabel && (
+                    {!item.isMarketOpen && item.sessionPhase && item.sessionPrice != null && (
                         <div className="flex items-baseline gap-2 text-[10px] tabular-nums">
                             <span className={`font-medium ${item.sessionPhase === "pre" ? "text-yellow-300/90" : "text-blue-300/90"}`}>
-                                {item.sessionLabel} {formatCurrency(item.sessionPrice, item.currency)}
+                                {formatCurrency(item.sessionPrice, item.currency)}
                             </span>
                             <span className={item.sessionChangePercent >= 0 ? "text-emerald-500/80" : "text-rose-500/80"}>
                                 ({item.sessionChangeValue > 0 ? "+" : ""}{formatCurrency(item.sessionChangeValue, item.currency)} · {formatPercent(item.sessionChangePercent)})
