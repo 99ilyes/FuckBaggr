@@ -82,6 +82,7 @@ const DEFAULT_TERMINAL_PE = 20;
 const DEFAULT_YEARS = 5;
 const DEFAULT_TARGET_RETURN = 10;
 const DEFAULT_VALUATION_MODEL: ValuationModel = "pe";
+const BILLION = 1_000_000_000;
 const COLOR_NEUTRAL = "text-foreground/85";
 const COLOR_SUBTLE = "text-foreground/70";
 const COLOR_POSITIVE = "text-emerald-400";
@@ -292,7 +293,7 @@ function parseValuationModel(value: unknown): ValuationModel | null {
 }
 
 function metricLabel(model: ValuationModel): string {
-  if (model === "fcf_per_share") return "FCF ann./action";
+  if (model === "fcf_per_share") return "FCF ann. (Md)";
   if (model === "ps") return "Ventes ann./action";
   return "EPS ann.";
 }
@@ -396,10 +397,10 @@ function calcImpliedReturn(
 function normalizeFundamentalsPayload(payload: unknown): Record<string, YFinanceData> {
   const source =
     payload &&
-    typeof payload === "object" &&
-    "results" in (payload as Record<string, unknown>) &&
-    (payload as Record<string, unknown>).results &&
-    typeof (payload as Record<string, unknown>).results === "object"
+      typeof payload === "object" &&
+      "results" in (payload as Record<string, unknown>) &&
+      (payload as Record<string, unknown>).results &&
+      typeof (payload as Record<string, unknown>).results === "object"
       ? ((payload as Record<string, unknown>).results as Record<string, unknown>)
       : (payload as Record<string, unknown> | null);
 
@@ -462,8 +463,8 @@ async function fetchAllQuotes(tickers: string[]): Promise<Record<string, TickerQ
     const computedPE = calcCurrentMultiple(quote.price ?? null, annualizedEps);
     const computedChangePercent =
       quote.price != null &&
-      quote.previousClose != null &&
-      quote.previousClose !== 0
+        quote.previousClose != null &&
+        quote.previousClose !== 0
         ? ((quote.price - quote.previousClose) / quote.previousClose) * 100
         : null;
 
@@ -651,11 +652,10 @@ function InlineMetric({
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className={`text-sm tabular-nums px-2 py-1 rounded transition-colors cursor-pointer ${
-          manualValue != null
+        className={`text-sm tabular-nums px-2 py-1 rounded transition-colors cursor-pointer ${manualValue != null
             ? "text-amber-300 hover:text-amber-200 hover:bg-amber-500/10"
             : "text-foreground/85 hover:text-foreground hover:bg-accent/60"
-        }`}
+          }`}
         title={manualValue != null ? `${label} manuel (cliquer pour modifier)` : `${label} auto (cliquer pour surcharger)`}
       >
         {displayed != null ? displayed.toFixed(2) : "—"}
@@ -1210,9 +1210,17 @@ export default function Watchlist() {
       const isCustom = !holdingSet.has(ticker);
       const params = fvParams[ticker] ?? null;
       const valuationModel = valuationModelByTicker[ticker] ?? DEFAULT_VALUATION_MODEL;
+      const shares =
+        q?.trailingRevenueShares != null && q.trailingRevenueShares > 0
+          ? q.trailingRevenueShares
+          : null;
+      const autoFcfTotalBillions =
+        q?.trailingFcfPerShare != null && shares != null
+          ? (q.trailingFcfPerShare * shares) / BILLION
+          : null;
       const autoMetric =
         valuationModel === "fcf_per_share"
-          ? resolveAnnualizedMetric(q?.trailingFcfPerShare ?? null)
+          ? resolveAnnualizedMetric(autoFcfTotalBillions)
           : valuationModel === "ps"
             ? resolveAnnualizedMetric(q?.trailingRevenuePerShare ?? null)
             : resolveAnnualizedMetric(q?.trailingEps ?? null);
@@ -1223,26 +1231,42 @@ export default function Watchlist() {
             ? (manualRevenuePerShare[ticker] ?? null)
             : (manualEps[ticker] ?? null);
       const effectiveMetric = manualMetric ?? autoMetric;
-      const psMarketCap =
+      const effectiveMetricForValuation =
+        valuationModel === "fcf_per_share"
+          ? effectiveMetric != null && shares != null
+            ? (effectiveMetric * BILLION) / shares
+            : null
+          : effectiveMetric;
+      const inferredMarketCap =
         q?.price != null &&
-          q.trailingRevenueShares != null &&
-          q.trailingRevenueShares > 0
-          ? q.price * q.trailingRevenueShares
+          shares != null
+          ? q.price * shares
           : null;
       const psFromTotals =
-        psMarketCap != null &&
+        inferredMarketCap != null &&
           q?.trailingTotalRevenue != null &&
           q.trailingTotalRevenue > 0
-          ? psMarketCap / q.trailingTotalRevenue
+          ? inferredMarketCap / q.trailingTotalRevenue
+          : null;
+      const fcfTotal =
+        valuationModel === "fcf_per_share" &&
+          effectiveMetric != null
+          ? effectiveMetric * BILLION
+          : null;
+      const pfcfFromTotals =
+        inferredMarketCap != null &&
+          fcfTotal != null &&
+          fcfTotal !== 0
+          ? inferredMarketCap / fcfTotal
           : null;
       const currentRatio =
         valuationModel === "fcf_per_share"
-          ? calcCurrentMultiple(q?.price ?? null, effectiveMetric)
+          ? pfcfFromTotals
           : valuationModel === "ps"
             ? psFromTotals
-          : calcCurrentMultiple(q?.price ?? null, effectiveMetric) ??
-          (valuationModel === "pe" ? (q?.trailingPE ?? null) : null);
-      const futurePrice = params ? calcFuturePrice(effectiveMetric, params) : null;
+            : calcCurrentMultiple(q?.price ?? null, effectiveMetric) ??
+            (valuationModel === "pe" ? (q?.trailingPE ?? null) : null);
+      const futurePrice = params ? calcFuturePrice(effectiveMetricForValuation, params) : null;
       const fairPrice = params ? calcFairPrice(futurePrice, targetReturn, params.years) : null;
       const impliedReturn = params ? calcImpliedReturn(q?.price ?? null, futurePrice, params.years) : null;
       const changeColor =
@@ -1391,11 +1415,10 @@ export default function Watchlist() {
                             <span className="font-semibold text-sm">{ticker}</span>
                             {!isCustom && <Briefcase className="h-3 w-3 text-primary" />}
                             <span
-                              className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
-                                hasValuation
+                              className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${hasValuation
                                   ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
                                   : "border-border/60 bg-muted/30 text-foreground/70"
-                              }`}
+                                }`}
                             >
                               {hasValuation ? "valorise" : "sans valo"}
                             </span>
@@ -1415,7 +1438,7 @@ export default function Watchlist() {
                       >
                         <X className="h-4 w-4" />
                       </Button>
-                      </div>
+                    </div>
 
                     <div className="mt-3 flex items-center justify-between rounded-md border border-border/60 px-2.5 py-2">
                       <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Modèle</span>
@@ -1670,11 +1693,10 @@ export default function Watchlist() {
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <span
-                                      className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
-                                        hasValuation
+                                      className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${hasValuation
                                           ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
                                           : "border-border/60 bg-muted/30 text-foreground/70"
-                                      }`}
+                                        }`}
                                     >
                                       {hasValuation ? "valorise" : "sans valo"}
                                     </span>

@@ -400,7 +400,7 @@ serve(async (req) => {
       supabase
         .from("assets_cache")
         .upsert(toUpsert, { onConflict: "ticker" })
-        .then(() => {});
+        .then(() => { });
     }
 
     return new Response(JSON.stringify({ results }), {
