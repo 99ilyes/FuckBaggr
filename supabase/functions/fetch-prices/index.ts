@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -13,10 +12,10 @@ const corsHeaders = {
 const YF_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-  "Accept": "application/json,text/plain,*/*",
+  Accept: "application/json,text/plain,*/*",
   "Accept-Language": "en-US,en;q=0.9",
-  "Origin": "https://finance.yahoo.com",
-  "Referer": "https://finance.yahoo.com/",
+  Origin: "https://finance.yahoo.com",
+  Referer: "https://finance.yahoo.com/",
 };
 
 function toFiniteNumber(value: unknown): number | null {
@@ -26,7 +25,7 @@ function toFiniteNumber(value: unknown): number | null {
 function getLastCloseInPeriod(
   timestamps: number[],
   closes: Array<number | null>,
-  period: { start?: number; end?: number } | undefined
+  period: { start?: number; end?: number } | undefined,
 ): number | null {
   if (!period) return null;
   const start = toFiniteNumber(period.start);
@@ -74,8 +73,7 @@ async function fetchYahoo(ticker: string): Promise<any | null> {
       post?: { start?: number; end?: number };
     };
 
-    const preMarketPrice =
-      toFiniteNumber(meta.preMarketPrice) ?? getLastCloseInPeriod(timestamps, closes, periods.pre);
+    const preMarketPrice = toFiniteNumber(meta.preMarketPrice) ?? getLastCloseInPeriod(timestamps, closes, periods.pre);
     const postMarketPrice =
       toFiniteNumber(meta.postMarketPrice) ?? getLastCloseInPeriod(timestamps, closes, periods.post);
     const regularLivePrice = getLastCloseInPeriod(timestamps, closes, periods.regular);
@@ -95,11 +93,9 @@ async function fetchYahoo(ticker: string): Promise<any | null> {
 
     const regularPrice = meta.regularMarketPrice as number;
     const price =
-      marketState === "REGULAR" || marketState === "OPEN"
-        ? (regularLivePrice ?? regularPrice)
-        : regularPrice;
+      marketState === "REGULAR" || marketState === "OPEN" ? (regularLivePrice ?? regularPrice) : regularPrice;
     const prevClose = (meta.chartPreviousClose ?? meta.previousClose ?? price) as number;
-    const change = (meta.regularMarketChange ?? (price - prevClose)) as number;
+    const change = (meta.regularMarketChange ?? price - prevClose) as number;
     const changePercent = (meta.regularMarketChangePercent ??
       (prevClose !== 0 ? (change / prevClose) * 100 : 0)) as number;
 
@@ -221,7 +217,7 @@ serve(async (req) => {
             trailingFcfPerShare: null,
             trailingRevenuePerShare: null,
           },
-        ])
+        ]),
       );
 
       // 1) Fundamentals timeseries endpoint (works without crumb for PE/EPS)
@@ -291,17 +287,9 @@ serve(async (req) => {
 
             const shares = trailingDilutedAverageShares ?? trailingBasicAverageShares;
             const trailingFcfPerShare =
-              shares != null &&
-                shares > 0 &&
-                trailingFreeCashFlow != null
-                ? trailingFreeCashFlow / shares
-                : null;
+              shares != null && shares > 0 && trailingFreeCashFlow != null ? trailingFreeCashFlow / shares : null;
             const trailingRevenuePerShare =
-              shares != null &&
-                shares > 0 &&
-                trailingTotalRevenue != null
-                ? trailingTotalRevenue / shares
-                : null;
+              shares != null && shares > 0 && trailingTotalRevenue != null ? trailingTotalRevenue / shares : null;
 
             fundResults[ticker] = {
               trailingPE,
@@ -314,10 +302,12 @@ serve(async (req) => {
           } catch (err) {
             console.warn(`[fetch-prices] fundamentals timeseries error for ${ticker}:`, err);
           }
-        })
+        }),
       );
 
-      console.info(`[fetch-prices] fundamentals computed for ${Object.keys(fundResults).length}/${uniqueTickers.length} tickers`);
+      console.info(
+        `[fetch-prices] fundamentals computed for ${Object.keys(fundResults).length}/${uniqueTickers.length} tickers`,
+      );
 
       return new Response(JSON.stringify({ results: fundResults }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -349,7 +339,7 @@ serve(async (req) => {
       uniqueTickers.map(async (t) => {
         const quote = await fetchYahoo(t);
         return { ticker: t, quote };
-      })
+      }),
     );
 
     const results: Record<string, any> = {};
@@ -403,13 +393,15 @@ serve(async (req) => {
       }));
 
     if (toUpsert.length > 0) {
-      supabase.from("assets_cache").upsert(toUpsert, { onConflict: "ticker" }).then(() => { });
+      supabase
+        .from("assets_cache")
+        .upsert(toUpsert, { onConflict: "ticker" })
+        .then(() => {});
     }
 
     return new Response(JSON.stringify({ results }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-
   } catch (err) {
     console.error("[fetch-prices] Unhandled error:", err);
     return new Response(JSON.stringify({ error: String(err) }), {
