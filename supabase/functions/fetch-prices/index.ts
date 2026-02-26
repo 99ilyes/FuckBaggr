@@ -211,7 +211,17 @@ serve(async (req) => {
 
       const uniqueTickers = [...new Set(tickers)] as string[];
       const fundResults: Record<string, any> = Object.fromEntries(
-        uniqueTickers.map((t) => [t, { trailingPE: null, forwardPE: null, trailingEps: null, forwardEps: null }])
+        uniqueTickers.map((t) => [
+          t,
+          {
+            trailingPE: null,
+            forwardPE: null,
+            trailingEps: null,
+            forwardEps: null,
+            trailingFcfPerShare: null,
+            trailingRevenuePerShare: null,
+          },
+        ])
       );
 
       // 1) Fundamentals timeseries endpoint (works without crumb for PE/EPS)
@@ -240,7 +250,7 @@ serve(async (req) => {
       await Promise.all(
         uniqueTickers.map(async (ticker: string) => {
           try {
-            const tsUrl = `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=trailingPeRatio,trailingDilutedEPS,trailingBasicEPS&period1=${period1}&period2=${period2}`;
+            const tsUrl = `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=trailingPeRatio,trailingDilutedEPS,trailingBasicEPS,trailingFreeCashFlow,trailingTotalRevenue,trailingDilutedAverageShares,trailingBasicAverageShares&period1=${period1}&period2=${period2}`;
             const tsResp = await fetch(tsUrl, {
               headers: YF_HEADERS,
               signal: AbortSignal.timeout(7000),
@@ -254,6 +264,10 @@ serve(async (req) => {
 
             let trailingPE: number | null = null;
             let trailingEps: number | null = null;
+            let trailingFreeCashFlow: number | null = null;
+            let trailingTotalRevenue: number | null = null;
+            let trailingDilutedAverageShares: number | null = null;
+            let trailingBasicAverageShares: number | null = null;
 
             for (const item of series) {
               const type = item?.meta?.type?.[0];
@@ -264,14 +278,38 @@ serve(async (req) => {
                 trailingEps = getLatestRaw(item?.trailingDilutedEPS, true);
               } else if (type === "trailingBasicEPS" && trailingEps == null) {
                 trailingEps = getLatestRaw(item?.trailingBasicEPS, true);
+              } else if (type === "trailingFreeCashFlow") {
+                trailingFreeCashFlow = getLatestRaw(item?.trailingFreeCashFlow, true);
+              } else if (type === "trailingTotalRevenue") {
+                trailingTotalRevenue = getLatestRaw(item?.trailingTotalRevenue, true);
+              } else if (type === "trailingDilutedAverageShares") {
+                trailingDilutedAverageShares = getLatestRaw(item?.trailingDilutedAverageShares, true);
+              } else if (type === "trailingBasicAverageShares") {
+                trailingBasicAverageShares = getLatestRaw(item?.trailingBasicAverageShares, true);
               }
             }
+
+            const shares = trailingDilutedAverageShares ?? trailingBasicAverageShares;
+            const trailingFcfPerShare =
+              shares != null &&
+                shares > 0 &&
+                trailingFreeCashFlow != null
+                ? trailingFreeCashFlow / shares
+                : null;
+            const trailingRevenuePerShare =
+              shares != null &&
+                shares > 0 &&
+                trailingTotalRevenue != null
+                ? trailingTotalRevenue / shares
+                : null;
 
             fundResults[ticker] = {
               trailingPE,
               forwardPE: null,
               trailingEps,
               forwardEps: null,
+              trailingFcfPerShare,
+              trailingRevenuePerShare,
             };
           } catch (err) {
             console.warn(`[fetch-prices] fundamentals timeseries error for ${ticker}:`, err);

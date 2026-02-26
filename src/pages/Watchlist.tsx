@@ -34,6 +34,8 @@ interface TickerQuote {
   currency: string;
   trailingPE: number | null;
   trailingEps: number | null;
+  trailingFcfPerShare: number | null;
+  trailingRevenuePerShare: number | null;
   changePercent: number | null;
 }
 
@@ -45,17 +47,20 @@ interface SearchResult {
 }
 
 interface FairValueParams {
-  growth: number; // estimated EPS CAGR in % (e.g. 15 = 15%/an)
-  terminalPE: number; // target exit PE multiple
+  growth: number; // estimated metric CAGR in % (e.g. 15 = 15%/an)
+  terminalPE: number; // target exit multiple
   years: number; // projection horizon in years
 }
 
 interface YFinanceData {
   trailingPE: number | null;
   trailingEps: number | null;
+  trailingFcfPerShare: number | null;
+  trailingRevenuePerShare: number | null;
 }
 
 type ImpliedReturnSort = "none" | "desc" | "asc";
+type ValuationModel = "pe" | "pfcf" | "ps";
 
 // ─── Constants ───────────────────────────────────────────────────────
 
@@ -65,11 +70,15 @@ const HIDDEN_KEY = "watchlist-hidden-tickers";
 const FV_PARAMS_KEY = "watchlist-fv-params";
 const TARGET_RETURN_KEY = "watchlist-target-return";
 const MANUAL_EPS_KEY = "watchlist-manual-eps";
+const MANUAL_FCF_PER_SHARE_KEY = "watchlist-manual-fcf-per-share";
+const MANUAL_REVENUE_PER_SHARE_KEY = "watchlist-manual-revenue-per-share";
+const VALUATION_MODEL_KEY = "watchlist-valuation-model";
 const WATCHLIST_META_TICKER = "__WATCHLIST_SETTINGS__";
 const DEFAULT_GROWTH = 10;
 const DEFAULT_TERMINAL_PE = 20;
 const DEFAULT_YEARS = 5;
 const DEFAULT_TARGET_RETURN = 10;
+const DEFAULT_VALUATION_MODEL: ValuationModel = "pe";
 const COLOR_NEUTRAL = "text-foreground/85";
 const COLOR_SUBTLE = "text-foreground/70";
 const COLOR_POSITIVE = "text-emerald-400";
@@ -80,6 +89,9 @@ interface WatchlistTickerMeta {
   custom?: boolean;
   hidden?: boolean;
   manualEps?: boolean;
+  valuationModel?: ValuationModel;
+  manualFcfPerShare?: number;
+  manualRevenuePerShare?: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -154,8 +166,32 @@ function saveTargetReturn(value: number) {
 }
 
 function loadManualEps(): Record<string, number> {
+  return loadManualValues(MANUAL_EPS_KEY);
+}
+
+function saveManualEps(values: Record<string, number>) {
+  saveManualValues(MANUAL_EPS_KEY, values);
+}
+
+function loadManualFcfPerShare(): Record<string, number> {
+  return loadManualValues(MANUAL_FCF_PER_SHARE_KEY);
+}
+
+function saveManualFcfPerShare(values: Record<string, number>) {
+  saveManualValues(MANUAL_FCF_PER_SHARE_KEY, values);
+}
+
+function loadManualRevenuePerShare(): Record<string, number> {
+  return loadManualValues(MANUAL_REVENUE_PER_SHARE_KEY);
+}
+
+function saveManualRevenuePerShare(values: Record<string, number>) {
+  saveManualValues(MANUAL_REVENUE_PER_SHARE_KEY, values);
+}
+
+function loadManualValues(storageKey: string): Record<string, number> {
   try {
-    const raw = localStorage.getItem(MANUAL_EPS_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
@@ -172,9 +208,35 @@ function loadManualEps(): Record<string, number> {
   }
 }
 
-function saveManualEps(values: Record<string, number>) {
+function saveManualValues(storageKey: string, values: Record<string, number>) {
   try {
-    localStorage.setItem(MANUAL_EPS_KEY, JSON.stringify(values));
+    localStorage.setItem(storageKey, JSON.stringify(values));
+  } catch {
+    // Ignore local storage write errors (private mode, quota, etc.)
+  }
+}
+
+function loadValuationModels(): Record<string, ValuationModel> {
+  try {
+    const raw = localStorage.getItem(VALUATION_MODEL_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+
+    const out: Record<string, ValuationModel> = {};
+    for (const [ticker, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const model = parseValuationModel(value);
+      if (model) out[ticker] = model;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveValuationModels(values: Record<string, ValuationModel>) {
+  try {
+    localStorage.setItem(VALUATION_MODEL_KEY, JSON.stringify(values));
   } catch {
     // Ignore local storage write errors (private mode, quota, etc.)
   }
@@ -205,14 +267,36 @@ function toFiniteNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function roundTo(value: number, decimals = 6): number {
+  const factor = 10 ** decimals;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
 function toPercentFromDb(value: unknown, fallback: number): number {
   const n = toFiniteNumber(value);
   if (n == null) return fallback;
-  return Math.abs(n) <= 1 ? n * 100 : n;
+  return roundTo(Math.abs(n) <= 1 ? n * 100 : n);
 }
 
 function toDecimalPercent(value: number): number {
-  return value / 100;
+  return roundTo(value / 100);
+}
+
+function parseValuationModel(value: unknown): ValuationModel | null {
+  if (value === "pe" || value === "pfcf" || value === "ps") return value;
+  return null;
+}
+
+function modelLabel(model: ValuationModel): string {
+  if (model === "pfcf") return "P/FCF";
+  if (model === "ps") return "P/S";
+  return "PER";
+}
+
+function metricLabel(model: ValuationModel): string {
+  if (model === "pfcf") return "FCF ann./action";
+  if (model === "ps") return "Ventes ann./action";
+  return "EPS ann.";
 }
 
 function parseTickerMeta(notes: string | null): WatchlistTickerMeta {
@@ -222,10 +306,15 @@ function parseTickerMeta(notes: string | null): WatchlistTickerMeta {
     const parsed = JSON.parse(notes);
     if (!parsed || typeof parsed !== "object") return {};
     const obj = parsed as Record<string, unknown>;
+    const manualFcfPerShare = toFiniteNumber(obj.manualFcfPerShare);
+    const manualRevenuePerShare = toFiniteNumber(obj.manualRevenuePerShare);
     return {
       custom: typeof obj.custom === "boolean" ? obj.custom : undefined,
       hidden: typeof obj.hidden === "boolean" ? obj.hidden : undefined,
       manualEps: typeof obj.manualEps === "boolean" ? obj.manualEps : undefined,
+      valuationModel: parseValuationModel(obj.valuationModel) ?? undefined,
+      manualFcfPerShare: manualFcfPerShare ?? undefined,
+      manualRevenuePerShare: manualRevenuePerShare ?? undefined,
     };
   } catch {
     return {};
@@ -236,43 +325,43 @@ function serializeTickerMeta(meta: WatchlistTickerMeta): string {
   return JSON.stringify(meta);
 }
 
-/** EPS futur = EPS actuel × (1 + CAGR)^horizon */
-function calcFutureEps(
-  eps: number | null,
+/** Metrique future = metrique actuelle × (1 + CAGR)^horizon */
+function calcFutureMetric(
+  metric: number | null,
   growth: number,
   years: number
 ): number | null {
-  if (eps == null || years <= 0) return null;
+  if (metric == null || years <= 0) return null;
   const g = growth / 100;
   if (g <= -1) return null;
-  return eps * Math.pow(1 + g, years);
+  return metric * Math.pow(1 + g, years);
 }
 
-/** PER courant = Prix actuel / EPS annualise */
-function calcCurrentPE(
+/** Multiple courant = Prix actuel / metrique annualisee */
+function calcCurrentMultiple(
   price: number | null,
-  eps: number | null
+  metric: number | null
 ): number | null {
-  if (price == null || eps == null || price <= 0 || eps === 0) return null;
-  return price / eps;
+  if (price == null || metric == null || price <= 0 || metric === 0) return null;
+  return price / metric;
 }
 
-/** EPS annualise (BPA TTM - 12 derniers mois). */
-function resolveAnnualizedEps(trailingEps: number | null): number | null {
-  if (trailingEps != null && Number.isFinite(trailingEps)) {
-    return trailingEps;
+/** Metrique annualisee: utilise la valeur TTM fournie par l'API. */
+function resolveAnnualizedMetric(value: number | null): number | null {
+  if (value != null && Number.isFinite(value)) {
+    return value;
   }
   return null;
 }
 
-/** Prix futur = EPS_futur × PER_cible */
+/** Prix futur = Metrique_future × multiple_cible */
 function calcFuturePrice(
-  eps: number | null,
+  metric: number | null,
   params: FairValueParams
 ): number | null {
-  const futureEps = calcFutureEps(eps, params.growth, params.years);
-  if (futureEps == null || params.terminalPE <= 0) return null;
-  return futureEps * params.terminalPE;
+  const futureMetric = calcFutureMetric(metric, params.growth, params.years);
+  if (futureMetric == null || params.terminalPE <= 0) return null;
+  return futureMetric * params.terminalPE;
 }
 
 /** Prix juste = Prix futur / (1 + rendement cible)^horizon */
@@ -318,29 +407,44 @@ function normalizeFundamentalsPayload(payload: unknown): Record<string, YFinance
     out[ticker] = {
       trailingPE: typeof v.trailingPE === "number" ? v.trailingPE : null,
       trailingEps: typeof v.trailingEps === "number" ? v.trailingEps : null,
+      trailingFcfPerShare: typeof v.trailingFcfPerShare === "number" ? v.trailingFcfPerShare : null,
+      trailingRevenuePerShare: typeof v.trailingRevenuePerShare === "number" ? v.trailingRevenuePerShare : null,
     };
   }
   return out;
 }
 
-/** Browser fallback for fundamentals via Yahoo fundamentals-timeseries endpoint. */
+/** Browser fallback fundamentals (used only when backend payload is partial). */
 async function fetchFundamentalsBrowser(ticker: string): Promise<YFinanceData> {
   try {
     const baseUrl = import.meta.env.DEV ? "/api/yf" : "https://query1.finance.yahoo.com";
     const period2 = Math.floor(Date.now() / 1000);
     const period1 = period2 - 60 * 60 * 24 * 365 * 3;
-    const url = `${baseUrl}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=trailingPeRatio,trailingDilutedEPS,trailingBasicEPS&period1=${period1}&period2=${period2}`;
+    const url = `${baseUrl}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=trailingPeRatio,trailingDilutedEPS,trailingBasicEPS,trailingFreeCashFlow,trailingTotalRevenue,trailingDilutedAverageShares,trailingBasicAverageShares&period1=${period1}&period2=${period2}`;
 
     const resp = await fetch(url, {
       signal: AbortSignal.timeout(YAHOO_TIMEOUT + 2000),
       headers: { Accept: "application/json" },
     });
-
-    if (!resp.ok) return { trailingPE: null, trailingEps: null };
+    if (!resp.ok) {
+      return {
+        trailingPE: null,
+        trailingEps: null,
+        trailingFcfPerShare: null,
+        trailingRevenuePerShare: null,
+      };
+    }
 
     const json = await resp.json();
     const series = json?.timeseries?.result;
-    if (!Array.isArray(series)) return { trailingPE: null, trailingEps: null };
+    if (!Array.isArray(series)) {
+      return {
+        trailingPE: null,
+        trailingEps: null,
+        trailingFcfPerShare: null,
+        trailingRevenuePerShare: null,
+      };
+    }
 
     const getLatestRaw = (arr: unknown, requireTTM = false): number | null => {
       if (!Array.isArray(arr) || arr.length === 0) return null;
@@ -370,6 +474,10 @@ async function fetchFundamentalsBrowser(ticker: string): Promise<YFinanceData> {
 
     let trailingPE: number | null = null;
     let trailingEps: number | null = null;
+    let trailingFreeCashFlow: number | null = null;
+    let trailingTotalRevenue: number | null = null;
+    let trailingDilutedAverageShares: number | null = null;
+    let trailingBasicAverageShares: number | null = null;
 
     for (const item of series) {
       const type = (item as { meta?: { type?: string[] } })?.meta?.type?.[0];
@@ -380,17 +488,41 @@ async function fetchFundamentalsBrowser(ticker: string): Promise<YFinanceData> {
         trailingEps = getLatestRaw((item as { trailingDilutedEPS?: unknown[] }).trailingDilutedEPS, true);
       } else if (type === "trailingBasicEPS" && trailingEps == null) {
         trailingEps = getLatestRaw((item as { trailingBasicEPS?: unknown[] }).trailingBasicEPS, true);
+      } else if (type === "trailingFreeCashFlow") {
+        trailingFreeCashFlow = getLatestRaw((item as { trailingFreeCashFlow?: unknown[] }).trailingFreeCashFlow, true);
+      } else if (type === "trailingTotalRevenue") {
+        trailingTotalRevenue = getLatestRaw((item as { trailingTotalRevenue?: unknown[] }).trailingTotalRevenue, true);
+      } else if (type === "trailingDilutedAverageShares") {
+        trailingDilutedAverageShares = getLatestRaw((item as { trailingDilutedAverageShares?: unknown[] }).trailingDilutedAverageShares, true);
+      } else if (type === "trailingBasicAverageShares") {
+        trailingBasicAverageShares = getLatestRaw((item as { trailingBasicAverageShares?: unknown[] }).trailingBasicAverageShares, true);
       }
     }
 
-    return { trailingPE, trailingEps };
+    const shares = trailingDilutedAverageShares ?? trailingBasicAverageShares;
+    const trailingFcfPerShare =
+      shares != null && shares > 0 && trailingFreeCashFlow != null
+        ? trailingFreeCashFlow / shares
+        : null;
+    const trailingRevenuePerShare =
+      shares != null && shares > 0 && trailingTotalRevenue != null
+        ? trailingTotalRevenue / shares
+        : null;
+
+    return { trailingPE, trailingEps, trailingFcfPerShare, trailingRevenuePerShare };
   } catch {
-    return { trailingPE: null, trailingEps: null };
+    return {
+      trailingPE: null,
+      trailingEps: null,
+      trailingFcfPerShare: null,
+      trailingRevenuePerShare: null,
+    };
   }
 }
 
-/** Fetch PE + EPS ratios via backend, then fallback to browser Yahoo v10 if empty/missing. */
+/** Fetch fundamentals via backend API first, then patch missing fields with browser fallback if needed. */
 async function fetchFundamentals(tickers: string[]): Promise<Record<string, YFinanceData>> {
+  if (tickers.length === 0) return {};
   const merged: Record<string, YFinanceData> = {};
 
   try {
@@ -399,27 +531,39 @@ async function fetchFundamentals(tickers: string[]): Promise<Record<string, YFin
       body: { tickers, mode: "fundamentals" },
     });
 
-    if (!error) {
-      Object.assign(merged, normalizeFundamentalsPayload(data));
-    } else {
+    if (error) {
       console.warn("[Watchlist] Edge Function fundamentals error:", error);
+    } else {
+      Object.assign(merged, normalizeFundamentalsPayload(data));
     }
   } catch (err) {
     console.warn("[Watchlist] Edge Function fundamentals failed:", err);
   }
 
-  const missingTickers = tickers.filter((t) => !(t in merged));
-  if (missingTickers.length === 0) return merged;
-  // In hosted previews, external Yahoo browser calls are often blocked.
-  // Keep production on edge-only fundamentals and skip browser fallback.
-  if (import.meta.env.PROD) return merged;
+  const missing = tickers.filter((ticker) => {
+    const fund = merged[ticker];
+    return (
+      !fund ||
+      fund.trailingEps == null ||
+      fund.trailingFcfPerShare == null ||
+      fund.trailingRevenuePerShare == null
+    );
+  });
+
+  if (missing.length === 0) return merged;
 
   const browserFallback = await Promise.all(
-    missingTickers.map(async (ticker) => [ticker, await fetchFundamentalsBrowser(ticker)] as const)
+    missing.map(async (ticker) => [ticker, await fetchFundamentalsBrowser(ticker)] as const)
   );
 
-  for (const [ticker, fund] of browserFallback) {
-    merged[ticker] = fund;
+  for (const [ticker, fallback] of browserFallback) {
+    const current = merged[ticker];
+    merged[ticker] = {
+      trailingPE: current?.trailingPE ?? fallback.trailingPE,
+      trailingEps: current?.trailingEps ?? fallback.trailingEps,
+      trailingFcfPerShare: current?.trailingFcfPerShare ?? fallback.trailingFcfPerShare,
+      trailingRevenuePerShare: current?.trailingRevenuePerShare ?? fallback.trailingRevenuePerShare,
+    };
   }
 
   return merged;
@@ -439,8 +583,10 @@ async function fetchAllQuotes(tickers: string[]): Promise<Record<string, TickerQ
     if (!quote) continue;
 
     const fund = fundMap[ticker];
-    const annualizedEps = resolveAnnualizedEps(fund?.trailingEps ?? null);
-    const computedPE = calcCurrentPE(quote.price ?? null, annualizedEps);
+    const annualizedEps = resolveAnnualizedMetric(fund?.trailingEps ?? null);
+    const annualizedFcfPerShare = resolveAnnualizedMetric(fund?.trailingFcfPerShare ?? null);
+    const annualizedRevenuePerShare = resolveAnnualizedMetric(fund?.trailingRevenuePerShare ?? null);
+    const computedPE = calcCurrentMultiple(quote.price ?? null, annualizedEps);
     const computedChangePercent =
       quote.price != null &&
       quote.previousClose != null &&
@@ -455,6 +601,8 @@ async function fetchAllQuotes(tickers: string[]): Promise<Record<string, TickerQ
       currency: quote.currency ?? "USD",
       trailingPE: computedPE ?? fund?.trailingPE ?? null,
       trailingEps: annualizedEps,
+      trailingFcfPerShare: annualizedFcfPerShare,
+      trailingRevenuePerShare: annualizedRevenuePerShare,
       changePercent: quote.changePercent ?? computedChangePercent,
     };
   }
@@ -529,7 +677,7 @@ function InlineNum({
   const commit = () => {
     const n = parseFloat(draft);
     if (!isNaN(n) && n >= min && n <= max) {
-      onChange(n);
+      onChange(roundTo(n));
     }
     setEditing(false);
   };
@@ -560,19 +708,21 @@ function InlineNum({
       onClick={() => setEditing(true)}
       className="text-sm tabular-nums text-foreground/85 hover:text-foreground hover:bg-accent/60 px-2 py-1 rounded transition-colors cursor-pointer"
     >
-      {value}{suffix}
+      {roundTo(value)}{suffix}
     </button>
   );
 }
 
-function InlineEps({
+function InlineMetric({
   autoValue,
   manualValue,
   onChange,
+  label,
 }: {
   autoValue: number | null;
   manualValue: number | null;
   onChange: (v: number | null) => void;
+  label: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -631,7 +781,7 @@ function InlineEps({
             ? "text-amber-300 hover:text-amber-200 hover:bg-amber-500/10"
             : "text-foreground/85 hover:text-foreground hover:bg-accent/60"
         }`}
-        title={manualValue != null ? "BPA manuel (cliquer pour modifier)" : "BPA TTM auto (cliquer pour surcharger)"}
+        title={manualValue != null ? `${label} manuel (cliquer pour modifier)` : `${label} auto (cliquer pour surcharger)`}
       >
         {displayed != null ? displayed.toFixed(2) : "—"}
       </button>
@@ -640,12 +790,35 @@ function InlineEps({
           type="button"
           onClick={() => onChange(null)}
           className="text-[10px] uppercase tracking-wide text-foreground/70 hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent/60"
-          title="Revenir au BPA TTM automatique"
+          title={`Revenir au ${label} automatique`}
         >
           auto
         </button>
       )}
     </div>
+  );
+}
+
+function InlineModel({
+  value,
+  onChange,
+}: {
+  value: ValuationModel;
+  onChange: (v: ValuationModel) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => {
+        const next = parseValuationModel(e.target.value);
+        if (next) onChange(next);
+      }}
+      className="h-7 rounded border border-border/60 bg-background px-2 text-xs text-foreground/85 outline-none focus:ring-1 focus:ring-primary"
+    >
+      <option value="pe">PER</option>
+      <option value="pfcf">P/FCF</option>
+      <option value="ps">P/S</option>
+    </select>
   );
 }
 
@@ -773,6 +946,9 @@ export default function Watchlist() {
   const [fvParams, setFvParams] = useState<Record<string, FairValueParams>>(loadFVParams);
   const [targetReturn, setTargetReturn] = useState<number>(loadTargetReturn);
   const [manualEps, setManualEps] = useState<Record<string, number>>(loadManualEps);
+  const [manualFcfPerShare, setManualFcfPerShare] = useState<Record<string, number>>(loadManualFcfPerShare);
+  const [manualRevenuePerShare, setManualRevenuePerShare] = useState<Record<string, number>>(loadManualRevenuePerShare);
+  const [valuationModelByTicker, setValuationModelByTicker] = useState<Record<string, ValuationModel>>(loadValuationModels);
   const [impliedSort, setImpliedSort] = useState<ImpliedReturnSort>("desc");
   const [cloudLoaded, setCloudLoaded] = useState(false);
   const cloudTickersRef = useRef<Set<string>>(new Set());
@@ -796,6 +972,9 @@ export default function Watchlist() {
         const nextHidden = new Set<string>();
         const nextFv: Record<string, FairValueParams> = {};
         const nextManual: Record<string, number> = {};
+        const nextManualFcf: Record<string, number> = {};
+        const nextManualRevenue: Record<string, number> = {};
+        const nextModels: Record<string, ValuationModel> = {};
         let nextTarget: number | null = null;
 
         for (const row of data) {
@@ -814,6 +993,10 @@ export default function Watchlist() {
 
           if (isCustom) nextCustom.add(row.ticker);
           if (isHidden) nextHidden.add(row.ticker);
+          const model = meta.valuationModel ?? DEFAULT_VALUATION_MODEL;
+          if (model !== DEFAULT_VALUATION_MODEL) {
+            nextModels[row.ticker] = model;
+          }
 
           if (row.eps_growth != null || row.terminal_pe != null || row.years != null) {
             const growth = toPercentFromDb(row.eps_growth, DEFAULT_GROWTH);
@@ -830,6 +1013,12 @@ export default function Watchlist() {
           if ((meta.manualEps === true || hasLegacyManualValue) && manual != null) {
             nextManual[row.ticker] = manual;
           }
+          if (meta.manualFcfPerShare != null) {
+            nextManualFcf[row.ticker] = meta.manualFcfPerShare;
+          }
+          if (meta.manualRevenuePerShare != null) {
+            nextManualRevenue[row.ticker] = meta.manualRevenuePerShare;
+          }
 
           if (nextTarget == null && row.min_return != null) {
             nextTarget = toPercentFromDb(row.min_return, DEFAULT_TARGET_RETURN);
@@ -842,6 +1031,9 @@ export default function Watchlist() {
           setHiddenTickers(Array.from(nextHidden));
           setFvParams(nextFv);
           setManualEps(nextManual);
+          setManualFcfPerShare(nextManualFcf);
+          setManualRevenuePerShare(nextManualRevenue);
+          setValuationModelByTicker(nextModels);
           if (nextTarget != null) setTargetReturn(nextTarget);
         }
 
@@ -869,6 +1061,9 @@ export default function Watchlist() {
     saveFVParams(fvParams);
     saveTargetReturn(targetReturn);
     saveManualEps(manualEps);
+    saveManualFcfPerShare(manualFcfPerShare);
+    saveManualRevenuePerShare(manualRevenuePerShare);
+    saveValuationModels(valuationModelByTicker);
 
     const timer = setTimeout(async () => {
       try {
@@ -879,12 +1074,18 @@ export default function Watchlist() {
           ...hiddenTickers,
           ...Object.keys(fvParams),
           ...Object.keys(manualEps),
+          ...Object.keys(manualFcfPerShare),
+          ...Object.keys(manualRevenuePerShare),
+          ...Object.keys(valuationModelByTicker),
         ]));
         const nowIso = new Date().toISOString();
 
         const rowsToUpsert: TablesInsert<"watchlist_valuations">[] = trackedTickers.map((ticker) => {
           const params = fvParams[ticker];
           const manual = manualEps[ticker];
+          const manualFcf = manualFcfPerShare[ticker];
+          const manualRevenue = manualRevenuePerShare[ticker];
+          const valuationModel = valuationModelByTicker[ticker] ?? DEFAULT_VALUATION_MODEL;
 
           return {
             ticker,
@@ -897,6 +1098,9 @@ export default function Watchlist() {
               custom: customTickerSet.has(ticker),
               hidden: hiddenTickerSet.has(ticker),
               manualEps: Number.isFinite(manual),
+              valuationModel,
+              manualFcfPerShare: Number.isFinite(manualFcf) ? manualFcf : undefined,
+              manualRevenuePerShare: Number.isFinite(manualRevenue) ? manualRevenue : undefined,
             }),
             updated_at: nowIso,
           };
@@ -937,7 +1141,17 @@ export default function Watchlist() {
     }, 700);
 
     return () => clearTimeout(timer);
-  }, [cloudLoaded, customTickers, hiddenTickers, fvParams, targetReturn, manualEps]);
+  }, [
+    cloudLoaded,
+    customTickers,
+    hiddenTickers,
+    fvParams,
+    targetReturn,
+    manualEps,
+    manualFcfPerShare,
+    manualRevenuePerShare,
+    valuationModelByTicker,
+  ]);
 
   // Compute unique tickers with positive holdings (from portfolio)
   const holdingTickers = useMemo(() => {
@@ -1020,6 +1234,24 @@ export default function Watchlist() {
       delete next[ticker];
       return next;
     });
+    setManualFcfPerShare((prev) => {
+      if (!(ticker in prev)) return prev;
+      const next = { ...prev };
+      delete next[ticker];
+      return next;
+    });
+    setManualRevenuePerShare((prev) => {
+      if (!(ticker in prev)) return prev;
+      const next = { ...prev };
+      delete next[ticker];
+      return next;
+    });
+    setValuationModelByTicker((prev) => {
+      if (!(ticker in prev)) return prev;
+      const next = { ...prev };
+      delete next[ticker];
+      return next;
+    });
   };
 
   const updateFVParam = (ticker: string, key: keyof FairValueParams, value: number) => {
@@ -1048,8 +1280,25 @@ export default function Watchlist() {
     setTargetReturn(value);
   };
 
-  const updateManualEps = (ticker: string, value: number | null) => {
-    setManualEps((prev) => {
+  const updateValuationModel = (ticker: string, model: ValuationModel) => {
+    setValuationModelByTicker((prev) => {
+      if (model === DEFAULT_VALUATION_MODEL) {
+        if (!(ticker in prev)) return prev;
+        const next = { ...prev };
+        delete next[ticker];
+        return next;
+      }
+      if (prev[ticker] === model) return prev;
+      return { ...prev, [ticker]: model };
+    });
+  };
+
+  const updateManualMetricMap = (
+    setter: (updater: (prev: Record<string, number>) => Record<string, number>) => void,
+    ticker: string,
+    value: number | null
+  ) => {
+    setter((prev) => {
       const next = { ...prev };
       if (value == null || !Number.isFinite(value)) {
         delete next[ticker];
@@ -1058,6 +1307,18 @@ export default function Watchlist() {
       }
       return next;
     });
+  };
+
+  const updateManualMetric = (ticker: string, model: ValuationModel, value: number | null) => {
+    if (model === "pfcf") {
+      updateManualMetricMap(setManualFcfPerShare, ticker, value);
+      return;
+    }
+    if (model === "ps") {
+      updateManualMetricMap(setManualRevenuePerShare, ticker, value);
+      return;
+    }
+    updateManualMetricMap(setManualEps, ticker, value);
   };
 
   const toggleImpliedSort = () => {
@@ -1073,11 +1334,24 @@ export default function Watchlist() {
       const q = quotes[ticker];
       const isCustom = !holdingSet.has(ticker);
       const params = fvParams[ticker] ?? null;
-      const autoEps = resolveAnnualizedEps(q?.trailingEps ?? null);
-      const manualValue = manualEps[ticker] ?? null;
-      const effectiveEps = manualValue ?? autoEps;
-      const currentPE = calcCurrentPE(q?.price ?? null, effectiveEps) ?? q?.trailingPE ?? null;
-      const futurePrice = params ? calcFuturePrice(effectiveEps, params) : null;
+      const valuationModel = valuationModelByTicker[ticker] ?? DEFAULT_VALUATION_MODEL;
+      const autoMetric =
+        valuationModel === "pfcf"
+          ? resolveAnnualizedMetric(q?.trailingFcfPerShare ?? null)
+          : valuationModel === "ps"
+            ? resolveAnnualizedMetric(q?.trailingRevenuePerShare ?? null)
+            : resolveAnnualizedMetric(q?.trailingEps ?? null);
+      const manualMetric =
+        valuationModel === "pfcf"
+          ? (manualFcfPerShare[ticker] ?? null)
+          : valuationModel === "ps"
+            ? (manualRevenuePerShare[ticker] ?? null)
+            : (manualEps[ticker] ?? null);
+      const effectiveMetric = manualMetric ?? autoMetric;
+      const currentMultiple =
+        calcCurrentMultiple(q?.price ?? null, effectiveMetric) ??
+        (valuationModel === "pe" ? (q?.trailingPE ?? null) : null);
+      const futurePrice = params ? calcFuturePrice(effectiveMetric, params) : null;
       const fairPrice = params ? calcFairPrice(futurePrice, targetReturn, params.years) : null;
       const impliedReturn = params ? calcImpliedReturn(q?.price ?? null, futurePrice, params.years) : null;
       const changeColor =
@@ -1103,9 +1377,12 @@ export default function Watchlist() {
         isCustom,
         params,
         hasValuation: params != null,
-        autoEps,
-        manualEps: manualValue,
-        currentPE,
+        valuationModel,
+        modelLabel: modelLabel(valuationModel),
+        metricLabel: metricLabel(valuationModel),
+        autoMetric,
+        manualMetric,
+        currentMultiple,
         fairPrice,
         impliedReturn,
         changeColor,
@@ -1126,7 +1403,18 @@ export default function Watchlist() {
       if (impliedSort === "desc") return bv - av;
       return av - bv;
     });
-  }, [allTickers, quotes, holdingSet, fvParams, manualEps, targetReturn, impliedSort]);
+  }, [
+    allTickers,
+    quotes,
+    holdingSet,
+    fvParams,
+    manualEps,
+    manualFcfPerShare,
+    manualRevenuePerShare,
+    valuationModelByTicker,
+    targetReturn,
+    impliedSort,
+  ]);
 
   const impliedSortLabel = impliedSort === "desc" ? "↓" : impliedSort === "asc" ? "↑" : "↕";
   const allTickersSet = useMemo(() => new Set(allTickers), [allTickers]);
@@ -1193,7 +1481,10 @@ export default function Watchlist() {
                 const isCustom = row.isCustom;
                 const params = row.params;
                 const hasValuation = row.hasValuation;
-                const currentPE = row.currentPE;
+                const valuationModel = row.valuationModel;
+                const modelLabelText = row.modelLabel;
+                const metricLabelText = row.metricLabel;
+                const currentMultiple = row.currentMultiple;
                 const fairPrice = row.fairPrice;
                 const impliedReturn = row.impliedReturn;
                 const changeColor = row.changeColor;
@@ -1233,6 +1524,14 @@ export default function Watchlist() {
                       >
                         <X className="h-4 w-4" />
                       </Button>
+                      </div>
+
+                    <div className="mt-3 flex items-center justify-between rounded-md border border-border/60 px-2.5 py-2">
+                      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Modèle</span>
+                      <InlineModel
+                        value={valuationModel}
+                        onChange={(v) => updateValuationModel(ticker, v)}
+                      />
                     </div>
 
                     <div className="mt-3 grid grid-cols-2 gap-2">
@@ -1259,12 +1558,12 @@ export default function Watchlist() {
                         </div>
                       </div>
                       <div className="rounded-md bg-muted/20 px-2.5 py-2">
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">PER</p>
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{modelLabelText}</p>
                         <div className="mt-1 tabular-nums text-sm text-foreground/90">
                           {quotesLoading && !q ? (
                             <Skeleton className="h-4 w-10" />
-                          ) : currentPE != null ? (
-                            currentPE.toFixed(1)
+                          ) : currentMultiple != null ? (
+                            currentMultiple.toFixed(1)
                           ) : (
                             "—"
                           )}
@@ -1295,15 +1594,16 @@ export default function Watchlist() {
                         </div>
                       </div>
                       <div className="rounded-md border border-border/60 px-2.5 py-2">
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">EPS ann.</p>
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{metricLabelText}</p>
                         <div className="mt-1 flex justify-end">
                           {quotesLoading && !q ? (
                             <Skeleton className="h-4 w-12" />
                           ) : (
-                            <InlineEps
-                              autoValue={row.autoEps}
-                              manualValue={row.manualEps}
-                              onChange={(v) => updateManualEps(ticker, v)}
+                            <InlineMetric
+                              autoValue={row.autoMetric}
+                              manualValue={row.manualMetric}
+                              label={metricLabelText}
+                              onChange={(v) => updateManualMetric(ticker, valuationModel, v)}
                             />
                           )}
                         </div>
@@ -1333,7 +1633,7 @@ export default function Watchlist() {
                             />
                           </div>
                           <div className="flex flex-col items-center rounded bg-muted/20 px-2 py-1.5">
-                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">PER cible</span>
+                            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Multiple cible</span>
                             <InlineNum
                               value={params.terminalPE}
                               onChange={(v) => updateFVParam(ticker, "terminalPE", v)}
@@ -1369,8 +1669,9 @@ export default function Watchlist() {
                   <TableHead className="w-[200px]">Titre</TableHead>
                   <TableHead className="text-right">Cours</TableHead>
                   <TableHead className="text-right">Var.</TableHead>
-                  <TableHead className="text-right">PER (Px/EPS)</TableHead>
-                  <TableHead className="text-right border-r border-border/30">EPS ann.</TableHead>
+                  <TableHead className="text-center">Modèle</TableHead>
+                  <TableHead className="text-right">Multiple (Px/métrique)</TableHead>
+                  <TableHead className="text-right border-r border-border/30">Métrique ann.</TableHead>
                   <TableHead className="text-center">
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -1384,15 +1685,15 @@ export default function Watchlist() {
                       <TooltipTrigger asChild>
                         <span className="cursor-help border-b border-dashed border-muted-foreground">CAGR</span>
                       </TooltipTrigger>
-                      <TooltipContent>Croissance BPA estimée (%/an)</TooltipContent>
+                      <TooltipContent>Croissance de la métrique estimée (%/an)</TooltipContent>
                     </Tooltip>
                   </TableHead>
                   <TableHead className="text-center">
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="cursor-help border-b border-dashed border-muted-foreground">PER cible</span>
+                        <span className="cursor-help border-b border-dashed border-muted-foreground">Multiple cible</span>
                       </TooltipTrigger>
-                      <TooltipContent>PER terminal de sortie</TooltipContent>
+                      <TooltipContent>Multiple terminal de sortie</TooltipContent>
                     </Tooltip>
                   </TableHead>
                   <TableHead className="text-right border-l border-border/30">
@@ -1430,6 +1731,7 @@ export default function Watchlist() {
                       <TableCell><Skeleton className="h-5 w-32" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-20 ml-auto" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-14 ml-auto" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-14 mx-auto" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-12 ml-auto" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-12 ml-auto" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-10 mx-auto" /></TableCell>
@@ -1442,7 +1744,7 @@ export default function Watchlist() {
                   ))
                 ) : allTickers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center text-muted-foreground py-12">
+                    <TableCell colSpan={12} className="text-center text-muted-foreground py-12">
                       Aucun titre — utilisez la barre de recherche pour en ajouter
                     </TableCell>
                   </TableRow>
@@ -1453,7 +1755,9 @@ export default function Watchlist() {
                     const isCustom = row.isCustom;
                     const params = row.params;
                     const hasValuation = row.hasValuation;
-                    const currentPE = row.currentPE;
+                    const valuationModel = row.valuationModel;
+                    const metricLabelText = row.metricLabel;
+                    const currentMultiple = row.currentMultiple;
                     const fairPrice = row.fairPrice;
                     const impliedReturn = row.impliedReturn;
                     const changeColor = row.changeColor;
@@ -1519,26 +1823,35 @@ export default function Watchlist() {
                           )}
                         </TableCell>
 
-                        {/* PER */}
+                        {/* Modele */}
+                        <TableCell className="text-center">
+                          <InlineModel
+                            value={valuationModel}
+                            onChange={(v) => updateValuationModel(ticker, v)}
+                          />
+                        </TableCell>
+
+                        {/* Multiple */}
                         <TableCell className="text-right tabular-nums text-sm text-foreground/90">
                           {quotesLoading && !q ? (
                             <Skeleton className="h-4 w-12 ml-auto" />
-                          ) : currentPE != null ? (
-                            currentPE.toFixed(1)
+                          ) : currentMultiple != null ? (
+                            currentMultiple.toFixed(1)
                           ) : (
                             "—"
                           )}
                         </TableCell>
 
-                        {/* EPS */}
+                        {/* Metrique */}
                         <TableCell className="text-right tabular-nums text-sm text-foreground/90 border-r border-border/30">
                           {quotesLoading && !q ? (
                             <Skeleton className="h-4 w-12 ml-auto" />
                           ) : (
-                            <InlineEps
-                              autoValue={row.autoEps}
-                              manualValue={row.manualEps}
-                              onChange={(v) => updateManualEps(ticker, v)}
+                            <InlineMetric
+                              autoValue={row.autoMetric}
+                              manualValue={row.manualMetric}
+                              label={metricLabelText}
+                              onChange={(v) => updateManualMetric(ticker, valuationModel, v)}
                             />
                           )}
                         </TableCell>
@@ -1580,7 +1893,7 @@ export default function Watchlist() {
                           )}
                         </TableCell>
 
-                        {/* PER cible */}
+                        {/* Multiple cible */}
                         <TableCell className="text-center">
                           {params ? (
                             <InlineNum
