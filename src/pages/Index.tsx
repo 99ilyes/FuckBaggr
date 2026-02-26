@@ -22,6 +22,12 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { toast } from "@/hooks/use-toast";
 import { DEFAULT_MAX_BENCHMARKS, loadPerformanceBenchmarkTickers } from "@/lib/performanceBenchmarks";
 
+interface LiveMarketQuote {
+  marketState: string | null;
+  preMarketPrice: number | null;
+  postMarketPrice: number | null;
+}
+
 export default function Index() {
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
   const [chartView, setChartView] = useState<"performance" | "allocation">("performance");
@@ -33,6 +39,7 @@ export default function Index() {
   const [previousCloseMap, setPreviousCloseMap] = useState<Record<string, number>>({});
   const [livePriceMap, setLivePriceMap] = useState<Record<string, number>>({});
   const [liveChangeMap, setLiveChangeMap] = useState<Record<string, number>>({});
+  const [liveMarketQuoteMap, setLiveMarketQuoteMap] = useState<Record<string, LiveMarketQuote>>({});
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
   const [eurUsdRate, setEurUsdRate] = useState<{ price: number; change: number } | null>(null);
 
@@ -164,10 +171,18 @@ export default function Index() {
       const prevMap: Record<string, number> = {};
       const liveMap: Record<string, number> = {};
       const changeMap: Record<string, number> = {};
+      const marketQuoteMap: Record<string, LiveMarketQuote> = {};
       for (const [ticker, info] of Object.entries(results)) {
         if (info?.previousClose != null) prevMap[ticker] = info.previousClose;
         if (info?.changePercent != null) changeMap[ticker] = info.changePercent;
-        if (info?.price) {
+        if (info) {
+          marketQuoteMap[ticker] = {
+            marketState: info.marketState ?? null,
+            preMarketPrice: info.preMarketPrice ?? null,
+            postMarketPrice: info.postMarketPrice ?? null,
+          };
+        }
+        if (info?.price != null) {
           liveMap[ticker] = info.price;
         }
       }
@@ -175,6 +190,7 @@ export default function Index() {
         setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
         setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
         setLiveChangeMap((prev) => ({ ...prev, ...changeMap }));
+        setLiveMarketQuoteMap((prev) => ({ ...prev, ...marketQuoteMap }));
         setLastRefreshTime(new Date());
         // Persist live prices silently (fire-and-forget)
         persistPricesToCache(results);
@@ -235,12 +251,20 @@ export default function Index() {
       const prevMap: Record<string, number> = {};
       const liveMap: Record<string, number> = {};
       const changeMap: Record<string, number> = {};
+      const marketQuoteMap: Record<string, LiveMarketQuote> = {};
       let liveCount = 0;
       let cacheCount = 0;
       for (const [ticker, info] of Object.entries(results)) {
-        if (info?.previousClose) prevMap[ticker] = info.previousClose;
+        if (info?.previousClose != null) prevMap[ticker] = info.previousClose;
         if (info?.changePercent != null) changeMap[ticker] = info.changePercent;
-        if (info?.price) {
+        if (info) {
+          marketQuoteMap[ticker] = {
+            marketState: info.marketState ?? null,
+            preMarketPrice: info.preMarketPrice ?? null,
+            postMarketPrice: info.postMarketPrice ?? null,
+          };
+        }
+        if (info?.price != null) {
           liveMap[ticker] = info.price;
           if (info.fromCache) cacheCount++;
           else liveCount++;
@@ -251,6 +275,7 @@ export default function Index() {
         setPreviousCloseMap((prev) => ({ ...prev, ...prevMap }));
         setLivePriceMap((prev) => ({ ...prev, ...liveMap }));
         setLiveChangeMap((prev) => ({ ...prev, ...changeMap }));
+        setLiveMarketQuoteMap((prev) => ({ ...prev, ...marketQuoteMap }));
         setLastRefreshTime(new Date());
 
         if (liveCount > 0) {
@@ -484,7 +509,8 @@ export default function Index() {
             <TopMovers
               positions={positions}
               assetsCache={effectiveAssetsCache}
-              liveChangeMap={liveChangeMap} />
+              liveChangeMap={liveChangeMap}
+              liveMarketQuoteMap={liveMarketQuoteMap} />
           </div>
         </div>
 

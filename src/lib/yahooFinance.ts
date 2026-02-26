@@ -20,6 +20,9 @@ export interface YahooQuoteResult {
   currency: string;
   change?: number | null;
   changePercent?: number | null;
+  marketState?: string | null;
+  preMarketPrice?: number | null;
+  postMarketPrice?: number | null;
   fromCache?: boolean;
 }
 
@@ -30,7 +33,84 @@ export interface YahooHistoryResult {
   symbol?: string;
 }
 
-const YAHOO_TIMEOUT_MS = 5000;
+const YAHOO_TIMEOUT_MS = 7000;
+
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return null;
+}
+
+function getLastCloseInPeriod(
+  timestamps: number[],
+  closes: Array<number | null>,
+  period: { start?: number; end?: number } | undefined
+): number | null {
+  if (!period) return null;
+  const start = toFiniteNumber(period.start);
+  const end = toFiniteNumber(period.end);
+  if (start == null || end == null) return null;
+
+  const maxIdx = Math.min(timestamps.length, closes.length) - 1;
+  for (let i = maxIdx; i >= 0; i--) {
+    const ts = timestamps[i];
+    const close = closes[i];
+    if (ts >= start && ts < end && typeof close === "number" && Number.isFinite(close)) {
+      return close;
+    }
+  }
+  return null;
+}
+
+function isWithinPeriod(nowSec: number, period: { start?: number; end?: number } | undefined): boolean {
+  if (!period) return false;
+  const start = toFiniteNumber(period.start);
+  const end = toFiniteNumber(period.end);
+  if (start == null || end == null) return false;
+  return nowSec >= start && nowSec < end;
+}
+
+function extractSessionInfo(result: any): {
+  marketState: string | null;
+  preMarketPrice: number | null;
+  postMarketPrice: number | null;
+  regularLivePrice: number | null;
+} {
+  const meta = result?.meta ?? {};
+  const timestamps = Array.isArray(result?.timestamp) ? (result.timestamp as number[]) : [];
+  const closesRaw = result?.indicators?.quote?.[0]?.close;
+  const closes = Array.isArray(closesRaw) ? (closesRaw as Array<number | null>) : [];
+  const periods = (meta.currentTradingPeriod ?? {}) as {
+    pre?: { start?: number; end?: number };
+    regular?: { start?: number; end?: number };
+    post?: { start?: number; end?: number };
+  };
+
+  const preMarketPrice =
+    toFiniteNumber(meta.preMarketPrice) ?? getLastCloseInPeriod(timestamps, closes, periods.pre);
+  const postMarketPrice =
+    toFiniteNumber(meta.postMarketPrice) ?? getLastCloseInPeriod(timestamps, closes, periods.post);
+  const regularLivePrice = getLastCloseInPeriod(timestamps, closes, periods.regular);
+
+  let marketState: string | null =
+    typeof meta.marketState === "string" && meta.marketState.trim().length > 0
+      ? meta.marketState.toUpperCase()
+      : null;
+
+  if (!marketState) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (isWithinPeriod(nowSec, periods.regular)) marketState = "REGULAR";
+    else if (isWithinPeriod(nowSec, periods.pre)) marketState = "PRE";
+    else if (isWithinPeriod(nowSec, periods.post)) marketState = "POST";
+    else if (periods.regular || periods.pre || periods.post) marketState = "CLOSED";
+  }
+
+  return {
+    marketState,
+    preMarketPrice: preMarketPrice ?? null,
+    postMarketPrice: postMarketPrice ?? null,
+    regularLivePrice: regularLivePrice ?? null,
+  };
+}
 
 /** Fetch a single ticker directly from Yahoo Finance v8 (browser → unique IP). */
 async function fetchTickerBrowser(ticker: string): Promise<YahooQuoteResult | null> {
@@ -40,7 +120,7 @@ async function fetchTickerBrowser(ticker: string): Promise<YahooQuoteResult | nu
       ? "/api/yf"
       : "https://query2.finance.yahoo.com";
 
-    const url = `${baseUrl}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d&includePrePost=false`;
+    const url = `${baseUrl}/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d&includePrePost=true`;
 
     // Add logging for debugging
     console.log(`Fetching ${ticker} from ${baseUrl}...`);
@@ -55,10 +135,16 @@ async function fetchTickerBrowser(ticker: string): Promise<YahooQuoteResult | nu
     if (!resp.ok) return null;
 
     const data = await resp.json();
-    const meta = data?.chart?.result?.[0]?.meta;
+    const result = data?.chart?.result?.[0];
+    const meta = result?.meta;
     if (!meta || meta.regularMarketPrice == null) return null;
+    const sessionInfo = extractSessionInfo(result);
 
-    const price = meta.regularMarketPrice as number;
+    const regularPrice = meta.regularMarketPrice as number;
+    const price =
+      sessionInfo.marketState === "REGULAR" || sessionInfo.marketState === "OPEN"
+        ? (sessionInfo.regularLivePrice ?? regularPrice)
+        : regularPrice;
     const prevClose = (meta.chartPreviousClose ?? meta.previousClose ?? price) as number;
     const change = (meta.regularMarketChange ?? (price - prevClose)) as number;
     const changePercent = (meta.regularMarketChangePercent ?? (prevClose !== 0 ? (change / prevClose) * 100 : 0)) as number;
@@ -70,6 +156,9 @@ async function fetchTickerBrowser(ticker: string): Promise<YahooQuoteResult | nu
       currency: meta.currency ?? "USD",
       change,
       changePercent,
+      marketState: sessionInfo.marketState,
+      preMarketPrice: sessionInfo.preMarketPrice,
+      postMarketPrice: sessionInfo.postMarketPrice,
       fromCache: false,
     };
   } catch {
@@ -102,6 +191,9 @@ async function fetchServerSideFallback(
         previousClose?: number | null;
         name?: string | null;
         currency?: string | null;
+        marketState?: string | null;
+        preMarketPrice?: number | null;
+        postMarketPrice?: number | null;
         fromCache?: boolean;
       }
     >;
@@ -120,6 +212,9 @@ async function fetchServerSideFallback(
           currency: info.currency ?? "USD",
           change,
           changePercent,
+          marketState: info.marketState ?? null,
+          preMarketPrice: info.preMarketPrice ?? null,
+          postMarketPrice: info.postMarketPrice ?? null,
           fromCache: !!info.fromCache, // could be true or false depending on what the server managed to do
         };
       }

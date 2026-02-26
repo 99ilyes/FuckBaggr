@@ -12,6 +12,11 @@ interface Props {
     positions: AssetPosition[];
     assetsCache: AssetCache[];
     liveChangeMap?: Record<string, number>;
+    liveMarketQuoteMap?: Record<string, {
+        marketState: string | null;
+        preMarketPrice: number | null;
+        postMarketPrice: number | null;
+    }>;
 }
 
 interface AssetVariation {
@@ -19,37 +24,152 @@ interface AssetVariation {
     name: string;
     changePercent: number;
     currentPrice: number;
+    closePrice: number;
     valueVariation: number;
     currency: string;
+    marketIndicatorLabel: string;
+    marketIndicatorClass: string;
+    marketIndicatorPulseClass: string | null;
     isMarketOpen: boolean;
+    sessionPhase: "pre" | "post" | null;
+    sessionLabel: string | null;
+    sessionChangePercent: number;
+    sessionChangeValue: number;
+    sessionPrice: number | null;
 }
 
-export function TopMovers({ positions, assetsCache, liveChangeMap = {} }: Props) {
+function normalizeMarketState(marketState: string | null | undefined): string {
+    return (marketState ?? "").toUpperCase();
+}
+
+function resolveMarketIndicator(ticker: string, marketState: string | null | undefined) {
+    const state = normalizeMarketState(marketState);
+
+    if (state === "REGULAR" || state === "OPEN") {
+        return {
+            phase: "open" as const,
+            label: "Marché ouvert",
+            className: "bg-emerald-500",
+            pulseClass: "bg-emerald-400",
+        };
+    }
+
+    if (["PRE", "PREPRE", "PREMARKET"].includes(state)) {
+        return {
+            phase: "pre" as const,
+            label: "Pré-marché",
+            className: "bg-yellow-400",
+            pulseClass: null,
+        };
+    }
+
+    if (["POST", "POSTPOST", "POSTMARKET", "AFTER_HOURS", "AFTERHOURS"].includes(state)) {
+        return {
+            phase: "post" as const,
+            label: "Post-marché",
+            className: "bg-blue-500",
+            pulseClass: null,
+        };
+    }
+
+    if (state === "CLOSED") {
+        return {
+            phase: "closed" as const,
+            label: "Marché fermé",
+            className: "bg-zinc-500",
+            pulseClass: null,
+        };
+    }
+
+    const isOpen = isMarketCurrentlyOpen(ticker);
+    return {
+        phase: isOpen ? "open" as const : "closed" as const,
+        label: isOpen ? "Marché ouvert" : "Marché fermé",
+        className: isOpen ? "bg-emerald-500" : "bg-zinc-500",
+        pulseClass: isOpen ? "bg-emerald-400" : null,
+    };
+}
+
+function resolveCurrentPrice(
+    regularPrice: number,
+    marketState: string | null | undefined,
+    preMarketPrice: number | null,
+    postMarketPrice: number | null
+): number {
+    const state = normalizeMarketState(marketState);
+    if (["PRE", "PREPRE", "PREMARKET"].includes(state) && preMarketPrice != null) return preMarketPrice;
+    if (["POST", "POSTPOST", "POSTMARKET", "AFTER_HOURS", "AFTERHOURS"].includes(state) && postMarketPrice != null) return postMarketPrice;
+    if (state === "CLOSED" && postMarketPrice != null) return postMarketPrice;
+    return regularPrice;
+}
+
+export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMarketQuoteMap = {} }: Props) {
     const [selectedTicker, setSelectedTicker] = useState<AssetVariation | null>(null);
 
     const variations: AssetVariation[] = positions
         .filter(p => p.quantity > 0)
         .map(p => {
             const asset = assetsCache.find(a => a.ticker === p.ticker);
-            if (!asset || !asset.last_price || !asset.previous_close) return null;
+            if (!asset || asset.last_price == null || asset.previous_close == null) return null;
+
+            const marketQuote = liveMarketQuoteMap[p.ticker];
+            const preMarketPrice = marketQuote?.preMarketPrice ?? null;
+            const postMarketPrice = marketQuote?.postMarketPrice ?? null;
+            const marketState = marketQuote?.marketState ?? null;
+            const currentPrice = resolveCurrentPrice(asset.last_price, marketState, preMarketPrice, postMarketPrice);
 
             let change = 0;
-            if (liveChangeMap[p.ticker] != null) {
+            if (asset.previous_close !== 0) {
+                change = ((currentPrice - asset.previous_close) / asset.previous_close) * 100;
+            } else if (liveChangeMap[p.ticker] != null) {
                 change = liveChangeMap[p.ticker];
-            } else {
-                change = ((asset.last_price - asset.previous_close) / asset.previous_close) * 100;
             }
 
-            const valueVariation = asset.last_price - asset.previous_close;
+            const valueVariation = currentPrice - asset.previous_close;
+            const indicator = resolveMarketIndicator(p.ticker, marketState);
+            const isMarketOpen = indicator.phase === "open" || isMarketCurrentlyOpen(p.ticker);
+            const sessionPrice =
+                isMarketOpen
+                    ? null
+                    : postMarketPrice != null
+                        ? postMarketPrice
+                        : indicator.phase === "pre" && preMarketPrice != null
+                            ? preMarketPrice
+                            : null;
+            const sessionPhase =
+                sessionPrice == null
+                    ? null
+                    : postMarketPrice != null
+                        ? "post"
+                        : "pre";
+            const sessionLabel =
+                sessionPhase === "post"
+                    ? "Après clôture"
+                    : sessionPhase === "pre"
+                        ? "Pré-marché"
+                        : null;
+            const sessionChangeValue = sessionPrice != null ? sessionPrice - asset.last_price : 0;
+            const sessionChangePercent = asset.last_price !== 0 && sessionPrice != null
+                ? (sessionChangeValue / asset.last_price) * 100
+                : 0;
 
             return {
                 ticker: p.ticker,
                 name: asset.name || p.ticker,
                 changePercent: change,
-                currentPrice: asset.last_price,
+                currentPrice,
+                closePrice: asset.last_price,
                 valueVariation,
                 currency: p.currency,
-                isMarketOpen: isMarketCurrentlyOpen(p.ticker)
+                marketIndicatorLabel: indicator.label,
+                marketIndicatorClass: indicator.className,
+                marketIndicatorPulseClass: indicator.pulseClass,
+                isMarketOpen,
+                sessionPhase,
+                sessionLabel,
+                sessionChangePercent,
+                sessionChangeValue,
+                sessionPrice,
             };
         })
         .filter((v): v is AssetVariation => v !== null)
@@ -60,8 +180,8 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {} }: Props)
             <div className="flex items-center gap-3">
                 <div className="relative">
                     <TickerLogo ticker={item.ticker} className="w-8 h-8 rounded-full" />
-                    <span className={`absolute -bottom-0.5 -right-0.5 block h-2.5 w-2.5 rounded-full ring-2 ring-background ${item.isMarketOpen ? "bg-emerald-500" : "bg-zinc-600"}`} title={item.isMarketOpen ? "Marché Ouvert" : "Marché Fermé"}>
-                        {item.isMarketOpen && <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping"></span>}
+                    <span className={`absolute -bottom-0.5 -right-0.5 block h-2.5 w-2.5 rounded-full ring-2 ring-background ${item.marketIndicatorClass}`} title={item.marketIndicatorLabel}>
+                        {item.marketIndicatorPulseClass && <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping ${item.marketIndicatorPulseClass}`}></span>}
                     </span>
                 </div>
                 <div className="flex flex-col min-w-0 pr-2">
@@ -69,8 +189,24 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {} }: Props)
                     <div className="flex items-baseline gap-2 text-[10px] text-muted-foreground uppercase tracking-wide font-medium">
                         <span>{item.ticker}</span>
                         <span className="text-zinc-600">•</span>
-                        <span className="text-xs font-semibold text-zinc-300">{formatCurrency(item.currentPrice, item.currency)}</span>
+                        {item.isMarketOpen ? (
+                            <span className="text-xs font-semibold text-zinc-300">{formatCurrency(item.currentPrice, item.currency)}</span>
+                        ) : (
+                            <>
+                                <span className="text-xs font-semibold text-zinc-300">{formatCurrency(item.closePrice, item.currency)}</span>
+                            </>
+                        )}
                     </div>
+                    {!item.isMarketOpen && item.sessionPhase && item.sessionPrice != null && item.sessionLabel && (
+                        <div className="flex items-baseline gap-2 text-[10px] tabular-nums">
+                            <span className={`font-medium ${item.sessionPhase === "pre" ? "text-yellow-300/90" : "text-blue-300/90"}`}>
+                                {item.sessionLabel} {formatCurrency(item.sessionPrice, item.currency)}
+                            </span>
+                            <span className={item.sessionChangePercent >= 0 ? "text-emerald-500/80" : "text-rose-500/80"}>
+                                ({item.sessionChangeValue > 0 ? "+" : ""}{formatCurrency(item.sessionChangeValue, item.currency)} · {formatPercent(item.sessionChangePercent)})
+                            </span>
+                        </div>
+                    )}
                 </div>
             </div>
 

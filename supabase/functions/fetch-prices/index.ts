@@ -19,16 +19,101 @@ const YF_HEADERS = {
   "Referer": "https://finance.yahoo.com/",
 };
 
+function toFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getLastCloseInPeriod(
+  timestamps: number[],
+  closes: Array<number | null>,
+  period: { start?: number; end?: number } | undefined
+): number | null {
+  if (!period) return null;
+  const start = toFiniteNumber(period.start);
+  const end = toFiniteNumber(period.end);
+  if (start == null || end == null) return null;
+
+  const maxIdx = Math.min(timestamps.length, closes.length) - 1;
+  for (let i = maxIdx; i >= 0; i--) {
+    const ts = timestamps[i];
+    const close = closes[i];
+    if (ts >= start && ts < end && typeof close === "number" && Number.isFinite(close)) {
+      return close;
+    }
+  }
+  return null;
+}
+
+function isWithinPeriod(nowSec: number, period: { start?: number; end?: number } | undefined): boolean {
+  if (!period) return false;
+  const start = toFiniteNumber(period.start);
+  const end = toFiniteNumber(period.end);
+  if (start == null || end == null) return false;
+  return nowSec >= start && nowSec < end;
+}
+
 async function fetchYahoo(ticker: string): Promise<any | null> {
-  const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d&includePrePost=false`;
+  const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d&includePrePost=true`;
   try {
     const resp = await fetch(url, {
       headers: YF_HEADERS,
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(7000),
     });
     if (!resp.ok) return null;
     const json = await resp.json();
-    return json?.chart?.result?.[0]?.meta ?? null;
+    const result = json?.chart?.result?.[0];
+    const meta = result?.meta;
+    if (!meta || meta.regularMarketPrice == null) return null;
+
+    const timestamps = Array.isArray(result?.timestamp) ? (result.timestamp as number[]) : [];
+    const closesRaw = result?.indicators?.quote?.[0]?.close;
+    const closes = Array.isArray(closesRaw) ? (closesRaw as Array<number | null>) : [];
+    const periods = (meta.currentTradingPeriod ?? {}) as {
+      pre?: { start?: number; end?: number };
+      regular?: { start?: number; end?: number };
+      post?: { start?: number; end?: number };
+    };
+
+    const preMarketPrice =
+      toFiniteNumber(meta.preMarketPrice) ?? getLastCloseInPeriod(timestamps, closes, periods.pre);
+    const postMarketPrice =
+      toFiniteNumber(meta.postMarketPrice) ?? getLastCloseInPeriod(timestamps, closes, periods.post);
+    const regularLivePrice = getLastCloseInPeriod(timestamps, closes, periods.regular);
+
+    let marketState: string | null =
+      typeof meta.marketState === "string" && meta.marketState.trim().length > 0
+        ? meta.marketState.toUpperCase()
+        : null;
+
+    if (!marketState) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (isWithinPeriod(nowSec, periods.regular)) marketState = "REGULAR";
+      else if (isWithinPeriod(nowSec, periods.pre)) marketState = "PRE";
+      else if (isWithinPeriod(nowSec, periods.post)) marketState = "POST";
+      else if (periods.regular || periods.pre || periods.post) marketState = "CLOSED";
+    }
+
+    const regularPrice = meta.regularMarketPrice as number;
+    const price =
+      marketState === "REGULAR" || marketState === "OPEN"
+        ? (regularLivePrice ?? regularPrice)
+        : regularPrice;
+    const prevClose = (meta.chartPreviousClose ?? meta.previousClose ?? price) as number;
+    const change = (meta.regularMarketChange ?? (price - prevClose)) as number;
+    const changePercent = (meta.regularMarketChangePercent ??
+      (prevClose !== 0 ? (change / prevClose) * 100 : 0)) as number;
+
+    return {
+      price,
+      previousClose: prevClose,
+      name: meta.longName ?? meta.shortName ?? meta.symbol ?? ticker,
+      currency: meta.currency ?? "USD",
+      change,
+      changePercent,
+      marketState,
+      preMarketPrice: preMarketPrice ?? null,
+      postMarketPrice: postMarketPrice ?? null,
+    };
   } catch {
     return null;
   }
@@ -103,6 +188,9 @@ serve(async (req) => {
             previousClose: row.previous_close,
             name: row.name ?? row.ticker,
             currency: row.currency ?? "USD",
+            marketState: null,
+            preMarketPrice: null,
+            postMarketPrice: null,
             fromCache: true,
           };
         }
@@ -221,8 +309,8 @@ serve(async (req) => {
     // Fetch all tickers from Yahoo in parallel with 4s timeout each
     const liveResults = await Promise.all(
       uniqueTickers.map(async (t) => {
-        const meta = await fetchYahoo(t);
-        return { ticker: t, meta };
+        const quote = await fetchYahoo(t);
+        return { ticker: t, quote };
       })
     );
 
@@ -230,21 +318,18 @@ serve(async (req) => {
     let liveCount = 0;
     let cacheCount = 0;
 
-    for (const { ticker: t, meta } of liveResults) {
-      if (meta?.regularMarketPrice != null) {
-        const price = meta.regularMarketPrice as number;
-        const prevClose = (meta.chartPreviousClose ?? meta.previousClose ?? price) as number;
-        const change = (meta.regularMarketChange ?? (price - prevClose)) as number;
-        const changePct = (meta.regularMarketChangePercent ??
-          (prevClose !== 0 ? (change / prevClose) * 100 : 0)) as number;
-
+    for (const { ticker: t, quote } of liveResults) {
+      if (quote?.price != null) {
         results[t] = {
-          price,
-          previousClose: prevClose,
-          name: meta.longName ?? meta.shortName ?? meta.symbol ?? t,
-          currency: meta.currency ?? "USD",
-          change,
-          changePercent: changePct,
+          price: quote.price,
+          previousClose: quote.previousClose,
+          name: quote.name,
+          currency: quote.currency,
+          change: quote.change,
+          changePercent: quote.changePercent,
+          marketState: quote.marketState ?? null,
+          preMarketPrice: quote.preMarketPrice ?? null,
+          postMarketPrice: quote.postMarketPrice ?? null,
           fromCache: false,
         };
         liveCount++;
@@ -256,6 +341,9 @@ serve(async (req) => {
           currency: cacheMap[t].currency ?? "USD",
           change: 0,
           changePercent: 0,
+          marketState: null,
+          preMarketPrice: null,
+          postMarketPrice: null,
           fromCache: true,
         };
         cacheCount++;
