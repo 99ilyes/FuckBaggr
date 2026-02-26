@@ -28,7 +28,7 @@ function rangeToParams(range: string): { rangeStr: string; interval: string } {
 
 type SessionType = "pre" | "regular" | "post";
 type HistoryPoint = { time: number; price: number; session?: SessionType };
-type HistorySuccess = { history: HistoryPoint[]; currency: string; symbol: string };
+type HistorySuccess = { history: HistoryPoint[]; currency: string; symbol: string; previousClose: number | null };
 type HistoryResult = HistorySuccess | { error: string };
 
 type TradingPeriod = { start: number; end: number };
@@ -131,6 +131,7 @@ async function fetchYahooHistory(
     const closes: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
     const currency: string = result.meta?.currency ?? "USD";
     const symbol: string = result.meta?.symbol ?? ticker;
+    const previousClose: number | null = result.meta?.chartPreviousClose ?? result.meta?.previousClose ?? null;
     const sessionPeriods = includePrePost
       ? extractSessionPeriods(result?.meta?.tradingPeriods)
       : null;
@@ -151,7 +152,7 @@ async function fetchYahooHistory(
       }
     }
 
-    return { history, currency, symbol };
+    return { history, currency, symbol, previousClose };
   } catch (err) {
     clearTimeout(timeout);
     console.error(`Error fetching ${ticker}:`, err);
