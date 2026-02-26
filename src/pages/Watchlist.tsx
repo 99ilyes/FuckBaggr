@@ -294,7 +294,7 @@ function parseValuationModel(value: unknown): ValuationModel | null {
 
 function metricLabel(model: ValuationModel): string {
   if (model === "fcf_per_share") return "FCF ann. (Md)";
-  if (model === "ps") return "Ventes ann./action";
+  if (model === "ps") return "Ventes ann. (Md)";
   return "EPS ann.";
 }
 
@@ -1218,11 +1218,15 @@ export default function Watchlist() {
         q?.trailingFcfPerShare != null && shares != null
           ? (q.trailingFcfPerShare * shares) / BILLION
           : null;
+      const autoRevenueTotalBillions =
+        q?.trailingTotalRevenue != null
+          ? q.trailingTotalRevenue / BILLION
+          : null;
       const autoMetric =
         valuationModel === "fcf_per_share"
           ? resolveAnnualizedMetric(autoFcfTotalBillions)
           : valuationModel === "ps"
-            ? resolveAnnualizedMetric(q?.trailingRevenuePerShare ?? null)
+            ? resolveAnnualizedMetric(autoRevenueTotalBillions)
             : resolveAnnualizedMetric(q?.trailingEps ?? null);
       const manualMetric =
         valuationModel === "fcf_per_share"
@@ -1232,7 +1236,7 @@ export default function Watchlist() {
             : (manualEps[ticker] ?? null);
       const effectiveMetric = manualMetric ?? autoMetric;
       const effectiveMetricForValuation =
-        valuationModel === "fcf_per_share"
+        valuationModel === "fcf_per_share" || valuationModel === "ps"
           ? effectiveMetric != null && shares != null
             ? (effectiveMetric * BILLION) / shares
             : null
@@ -1242,11 +1246,16 @@ export default function Watchlist() {
           shares != null
           ? q.price * shares
           : null;
+      const psTotalRevenue =
+        valuationModel === "ps" &&
+          effectiveMetric != null
+          ? effectiveMetric * BILLION
+          : (q?.trailingTotalRevenue ?? null);
       const psFromTotals =
         inferredMarketCap != null &&
-          q?.trailingTotalRevenue != null &&
-          q.trailingTotalRevenue > 0
-          ? inferredMarketCap / q.trailingTotalRevenue
+          psTotalRevenue != null &&
+          psTotalRevenue > 0
+          ? inferredMarketCap / psTotalRevenue
           : null;
       const fcfTotal =
         valuationModel === "fcf_per_share" &&
