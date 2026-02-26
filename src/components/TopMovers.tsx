@@ -25,6 +25,7 @@ interface AssetVariation {
     changePercent: number;
     currentPrice: number;
     closePrice: number;
+    previousClose: number;
     valueVariation: number;
     currency: string;
     marketIndicatorLabel: string;
@@ -161,6 +162,7 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
                 changePercent: change,
                 currentPrice,
                 closePrice: asset.last_price,
+                previousClose: asset.previous_close,
                 valueVariation,
                 currency: p.currency,
                 marketIndicatorLabel: indicator.label,
@@ -255,6 +257,7 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
                     currentPrice: selectedTicker.currentPrice,
                     changePercent: selectedTicker.changePercent,
                     currency: selectedTicker.currency,
+                    previousClose: selectedTicker.previousClose,
                 } : null}
             />
         </Card>

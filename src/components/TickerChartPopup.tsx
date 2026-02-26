@@ -6,7 +6,7 @@ import { TickerLogo } from "@/components/TickerLogo";
 import { formatCurrency, formatPercent } from "@/lib/calculations";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowUp, ArrowDown } from "lucide-react";
-import { ComposedChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Line } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
 
 interface TickerInfo {
@@ -15,6 +15,7 @@ interface TickerInfo {
   currentPrice: number;
   changePercent: number;
   currency: string;
+  previousClose?: number;
 }
 
 interface Props {
@@ -34,7 +35,6 @@ interface PeriodConfig {
 const DAY_SECONDS = 24 * 60 * 60;
 
 const PERIODS: readonly PeriodConfig[] = [
-  // 1D uses 5d/15m for broad compatibility, then gets trimmed to the last 24h of points.
   { label: "1D", range: "5d", interval: "15m", windowSeconds: DAY_SECONDS, includePrePost: true },
   { label: "1S", range: "5d", interval: "15m" },
   { label: "1M", range: "1mo", interval: "1d" },
@@ -48,127 +48,11 @@ interface ChartPoint {
   time: number;
   price: number;
   label: string;
-  session: "pre" | "regular" | "post" | null;
-  regularPrice: number | null;
-  prePrice: number | null;
-  postPrice: number | null;
 }
 
-type SessionType = ChartPoint["session"];
-
-interface TradingPeriod {
-  start: number;
-  end: number;
-}
-
-interface SessionPeriods {
-  pre: TradingPeriod[];
-  regular: TradingPeriod[];
-  post: TradingPeriod[];
-}
-
-function normalizeSession(session: unknown): SessionType {
-  return session === "pre" || session === "regular" || session === "post" ? session : null;
-}
-
-function flattenTradingPeriods(input: unknown): TradingPeriod[] {
-  const periods: TradingPeriod[] = [];
-
-  const walk = (node: unknown) => {
-    if (Array.isArray(node)) {
-      for (const child of node) walk(child);
-      return;
-    }
-    if (!node || typeof node !== "object") return;
-
-    const startRaw = (node as { start?: unknown }).start;
-    const endRaw = (node as { end?: unknown }).end;
-    const start = typeof startRaw === "number" ? startRaw : null;
-    const end = typeof endRaw === "number" ? endRaw : null;
-    if (start !== null && end !== null && Number.isFinite(start) && Number.isFinite(end) && end > start) {
-      periods.push({ start, end });
-    }
-  };
-
-  walk(input);
-  return periods;
-}
-
-function extractSessionPeriods(rawTradingPeriods: unknown): SessionPeriods {
-  const tradingPeriods = (rawTradingPeriods ?? {}) as {
-    pre?: unknown;
-    regular?: unknown;
-    post?: unknown;
-  };
-
-  return {
-    pre: flattenTradingPeriods(tradingPeriods.pre),
-    regular: flattenTradingPeriods(tradingPeriods.regular),
-    post: flattenTradingPeriods(tradingPeriods.post),
-  };
-}
-
-function isInPeriods(timestamp: number, periods: TradingPeriod[]): boolean {
-  for (const period of periods) {
-    if (timestamp >= period.start && timestamp < period.end) return true;
-  }
-  return false;
-}
-
-function resolveSession(timestamp: number, periods: SessionPeriods): SessionType {
-  if (isInPeriods(timestamp, periods.regular)) return "regular";
-  if (isInPeriods(timestamp, periods.pre)) return "pre";
-  if (isInPeriods(timestamp, periods.post)) return "post";
-  return null;
-}
-
-function buildChartPoint(time: number, price: number, interval: string, session: SessionType, splitSessions: boolean): ChartPoint {
-  const sessionToUse = splitSessions ? session : null;
-  return {
-    time,
-    price,
-    label: makeLabel(time, interval),
-    session: sessionToUse,
-    regularPrice: sessionToUse === null || sessionToUse === "regular" ? price : null,
-    prePrice: sessionToUse === "pre" ? price : null,
-    postPrice: sessionToUse === "post" ? price : null,
-  };
-}
-
-function buildPointsFromYahooResult(result: any, interval: string, includePrePost: boolean): ChartPoint[] {
-  const timestamps = Array.isArray(result?.timestamp) ? (result.timestamp as number[]) : [];
-  const closes = Array.isArray(result?.indicators?.quote?.[0]?.close)
-    ? (result.indicators.quote[0].close as Array<number | null>)
-    : [];
-  if (timestamps.length === 0 || closes.length === 0) return [];
-
-  const sessionPeriods = includePrePost ? extractSessionPeriods(result?.meta?.tradingPeriods) : null;
-  const maxLen = Math.min(timestamps.length, closes.length);
-  const points: ChartPoint[] = [];
-
-  for (let i = 0; i < maxLen; i++) {
-    const time = timestamps[i];
-    const price = closes[i];
-    if (typeof price !== "number" || !Number.isFinite(price)) continue;
-
-    const session = sessionPeriods ? resolveSession(time, sessionPeriods) : null;
-    points.push(buildChartPoint(time, price, interval, session, includePrePost));
-  }
-
-  return points;
-}
-
-function buildPointsFromEdgeHistory(
-  history: Array<{ time: number; price: number; session?: SessionType }>,
-  interval: string,
-  includePrePost: boolean
-): ChartPoint[] {
-  const points: ChartPoint[] = [];
-  for (const h of history) {
-    if (typeof h.time !== "number" || typeof h.price !== "number" || !Number.isFinite(h.price)) continue;
-    points.push(buildChartPoint(h.time, h.price, interval, includePrePost ? normalizeSession(h.session) : null, includePrePost));
-  }
-  return points;
+interface ChartResult {
+  points: ChartPoint[];
+  previousClose: number | null;
 }
 
 function makeLabel(timestamp: number, interval: string): string {
@@ -193,101 +77,98 @@ async function fetchChartData(
   interval: string,
   windowSeconds?: number,
   includePrePost = false
-): Promise<ChartPoint[]> {
-  const fetchFromYahoo = async (): Promise<ChartPoint[]> => {
+): Promise<ChartResult> {
+  const empty: ChartResult = { points: [], previousClose: null };
+
+  // In dev, try local proxy first for speed
+  if (import.meta.env.DEV) {
     try {
-      const baseUrl = import.meta.env.DEV ? "/api/yf" : "https://query2.finance.yahoo.com";
-      const url = `${baseUrl}/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=${interval}&events=history&includePrePost=${includePrePost ? "true" : "false"}`;
-      const resp = await fetch(url, {
-        signal: AbortSignal.timeout(10000),
-        headers: { Accept: "application/json" },
-      });
-      if (!resp.ok) return [];
-      const data = await resp.json();
-      const result = data?.chart?.result?.[0];
-      return buildPointsFromYahooResult(result, interval, includePrePost);
-    } catch {
-      return [];
-    }
-  };
-
-  const fetchFromEdge = async (): Promise<ChartPoint[]> => {
-    try {
-      const { data, error } = await supabase.functions.invoke("fetch-history", {
-        body: { tickers: [ticker], range, interval, includePrePost },
-      });
-      if (error || !data?.results?.[ticker]?.history) return [];
-      return buildPointsFromEdgeHistory(
-        data.results[ticker].history as Array<{ time: number; price: number; session?: SessionType }>,
-        interval,
-        includePrePost
-      );
-    } catch {
-      return [];
-    }
-  };
-
-  // Prod-first path: Edge Function first (stable in production), then direct Yahoo fallback.
-  if (import.meta.env.PROD) {
-    const edgePoints = await fetchFromEdge();
-    const edgeHasExtendedSessions = edgePoints.some((p) => p.session === "pre" || p.session === "post");
-    if (edgePoints.length > 0 && (!includePrePost || edgeHasExtendedSessions)) {
-      return trimToWindow(edgePoints, windowSeconds);
-    }
-
-    const yahooPoints = await fetchFromYahoo();
-    if (yahooPoints.length > 0) return trimToWindow(yahooPoints, windowSeconds);
-    return edgePoints.length > 0 ? trimToWindow(edgePoints, windowSeconds) : [];
+      const prePostParam = includePrePost ? "&includePrePost=true" : "";
+      const url = `/api/yf/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=${interval}&events=history${prePostParam}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { Accept: "application/json" } });
+      if (resp.ok) {
+        const data = await resp.json();
+        const result = data?.chart?.result?.[0];
+        if (result?.timestamp && result?.indicators?.quote?.[0]?.close) {
+          const ts: number[] = result.timestamp;
+          const cl: (number | null)[] = result.indicators.quote[0].close;
+          const points = ts.map((t, i) => cl[i] != null ? { time: t, price: cl[i] as number, label: makeLabel(t, interval) } : null)
+            .filter((p): p is ChartPoint => p !== null);
+          const prevClose = result?.meta?.chartPreviousClose ?? result?.meta?.previousClose ?? null;
+          return { points: trimToWindow(points, windowSeconds), previousClose: prevClose };
+        }
+      }
+    } catch { /* fall through */ }
   }
 
-  // Dev-first path: local Yahoo proxy first for quick iteration, Edge fallback.
-  const yahooPoints = await fetchFromYahoo();
-  if (yahooPoints.length > 0) return trimToWindow(yahooPoints, windowSeconds);
-
-  const edgePoints = await fetchFromEdge();
-  if (edgePoints.length > 0) return trimToWindow(edgePoints, windowSeconds);
-  return [];
+  // Production: use Edge Function (no CORS issues)
+  try {
+    const { data, error } = await supabase.functions.invoke("fetch-history", {
+      body: { tickers: [ticker], range, interval, includePrePost },
+    });
+    if (error || !data?.results?.[ticker]?.history) return empty;
+    const result = data.results[ticker];
+    const points = (result.history as { time: number; price: number }[])
+      .map(h => ({ time: h.time, price: h.price, label: makeLabel(h.time, interval) }));
+    const prevClose = result.previousClose ?? null;
+    return { points: trimToWindow(points, windowSeconds), previousClose: prevClose };
+  } catch {
+    return empty;
+  }
 }
 
 function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
   const [period, setPeriod] = useState<PeriodConfig>(PERIODS[0]);
-  const [data, setData] = useState<ChartPoint[]>([]);
+  const [chartResult, setChartResult] = useState<ChartResult>({ points: [], previousClose: null });
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
-  const useSessionSplit = period.includePrePost === true;
 
   const load = useCallback(async () => {
     setLoading(true);
-    const pts = await fetchChartData(
+    const result = await fetchChartData(
       tickerInfo.ticker,
       period.range,
       period.interval,
       period.windowSeconds,
-      period.includePrePost === true
+      period.includePrePost
     );
-    setData(pts);
+    setChartResult(result);
     setLoading(false);
   }, [tickerInfo.ticker, period.range, period.interval, period.windowSeconds, period.includePrePost]);
 
   useEffect(() => { load(); }, [load]);
 
-  const firstPrice = data[0]?.price ?? null;
+  const data = chartResult.points;
+  const is1D = period.label === "1D";
+
+  // For 1D: use previousClose as reference. Otherwise use first point.
+  const referencePrice = is1D
+    ? (chartResult.previousClose ?? tickerInfo.previousClose ?? data[0]?.price ?? null)
+    : (data[0]?.price ?? null);
   const lastPrice = data.length > 0 ? data[data.length - 1].price : null;
   const periodChangePercent =
-    firstPrice && lastPrice != null
-      ? ((lastPrice - firstPrice) / firstPrice) * 100
+    referencePrice && lastPrice != null && referencePrice !== 0
+      ? ((lastPrice - referencePrice) / referencePrice) * 100
       : null;
   const displayedChangePercent = periodChangePercent ?? tickerInfo.changePercent;
   const isUp = displayedChangePercent >= 0;
   const color = isUp ? "hsl(142, 71%, 45%)" : "hsl(0, 84%, 60%)";
-  const preColor = "hsl(42, 96%, 56%)";
-  const postColor = "hsl(210, 100%, 62%)";
   const gradientId = `chart-grad-${tickerInfo.ticker}`;
 
   const formatYAxis = (v: number) => {
     if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
     return v.toFixed(v < 10 ? 2 : 0);
   };
+
+  // Compute Y domain to include previousClose reference line
+  const yDomain: [string | number, string | number] = (() => {
+    if (!is1D || !referencePrice || data.length === 0) return ["auto", "auto"];
+    const prices = data.map(d => d.price);
+    const minP = Math.min(...prices, referencePrice);
+    const maxP = Math.max(...prices, referencePrice);
+    const margin = (maxP - minP) * 0.05 || referencePrice * 0.002;
+    return [minP - margin, maxP + margin];
+  })();
 
   return (
     <div className="space-y-4">
@@ -323,22 +204,6 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
           </button>
         ))}
       </div>
-      {useSessionSplit && (
-        <div className="flex items-center gap-3 px-1 text-[10px] text-muted-foreground flex-wrap">
-          <div className="flex items-center gap-1">
-            <span className="h-[2px] w-4 rounded-full" style={{ backgroundColor: color }} />
-            <span>Heures ouvertes</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="h-0 w-4 border-t border-dashed" style={{ borderColor: preColor }} />
-            <span>Pré-marché</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="h-0 w-4 border-t border-dashed" style={{ borderColor: postColor }} />
-            <span>Post-marché</span>
-          </div>
-        </div>
-      )}
 
       {/* Chart */}
       {loading ? (
@@ -349,7 +214,7 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={isMobile ? 220 : 280}>
-          <ComposedChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+          <AreaChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={color} stopOpacity={0.3} />
@@ -365,84 +230,51 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
               minTickGap={40}
             />
             <YAxis
-              domain={["auto", "auto"]}
+              domain={yDomain}
               tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
               tickLine={false}
               axisLine={false}
               tickFormatter={formatYAxis}
               width={48}
             />
+            {is1D && referencePrice != null && (
+              <ReferenceLine
+                y={referencePrice}
+                stroke="hsl(var(--muted-foreground))"
+                strokeDasharray="4 4"
+                strokeOpacity={0.5}
+              />
+            )}
             <Tooltip
               content={({ active, payload }) => {
                 if (!active || !payload?.length) return null;
                 const pt = payload[0].payload as ChartPoint;
-                const extendedSessionLabel =
-                  pt.session === "pre"
-                    ? "Pré-marché"
-                    : pt.session === "post"
-                      ? "Post-marché"
-                      : null;
+                const changeFromRef = referencePrice && referencePrice !== 0
+                  ? ((pt.price - referencePrice) / referencePrice) * 100
+                  : null;
                 return (
                   <div className="rounded-lg border bg-popover px-3 py-2 shadow-md">
                     <div className="text-[10px] text-muted-foreground">{pt.label}</div>
                     <div className="font-bold text-sm">{formatCurrency(pt.price, tickerInfo.currency)}</div>
-                    {useSessionSplit && extendedSessionLabel && (
-                      <div className={`text-[10px] font-medium ${pt.session === "pre" ? "text-yellow-400" : "text-blue-400"}`}>
-                        {extendedSessionLabel}
+                    {changeFromRef != null && (
+                      <div className={`text-[10px] font-semibold ${changeFromRef >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
+                        {changeFromRef >= 0 ? "+" : ""}{changeFromRef.toFixed(2)}%
                       </div>
                     )}
                   </div>
                 );
               }}
             />
-            {useSessionSplit ? (
-              <>
-                <Area
-                  type="monotone"
-                  dataKey="regularPrice"
-                  stroke={color}
-                  strokeWidth={2}
-                  fill={`url(#${gradientId})`}
-                  dot={false}
-                  activeDot={{ r: 4, fill: color }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="prePrice"
-                  stroke={preColor}
-                  strokeWidth={1.8}
-                  strokeDasharray="3 5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeOpacity={0.95}
-                  dot={false}
-                  activeDot={{ r: 3, fill: preColor, stroke: "hsl(var(--background))", strokeWidth: 1 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="postPrice"
-                  stroke={postColor}
-                  strokeWidth={1.8}
-                  strokeDasharray="3 5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeOpacity={0.95}
-                  dot={false}
-                  activeDot={{ r: 3, fill: postColor, stroke: "hsl(var(--background))", strokeWidth: 1 }}
-                />
-              </>
-            ) : (
-              <Area
-                type="monotone"
-                dataKey="price"
-                stroke={color}
-                strokeWidth={2}
-                fill={`url(#${gradientId})`}
-                dot={false}
-                activeDot={{ r: 4, fill: color }}
-              />
-            )}
-          </ComposedChart>
+            <Area
+              type="monotone"
+              dataKey="price"
+              stroke={color}
+              strokeWidth={2}
+              fill={`url(#${gradientId})`}
+              dot={false}
+              activeDot={{ r: 4, fill: color }}
+            />
+          </AreaChart>
         </ResponsiveContainer>
       )}
     </div>
