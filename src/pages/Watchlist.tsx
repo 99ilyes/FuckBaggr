@@ -298,7 +298,7 @@ function metricLabel(model: ValuationModel): string {
 }
 
 function currentRatioLabel(model: ValuationModel): string {
-  if (model === "fcf_per_share") return "FCF/Action";
+  if (model === "fcf_per_share") return "P/FCF";
   if (model === "ps") return "P/S";
   return "PER";
 }
@@ -691,7 +691,7 @@ function InlineModel({
       className="h-7 rounded border border-border/60 bg-background px-2 text-xs text-foreground/85 outline-none focus:ring-1 focus:ring-primary"
     >
       <option value="pe">PER</option>
-      <option value="fcf_per_share">FCF/Action</option>
+      <option value="fcf_per_share">P/FCF</option>
       <option value="ps">P/S</option>
     </select>
   );
@@ -1237,7 +1237,7 @@ export default function Watchlist() {
           : null;
       const currentRatio =
         valuationModel === "fcf_per_share"
-          ? effectiveMetric
+          ? calcCurrentMultiple(q?.price ?? null, effectiveMetric)
           : valuationModel === "ps"
             ? psFromTotals
           : calcCurrentMultiple(q?.price ?? null, effectiveMetric) ??
