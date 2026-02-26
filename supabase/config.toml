@@ -1,4 +1,4 @@
-project_id = "vekclcxbhngvzkueytoy"
+project_id = "hjgayfnnwgonluthwtuu"
 
 [functions.fetch-prices]
 verify_jwt = false
