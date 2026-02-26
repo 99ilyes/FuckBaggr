@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import * as XLSX from "xlsx";
 import { useQueryClient } from "@tanstack/react-query";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -248,6 +247,7 @@ export function ImportTransactionsDialog({ open, onOpenChange, portfolios, onImp
                 if (ext === "xlsx" || ext === "xls") {
                     setFileType("xlsx");
                     const buffer = await selectedFile.arrayBuffer();
+                    const XLSX = await import("xlsx");
                     const workbook = XLSX.read(buffer, { type: "array", cellDates: true, raw: true });
                     const sheetName = workbook.SheetNames[0];
                     const sheet = workbook.Sheets[sheetName];

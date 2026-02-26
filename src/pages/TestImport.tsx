@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import * as XLSX from "xlsx";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -743,6 +742,7 @@ export default function TestImport() {
     } else {
       reader.onload = async (ev) => {
         try {
+          const XLSX = await import("xlsx");
           const wb = XLSX.read(ev.target?.result, { type: "array", cellDates: true, raw: true });
           const sheet = wb.Sheets[wb.SheetNames[0]];
           const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet);

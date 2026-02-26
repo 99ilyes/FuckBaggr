@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local debug/import artifacts at project root
+/debug_*
+/ibkr_*
+/parse_ibkr_debug*.py
+/parse_debug_cash.ts
+/test_*
+/Calculatrice.xlsx
+/Transactions_*.xlsx
+/U*_20*.htm

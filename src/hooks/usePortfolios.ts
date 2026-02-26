@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Tables, TablesInsert } from "@/integrations/supabase/types";
@@ -18,6 +19,8 @@ export function usePortfolios() {
       if (error) throw error;
       return data as Portfolio[];
     },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -90,6 +93,8 @@ export function useTransactions(portfolioId?: string) {
 
       return allRows;
     },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -159,6 +164,8 @@ export function useAssetsCache() {
       if (error) throw error;
       return data as AssetCache[];
     },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 export function useCreateBatchTransactions() {
@@ -192,6 +199,7 @@ const HISTORY_QUERY_VERSION_SAFE_PROD = "v3-safe-prod";
 
 export function useHistoricalPrices(tickers: string[], range = "5y", interval = "1wk") {
   const isProd = import.meta.env.PROD;
+  const sortedTickers = useMemo(() => [...tickers].sort(), [tickers]);
   // Some Yahoo combinations can be downsampled by the upstream API.
   // For edge fallback, prefer a stable daily range in production.
   const safeRangeForEdge = interval === "1d" && range === "max" ? "5y" : range;
@@ -201,14 +209,14 @@ export function useHistoricalPrices(tickers: string[], range = "5y", interval = 
       "historical_prices",
       HISTORY_QUERY_VERSION,
       HISTORY_QUERY_VERSION_SAFE_PROD,
-      tickers.sort().join(","),
+      sortedTickers.join(","),
       range,
       safeRangeForEdge,
       interval,
       isProd ? "prod" : "dev",
     ],
     queryFn: async (): Promise<Record<string, AssetHistory>> => {
-      if (tickers.length === 0) return {};
+      if (sortedTickers.length === 0) return {};
 
       const results: Record<string, AssetHistory> = {};
 
@@ -217,7 +225,7 @@ export function useHistoricalPrices(tickers: string[], range = "5y", interval = 
       if (!isProd) {
         // 1) Browser direct Yahoo history first (per-user IP)
         try {
-          const browserHistories = await fetchHistoricalPricesClientSide(tickers);
+          const browserHistories = await fetchHistoricalPricesClientSide(sortedTickers);
           for (const [ticker, info] of Object.entries(browserHistories)) {
             const history = info.timestamps.map((time, idx) => ({
               time,
@@ -236,7 +244,9 @@ export function useHistoricalPrices(tickers: string[], range = "5y", interval = 
       }
 
       // 2) Edge fallback for any missing tickers
-      const missingTickers = isProd ? tickers : tickers.filter((ticker) => !results[ticker]);
+      const missingTickers = isProd
+        ? sortedTickers
+        : sortedTickers.filter((ticker) => !results[ticker]);
       if (missingTickers.length > 0) {
         const { data, error } = await supabase.functions.invoke("fetch-history", {
           body: { tickers: missingTickers, range: safeRangeForEdge, interval },
@@ -263,7 +273,7 @@ export function useHistoricalPrices(tickers: string[], range = "5y", interval = 
 
       return results;
     },
-    enabled: tickers.length > 0,
+    enabled: sortedTickers.length > 0,
     staleTime: 1000 * 60 * 60 * 24, // 24 hours
     retry: 1,
   });

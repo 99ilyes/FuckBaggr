@@ -1,17 +1,11 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { lazy, Suspense, useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { usePortfolios, useTransactions, useAssetsCache, useHistoricalPrices } from "@/hooks/usePortfolios";
-import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats, formatCurrency, formatPercent, calculateDailyPerformance, getMarketStatusForPositions } from "@/lib/calculations";
+import { calculatePositions, calculateCashBalance, calculateCashBalances, calculatePortfolioStats, calculateDailyPerformance, getMarketStatusForPositions } from "@/lib/calculations";
 import { fetchPricesClientSide, persistPricesToCache } from "@/lib/yahooFinance";
 import { KPICards, PortfolioPerformance } from "@/components/KPICards";
 import { PortfolioSelector } from "@/components/PortfolioSelector";
-import { CreatePortfolioDialog } from "@/components/CreatePortfolioDialog";
-import { AddTransactionDialog } from "@/components/AddTransactionDialog";
-import { ImportTransactionsDialog } from "@/components/ImportTransactionsDialog";
 import { PositionsTable } from "@/components/PositionsTable";
 import { TransactionsTable } from "@/components/TransactionsTable";
-
-import { AllocationChart } from "@/components/AllocationChart";
-import { DashboardPerformanceChart } from "@/components/DashboardPerformanceChart";
 import { TopMovers } from "@/components/TopMovers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +20,30 @@ interface LiveMarketQuote {
   marketState: string | null;
   preMarketPrice: number | null;
   postMarketPrice: number | null;
+}
+
+const CreatePortfolioDialog = lazy(() =>
+  import("@/components/CreatePortfolioDialog").then((m) => ({ default: m.CreatePortfolioDialog }))
+);
+const AddTransactionDialog = lazy(() =>
+  import("@/components/AddTransactionDialog").then((m) => ({ default: m.AddTransactionDialog }))
+);
+const ImportTransactionsDialog = lazy(() =>
+  import("@/components/ImportTransactionsDialog").then((m) => ({ default: m.ImportTransactionsDialog }))
+);
+const AllocationChart = lazy(() =>
+  import("@/components/AllocationChart").then((m) => ({ default: m.AllocationChart }))
+);
+const DashboardPerformanceChart = lazy(() =>
+  import("@/components/DashboardPerformanceChart").then((m) => ({ default: m.DashboardPerformanceChart }))
+);
+
+function ChartFallback() {
+  return (
+    <Card className="border-border/50">
+      <CardContent className="h-[340px] animate-pulse" />
+    </Card>
+  );
 }
 
 export default function Index() {
@@ -462,18 +480,20 @@ export default function Index() {
             </div>
 
             {chartView === "performance" ? (
-              <DashboardPerformanceChart
-                transactions={filteredTransactions}
-                historicalPrices={historicalPrices}
-                portfolioId={selectedPortfolioId}
-                portfolioName={selectedPortfolio?.name || "Vue globale"}
-                portfolioColor={selectedPortfolio?.color}
-                currentTotalValue={totalValue}
-                displayCurrency={baseCurrency}
-                loading={historicalLoading || historicalFetching}
-                benchmarkHistories={benchmarkHistories}
-                benchmarkTickers={benchmarkTickers}
-              />
+              <Suspense fallback={<ChartFallback />}>
+                <DashboardPerformanceChart
+                  transactions={filteredTransactions}
+                  historicalPrices={historicalPrices}
+                  portfolioId={selectedPortfolioId}
+                  portfolioName={selectedPortfolio?.name || "Vue globale"}
+                  portfolioColor={selectedPortfolio?.color}
+                  currentTotalValue={totalValue}
+                  displayCurrency={baseCurrency}
+                  loading={historicalLoading || historicalFetching}
+                  benchmarkHistories={benchmarkHistories}
+                  benchmarkTickers={benchmarkTickers}
+                />
+              </Suspense>
             ) : (
               <div className="space-y-2">
                 {!selectedPortfolioId && (
@@ -498,9 +518,13 @@ export default function Index() {
                   </div>
                 )}
                 {!selectedPortfolioId && allocationMode === "account" ? (
-                  <AllocationChart data={portfolioAllocation} title="Par compte" showLogos={false} />
+                  <Suspense fallback={<ChartFallback />}>
+                    <AllocationChart data={portfolioAllocation} title="Par compte" showLogos={false} />
+                  </Suspense>
                 ) : (
-                  <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
+                  <Suspense fallback={<ChartFallback />}>
+                    <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
+                  </Suspense>
                 )}
               </div>
             )}
@@ -546,17 +570,32 @@ export default function Index() {
         </Tabs>
       </main>
 
-      <CreatePortfolioDialog open={createPortfolioOpen} onOpenChange={setCreatePortfolioOpen} />
-      <AddTransactionDialog
-        open={addTransactionOpen}
-        onOpenChange={setAddTransactionOpen}
-        portfolios={portfolios}
-        defaultPortfolioId={selectedPortfolioId || undefined} />
+      {createPortfolioOpen && (
+        <Suspense fallback={null}>
+          <CreatePortfolioDialog open={createPortfolioOpen} onOpenChange={setCreatePortfolioOpen} />
+        </Suspense>
+      )}
 
-      <ImportTransactionsDialog
-        open={importTransactionsOpen}
-        onOpenChange={setImportTransactionsOpen}
-        portfolios={portfolios} />
+      {addTransactionOpen && (
+        <Suspense fallback={null}>
+          <AddTransactionDialog
+            open={addTransactionOpen}
+            onOpenChange={setAddTransactionOpen}
+            portfolios={portfolios}
+            defaultPortfolioId={selectedPortfolioId || undefined}
+          />
+        </Suspense>
+      )}
+
+      {importTransactionsOpen && (
+        <Suspense fallback={null}>
+          <ImportTransactionsDialog
+            open={importTransactionsOpen}
+            onOpenChange={setImportTransactionsOpen}
+            portfolios={portfolios}
+          />
+        </Suspense>
+      )}
 
     </div>);
 
