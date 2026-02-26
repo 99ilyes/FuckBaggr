@@ -54,6 +54,7 @@ interface ChartPoint {
 interface ChartResult {
   points: ChartPoint[];
   previousClose: number | null;
+  sessionWindow: { start: number; end: number } | null;
 }
 
 type SessionType = "pre" | "regular" | "post";
@@ -141,24 +142,50 @@ function trimToWindow(points: ChartPoint[], windowSeconds?: number): ChartPoint[
   return trimmed.length > 1 ? trimmed : points;
 }
 
-function trimToLatestSessionDay(points: ChartPoint[]): ChartPoint[] {
-  if (points.length === 0) return points;
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
 
-  const sessionPoints = points.filter((p) => p.session !== null);
-  if (sessionPoints.length === 0) return points;
+function trimToLatestRegularSession(points: ChartPoint[]): { points: ChartPoint[]; sessionWindow: { start: number; end: number } | null } {
+  if (points.length === 0) return { points, sessionWindow: null };
+
+  const regularPoints = points.filter((p) => p.session === "regular");
+  if (regularPoints.length === 0) return { points, sessionWindow: null };
 
   // A large intraday gap indicates a new market day.
   const SESSION_BREAK_SECONDS = 3 * 60 * 60;
-  let latestDayStartTime = sessionPoints[0].time;
+  const sessions: ChartPoint[][] = [[regularPoints[0]]];
 
-  for (let i = 1; i < sessionPoints.length; i++) {
-    if (sessionPoints[i].time - sessionPoints[i - 1].time > SESSION_BREAK_SECONDS) {
-      latestDayStartTime = sessionPoints[i].time;
+  for (let i = 1; i < regularPoints.length; i++) {
+    if (regularPoints[i].time - regularPoints[i - 1].time > SESSION_BREAK_SECONDS) {
+      sessions.push([regularPoints[i]]);
+    } else {
+      sessions[sessions.length - 1].push(regularPoints[i]);
     }
   }
 
-  const trimmed = points.filter((p) => p.time >= latestDayStartTime);
-  return trimmed.length > 1 ? trimmed : points;
+  const latestSession = sessions[sessions.length - 1];
+  const latestStart = latestSession[0].time;
+  const latestLast = latestSession[latestSession.length - 1].time;
+
+  const previousDurations = sessions
+    .slice(0, -1)
+    .map((session) => session[session.length - 1].time - session[0].time)
+    .filter((duration) => duration > 0);
+  const typicalDuration = median(previousDurations);
+  const inferredEnd = typicalDuration != null
+    ? Math.max(latestLast, latestStart + typicalDuration)
+    : latestLast;
+
+  return {
+    points: latestSession.length > 0 ? latestSession : points,
+    sessionWindow: { start: latestStart, end: inferredEnd },
+  };
 }
 
 async function fetchChartData(
@@ -168,7 +195,7 @@ async function fetchChartData(
   windowSeconds?: number,
   includePrePost = false
 ): Promise<ChartResult> {
-  const empty: ChartResult = { points: [], previousClose: null };
+  const empty: ChartResult = { points: [], previousClose: null, sessionWindow: null };
 
   // In dev, try local proxy first for speed
   if (import.meta.env.DEV) {
@@ -193,10 +220,11 @@ async function fetchChartData(
             : null)
             .filter((p): p is ChartPoint => p !== null);
           const prevClose = result?.meta?.chartPreviousClose ?? result?.meta?.previousClose ?? null;
-          const trimmed = includePrePost
-            ? trimToLatestSessionDay(points)
-            : trimToWindow(points, windowSeconds);
-          return { points: trimmed, previousClose: prevClose };
+          if (includePrePost) {
+            const trimmed = trimToLatestRegularSession(points);
+            return { points: trimmed.points, previousClose: prevClose, sessionWindow: trimmed.sessionWindow };
+          }
+          return { points: trimToWindow(points, windowSeconds), previousClose: prevClose, sessionWindow: null };
         }
       }
     } catch { /* fall through */ }
@@ -212,10 +240,11 @@ async function fetchChartData(
     const points = (result.history as { time: number; price: number; session?: SessionType }[])
       .map(h => ({ time: h.time, price: h.price, label: makeLabel(h.time, interval), session: h.session ?? null }));
     const prevClose = result.previousClose ?? null;
-    const trimmed = includePrePost
-      ? trimToLatestSessionDay(points)
-      : trimToWindow(points, windowSeconds);
-    return { points: trimmed, previousClose: prevClose };
+    if (includePrePost) {
+      const trimmed = trimToLatestRegularSession(points);
+      return { points: trimmed.points, previousClose: prevClose, sessionWindow: trimmed.sessionWindow };
+    }
+    return { points: trimToWindow(points, windowSeconds), previousClose: prevClose, sessionWindow: null };
   } catch {
     return empty;
   }
@@ -257,13 +286,11 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
     referencePrice && changePrice != null && referencePrice !== 0
       ? ((changePrice - referencePrice) / referencePrice) * 100
       : null;
-  const displayedChangePercent = is1D
-    ? tickerInfo.changePercent
-    : (periodChangePercent ?? tickerInfo.changePercent);
+  const displayedChangePercent = periodChangePercent ?? tickerInfo.changePercent;
   const isUp = displayedChangePercent >= 0;
   const color = isUp ? "hsl(142, 71%, 45%)" : "hsl(0, 84%, 60%)";
   const gradientId = `chart-grad-${tickerInfo.ticker}`;
-  const hasSessionData = is1D && data.some((pt) => pt.session !== null);
+  const hasSessionData = is1D && data.some((pt) => pt.session === "pre" || pt.session === "post");
   const chartData = data.map((pt) => ({
     ...pt,
     regularPrice: hasSessionData ? (pt.session === "regular" ? pt.price : null) : pt.price,
@@ -285,6 +312,9 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
     const margin = (maxP - minP) * 0.05 || referencePrice * 0.002;
     return [minP - margin, maxP + margin];
   })();
+  const sessionWindow = is1D ? chartResult.sessionWindow : null;
+  const format1DTick = (sec: number) =>
+    new Date(sec * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
   return (
     <div className="space-y-4">
@@ -353,14 +383,29 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
                 <stop offset="100%" stopColor={color} stopOpacity={0} />
               </linearGradient>
             </defs>
-            <XAxis
-              dataKey="label"
-              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-              tickLine={false}
-              axisLine={false}
-              interval="preserveStartEnd"
-              minTickGap={40}
-            />
+            {is1D && sessionWindow ? (
+              <XAxis
+                type="number"
+                dataKey="time"
+                domain={[sessionWindow.start, sessionWindow.end]}
+                allowDataOverflow
+                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={format1DTick}
+                minTickGap={40}
+                tickCount={6}
+              />
+            ) : (
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                tickLine={false}
+                axisLine={false}
+                interval="preserveStartEnd"
+                minTickGap={40}
+              />
+            )}
             <YAxis
               domain={yDomain}
               tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
