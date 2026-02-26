@@ -48,11 +48,81 @@ interface ChartPoint {
   time: number;
   price: number;
   label: string;
+  session: SessionType | null;
 }
 
 interface ChartResult {
   points: ChartPoint[];
   previousClose: number | null;
+}
+
+type SessionType = "pre" | "regular" | "post";
+
+type TradingPeriod = { start: number; end: number };
+type SessionPeriods = {
+  pre: TradingPeriod[];
+  regular: TradingPeriod[];
+  post: TradingPeriod[];
+};
+
+function flattenTradingPeriods(input: unknown): TradingPeriod[] {
+  const periods: TradingPeriod[] = [];
+
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
+
+    if (node && typeof node === "object") {
+      const maybeStart = (node as { start?: unknown }).start;
+      const maybeEnd = (node as { end?: unknown }).end;
+      const start = typeof maybeStart === "number" ? maybeStart : null;
+      const end = typeof maybeEnd === "number" ? maybeEnd : null;
+
+      if (start !== null && end !== null && Number.isFinite(start) && Number.isFinite(end) && end > start) {
+        periods.push({ start, end });
+      }
+    }
+  };
+
+  walk(input);
+  return periods;
+}
+
+function extractSessionPeriods(metaTradingPeriods: unknown): SessionPeriods {
+  const raw = (metaTradingPeriods ?? {}) as {
+    pre?: unknown;
+    regular?: unknown;
+    post?: unknown;
+  };
+
+  return {
+    pre: flattenTradingPeriods(raw.pre),
+    regular: flattenTradingPeriods(raw.regular),
+    post: flattenTradingPeriods(raw.post),
+  };
+}
+
+function isInTradingPeriods(timestamp: number, periods: TradingPeriod[]): boolean {
+  for (const p of periods) {
+    if (timestamp >= p.start && timestamp < p.end) return true;
+  }
+  return false;
+}
+
+function resolveSession(timestamp: number, periods: SessionPeriods): SessionType | null {
+  if (isInTradingPeriods(timestamp, periods.regular)) return "regular";
+  if (isInTradingPeriods(timestamp, periods.pre)) return "pre";
+  if (isInTradingPeriods(timestamp, periods.post)) return "post";
+  return null;
+}
+
+function sessionLabel(session: SessionType | null): string | null {
+  if (session === "regular") return "Séance régulière";
+  if (session === "pre") return "Pré-marché";
+  if (session === "post") return "Post-marché";
+  return null;
 }
 
 function makeLabel(timestamp: number, interval: string): string {
@@ -92,7 +162,15 @@ async function fetchChartData(
         if (result?.timestamp && result?.indicators?.quote?.[0]?.close) {
           const ts: number[] = result.timestamp;
           const cl: (number | null)[] = result.indicators.quote[0].close;
-          const points = ts.map((t, i) => cl[i] != null ? { time: t, price: cl[i] as number, label: makeLabel(t, interval) } : null)
+          const sessionPeriods = includePrePost ? extractSessionPeriods(result?.meta?.tradingPeriods) : null;
+          const points = ts.map((t, i) => cl[i] != null
+            ? {
+              time: t,
+              price: cl[i] as number,
+              label: makeLabel(t, interval),
+              session: sessionPeriods ? resolveSession(t, sessionPeriods) : null,
+            }
+            : null)
             .filter((p): p is ChartPoint => p !== null);
           const prevClose = result?.meta?.chartPreviousClose ?? result?.meta?.previousClose ?? null;
           return { points: trimToWindow(points, windowSeconds), previousClose: prevClose };
@@ -108,8 +186,8 @@ async function fetchChartData(
     });
     if (error || !data?.results?.[ticker]?.history) return empty;
     const result = data.results[ticker];
-    const points = (result.history as { time: number; price: number }[])
-      .map(h => ({ time: h.time, price: h.price, label: makeLabel(h.time, interval) }));
+    const points = (result.history as { time: number; price: number; session?: SessionType }[])
+      .map(h => ({ time: h.time, price: h.price, label: makeLabel(h.time, interval), session: h.session ?? null }));
     const prevClose = result.previousClose ?? null;
     return { points: trimToWindow(points, windowSeconds), previousClose: prevClose };
   } catch {
@@ -143,17 +221,29 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
 
   // For 1D: use previousClose as reference. Otherwise use first point.
   const referencePrice = is1D
-    ? (chartResult.previousClose ?? tickerInfo.previousClose ?? data[0]?.price ?? null)
+    ? (tickerInfo.previousClose ?? chartResult.previousClose ?? data[0]?.price ?? null)
     : (data[0]?.price ?? null);
   const lastPrice = data.length > 0 ? data[data.length - 1].price : null;
+  const regularPoints = is1D ? data.filter((pt) => pt.session === "regular") : data;
+  const regularLastPrice = regularPoints.length > 0 ? regularPoints[regularPoints.length - 1].price : null;
+  const changePrice = is1D ? regularLastPrice : lastPrice;
   const periodChangePercent =
-    referencePrice && lastPrice != null && referencePrice !== 0
-      ? ((lastPrice - referencePrice) / referencePrice) * 100
+    referencePrice && changePrice != null && referencePrice !== 0
+      ? ((changePrice - referencePrice) / referencePrice) * 100
       : null;
-  const displayedChangePercent = periodChangePercent ?? tickerInfo.changePercent;
+  const displayedChangePercent = is1D
+    ? tickerInfo.changePercent
+    : (periodChangePercent ?? tickerInfo.changePercent);
   const isUp = displayedChangePercent >= 0;
   const color = isUp ? "hsl(142, 71%, 45%)" : "hsl(0, 84%, 60%)";
   const gradientId = `chart-grad-${tickerInfo.ticker}`;
+  const hasSessionData = is1D && data.some((pt) => pt.session !== null);
+  const chartData = data.map((pt) => ({
+    ...pt,
+    regularPrice: hasSessionData ? (pt.session === "regular" ? pt.price : null) : pt.price,
+    prePrice: hasSessionData && pt.session === "pre" ? pt.price : null,
+    postPrice: hasSessionData && pt.session === "post" ? pt.price : null,
+  }));
 
   const formatYAxis = (v: number) => {
     if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
@@ -204,6 +294,22 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
           </button>
         ))}
       </div>
+      {hasSessionData && (
+        <div className="flex items-center justify-end gap-3 px-1 text-[10px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-yellow-400" />
+            Pré-marché
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+            Séance régulière
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-blue-400" />
+            Post-marché
+          </span>
+        </div>
+      )}
 
       {/* Chart */}
       {loading ? (
@@ -214,7 +320,7 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={isMobile ? 220 : 280}>
-          <AreaChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+          <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={color} stopOpacity={0.3} />
@@ -252,9 +358,13 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
                 const changeFromRef = referencePrice && referencePrice !== 0
                   ? ((pt.price - referencePrice) / referencePrice) * 100
                   : null;
+                const currentSessionLabel = hasSessionData ? sessionLabel(pt.session) : null;
                 return (
                   <div className="rounded-lg border bg-popover px-3 py-2 shadow-md">
                     <div className="text-[10px] text-muted-foreground">{pt.label}</div>
+                    {currentSessionLabel && (
+                      <div className="text-[10px] text-muted-foreground">{currentSessionLabel}</div>
+                    )}
                     <div className="font-bold text-sm">{formatCurrency(pt.price, tickerInfo.currency)}</div>
                     {changeFromRef != null && (
                       <div className={`text-[10px] font-semibold ${changeFromRef >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
@@ -267,13 +377,37 @@ function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
             />
             <Area
               type="monotone"
-              dataKey="price"
+              dataKey="regularPrice"
               stroke={color}
               strokeWidth={2}
               fill={`url(#${gradientId})`}
               dot={false}
               activeDot={{ r: 4, fill: color }}
             />
+            {hasSessionData && (
+              <>
+                <Area
+                  type="monotone"
+                  dataKey="prePrice"
+                  stroke="hsl(45, 96%, 53%)"
+                  strokeWidth={1.5}
+                  strokeDasharray="4 3"
+                  fill="none"
+                  dot={false}
+                  activeDot={{ r: 3, fill: "hsl(45, 96%, 53%)" }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="postPrice"
+                  stroke="hsl(221, 83%, 53%)"
+                  strokeWidth={1.5}
+                  strokeDasharray="4 3"
+                  fill="none"
+                  dot={false}
+                  activeDot={{ r: 3, fill: "hsl(221, 83%, 53%)" }}
+                />
+              </>
+            )}
           </AreaChart>
         </ResponsiveContainer>
       )}
