@@ -191,6 +191,8 @@ async function fetchServerSideFallback(
         previousClose?: number | null;
         name?: string | null;
         currency?: string | null;
+        change?: number | null;
+        changePercent?: number | null;
         marketState?: string | null;
         preMarketPrice?: number | null;
         postMarketPrice?: number | null;
@@ -201,10 +203,10 @@ async function fetchServerSideFallback(
       if (info?.price != null) {
         const price = info.price as number;
         const previousClose = (info.previousClose ?? null) as number | null;
-        const change = previousClose != null ? price - previousClose : 0;
-        const changePercent = previousClose != null && previousClose !== 0
-          ? (change / previousClose) * 100
-          : 0;
+        const change = info.change ?? (previousClose != null ? price - previousClose : 0);
+        const changePercent = info.changePercent ?? (previousClose != null && previousClose !== 0
+          ? ((price - previousClose) / previousClose) * 100
+          : 0);
         results[t] = {
           price,
           previousClose,
@@ -257,11 +259,18 @@ export async function fetchPricesClientSide(
 ): Promise<Record<string, YahooQuoteResult>> {
   if (tickers.length === 0) return {};
 
+  // In production, always use the edge function for price fetching.
+  // This ensures reliable pre/post market data (marketState, preMarketPrice,
+  // postMarketPrice) which the direct browser→Yahoo call may not return
+  // correctly due to cross-origin response differences.
+  if (!import.meta.env.DEV) {
+    return fetchServerSideFallback(tickers);
+  }
+
+  // In dev, use the local Vite proxy for speed (each user has their own IP).
   const results: Record<string, YahooQuoteResult> = {};
   const failed: string[] = [];
 
-  // Fetch all tickers in parallel from the browser — each user has their own IP.
-  // Yahoo allows several hundred requests/min per IP so this is fine.
   await Promise.all(
     tickers.map(async (ticker) => {
       const r = await fetchTickerBrowser(ticker);
@@ -273,7 +282,7 @@ export async function fetchPricesClientSide(
     })
   );
 
-  // For any tickers that failed, fall back to the DB cache
+  // For any tickers that failed, fall back to the edge function
   if (failed.length > 0) {
     const cached = await fetchServerSideFallback(failed);
     for (const [t, r] of Object.entries(cached)) {
