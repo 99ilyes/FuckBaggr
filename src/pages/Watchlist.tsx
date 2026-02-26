@@ -68,7 +68,6 @@ type ValuationModel = "pe" | "fcf_per_share" | "ps";
 
 // ─── Constants ───────────────────────────────────────────────────────
 
-const YAHOO_TIMEOUT = 6000;
 const STORAGE_KEY = "watchlist-custom-tickers";
 const HIDDEN_KEY = "watchlist-hidden-tickers";
 const FV_PARAMS_KEY = "watchlist-fv-params";
@@ -421,129 +420,9 @@ function normalizeFundamentalsPayload(payload: unknown): Record<string, YFinance
   return out;
 }
 
-/** Browser fallback fundamentals (used only when backend payload is partial). */
-async function fetchFundamentalsBrowser(ticker: string): Promise<YFinanceData> {
-  try {
-    const baseUrl = import.meta.env.DEV ? "/api/yf" : "https://query1.finance.yahoo.com";
-    const period2 = Math.floor(Date.now() / 1000);
-    const period1 = period2 - 60 * 60 * 24 * 365 * 3;
-    const url = `${baseUrl}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=trailingPeRatio,trailingDilutedEPS,trailingBasicEPS,trailingFreeCashFlow,trailingTotalRevenue,trailingDilutedAverageShares,trailingBasicAverageShares&period1=${period1}&period2=${period2}`;
-
-    const resp = await fetch(url, {
-      signal: AbortSignal.timeout(YAHOO_TIMEOUT + 2000),
-      headers: { Accept: "application/json" },
-    });
-    if (!resp.ok) {
-      return {
-        trailingPE: null,
-        trailingEps: null,
-        trailingFcfPerShare: null,
-        trailingRevenuePerShare: null,
-        trailingTotalRevenue: null,
-        trailingRevenueShares: null,
-      };
-    }
-
-    const json = await resp.json();
-    const series = json?.timeseries?.result;
-    if (!Array.isArray(series)) {
-      return {
-        trailingPE: null,
-        trailingEps: null,
-        trailingFcfPerShare: null,
-        trailingRevenuePerShare: null,
-        trailingTotalRevenue: null,
-        trailingRevenueShares: null,
-      };
-    }
-
-    const getLatestRaw = (arr: unknown, requireTTM = false): number | null => {
-      if (!Array.isArray(arr) || arr.length === 0) return null;
-
-      const rows = arr
-        .map((item) => {
-          const r = item as {
-            asOfDate?: unknown;
-            periodType?: unknown;
-            reportedValue?: { raw?: unknown };
-          };
-          return {
-            asOfDate: typeof r.asOfDate === "string" ? r.asOfDate : "",
-            periodType: typeof r.periodType === "string" ? r.periodType : "",
-            raw: typeof r.reportedValue?.raw === "number" ? r.reportedValue.raw : null,
-          };
-        })
-        .filter((row): row is { asOfDate: string; periodType: string; raw: number } => row.raw != null);
-
-      if (rows.length === 0) return null;
-
-      rows.sort((a, b) => b.asOfDate.localeCompare(a.asOfDate));
-      const ttmRow = rows.find((r) => r.periodType.toUpperCase().includes("TTM"));
-      if (requireTTM) return ttmRow?.raw ?? null;
-      return (ttmRow ?? rows[0]).raw;
-    };
-
-    let trailingPE: number | null = null;
-    let trailingEps: number | null = null;
-    let trailingFreeCashFlow: number | null = null;
-    let trailingTotalRevenue: number | null = null;
-    let trailingDilutedAverageShares: number | null = null;
-    let trailingBasicAverageShares: number | null = null;
-
-    for (const item of series) {
-      const type = (item as { meta?: { type?: string[] } })?.meta?.type?.[0];
-
-      if (type === "trailingPeRatio") {
-        trailingPE = getLatestRaw((item as { trailingPeRatio?: unknown[] }).trailingPeRatio);
-      } else if (type === "trailingDilutedEPS") {
-        trailingEps = getLatestRaw((item as { trailingDilutedEPS?: unknown[] }).trailingDilutedEPS, true);
-      } else if (type === "trailingBasicEPS" && trailingEps == null) {
-        trailingEps = getLatestRaw((item as { trailingBasicEPS?: unknown[] }).trailingBasicEPS, true);
-      } else if (type === "trailingFreeCashFlow") {
-        trailingFreeCashFlow = getLatestRaw((item as { trailingFreeCashFlow?: unknown[] }).trailingFreeCashFlow, true);
-      } else if (type === "trailingTotalRevenue") {
-        trailingTotalRevenue = getLatestRaw((item as { trailingTotalRevenue?: unknown[] }).trailingTotalRevenue, true);
-      } else if (type === "trailingDilutedAverageShares") {
-        trailingDilutedAverageShares = getLatestRaw((item as { trailingDilutedAverageShares?: unknown[] }).trailingDilutedAverageShares, true);
-      } else if (type === "trailingBasicAverageShares") {
-        trailingBasicAverageShares = getLatestRaw((item as { trailingBasicAverageShares?: unknown[] }).trailingBasicAverageShares, true);
-      }
-    }
-
-    const shares = trailingDilutedAverageShares ?? trailingBasicAverageShares;
-    const trailingFcfPerShare =
-      shares != null && shares > 0 && trailingFreeCashFlow != null
-        ? trailingFreeCashFlow / shares
-        : null;
-    const trailingRevenuePerShare =
-      shares != null && shares > 0 && trailingTotalRevenue != null
-        ? trailingTotalRevenue / shares
-        : null;
-
-    return {
-      trailingPE,
-      trailingEps,
-      trailingFcfPerShare,
-      trailingRevenuePerShare,
-      trailingTotalRevenue,
-      trailingRevenueShares: shares,
-    };
-  } catch {
-    return {
-      trailingPE: null,
-      trailingEps: null,
-      trailingFcfPerShare: null,
-      trailingRevenuePerShare: null,
-      trailingTotalRevenue: null,
-      trailingRevenueShares: null,
-    };
-  }
-}
-
-/** Fetch fundamentals via backend API first, then patch missing fields with browser fallback if needed. */
+/** Fetch fundamentals uniquement via backend API. */
 async function fetchFundamentals(tickers: string[]): Promise<Record<string, YFinanceData>> {
   if (tickers.length === 0) return {};
-  const merged: Record<string, YFinanceData> = {};
 
   try {
     const { supabase } = await import("@/integrations/supabase/client");
@@ -553,44 +432,14 @@ async function fetchFundamentals(tickers: string[]): Promise<Record<string, YFin
 
     if (error) {
       console.warn("[Watchlist] Edge Function fundamentals error:", error);
-    } else {
-      Object.assign(merged, normalizeFundamentalsPayload(data));
+      return {};
     }
+
+    return normalizeFundamentalsPayload(data);
   } catch (err) {
     console.warn("[Watchlist] Edge Function fundamentals failed:", err);
+    return {};
   }
-
-  const missing = tickers.filter((ticker) => {
-    const fund = merged[ticker];
-    return (
-      !fund ||
-      fund.trailingEps == null ||
-      fund.trailingFcfPerShare == null ||
-      fund.trailingRevenuePerShare == null ||
-      fund.trailingTotalRevenue == null ||
-      fund.trailingRevenueShares == null
-    );
-  });
-
-  if (missing.length === 0) return merged;
-
-  const browserFallback = await Promise.all(
-    missing.map(async (ticker) => [ticker, await fetchFundamentalsBrowser(ticker)] as const)
-  );
-
-  for (const [ticker, fallback] of browserFallback) {
-    const current = merged[ticker];
-    merged[ticker] = {
-      trailingPE: current?.trailingPE ?? fallback.trailingPE,
-      trailingEps: current?.trailingEps ?? fallback.trailingEps,
-      trailingFcfPerShare: current?.trailingFcfPerShare ?? fallback.trailingFcfPerShare,
-      trailingRevenuePerShare: current?.trailingRevenuePerShare ?? fallback.trailingRevenuePerShare,
-      trailingTotalRevenue: current?.trailingTotalRevenue ?? fallback.trailingTotalRevenue,
-      trailingRevenueShares: current?.trailingRevenueShares ?? fallback.trailingRevenueShares,
-    };
-  }
-
-  return merged;
 }
 
 async function fetchAllQuotes(tickers: string[]): Promise<Record<string, TickerQuote>> {
@@ -1390,10 +1239,7 @@ export default function Watchlist() {
         valuationModel === "fcf_per_share"
           ? effectiveMetric
           : valuationModel === "ps"
-            ? (
-              psFromTotals ??
-              (manualMetric != null ? calcCurrentMultiple(q?.price ?? null, manualMetric) : null)
-            )
+            ? psFromTotals
           : calcCurrentMultiple(q?.price ?? null, effectiveMetric) ??
           (valuationModel === "pe" ? (q?.trailingPE ?? null) : null);
       const futurePrice = params ? calcFuturePrice(effectiveMetric, params) : null;
