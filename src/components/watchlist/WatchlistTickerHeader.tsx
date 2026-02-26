@@ -52,7 +52,7 @@ export function WatchlistTickerHeader({ row }: Props) {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 text-right">
+        <div className="grid grid-cols-1 gap-3 text-right sm:grid-cols-3">
           <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
             <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Prix juste</p>
             <p className="mt-1 tabular-nums text-sm font-semibold text-foreground">

@@ -1127,7 +1127,7 @@ export default function Watchlist() {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="flex flex-col min-h-screen w-full">
+      <div className="flex flex-col min-h-screen w-full overflow-x-hidden">
         <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3 md:px-6">
           <SidebarTrigger />
           <Eye className="h-5 w-5 text-primary" />
@@ -1137,7 +1137,7 @@ export default function Watchlist() {
           </span>
         </header>
 
-        <main className="flex-1 p-4 md:p-6">
+        <main className="flex-1 p-4 md:p-6 overflow-x-hidden">
           <div className="space-y-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] lg:gap-4 lg:space-y-0">
             <WatchlistTickerMenu
               rows={viewModel.menuRows}

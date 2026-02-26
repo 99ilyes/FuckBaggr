@@ -309,7 +309,7 @@ export function WatchlistPricePanel({ ticker, currency, pru, fairPrice, operatio
         )}
       </div>
 
-      <div className="relative rounded-lg border border-border/60 bg-muted/20 p-2">
+      <div className="relative overflow-hidden rounded-lg border border-border/60 bg-muted/20 p-2">
         {isLoading ? (
           <Skeleton className="h-[340px] w-full" />
         ) : filteredHistory.length === 0 ? (
@@ -318,14 +318,14 @@ export function WatchlistPricePanel({ ticker, currency, pru, fairPrice, operatio
           </div>
         ) : (
           <>
-            <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-col gap-1">
+            <div className="pointer-events-none absolute left-3 right-3 top-3 z-10 flex flex-col gap-1">
               {pru != null && (
-                <div className="rounded-md border border-[hsl(var(--chart-3))] bg-background/90 px-2 py-1 text-[11px] font-semibold text-[hsl(var(--chart-3))]">
+                <div className="max-w-full truncate rounded-md border border-[hsl(var(--chart-3))] bg-background/90 px-2 py-1 text-[11px] font-semibold text-[hsl(var(--chart-3))]">
                   PRU {formatCurrency(pru, currency)}
                 </div>
               )}
               {fairPrice != null && (
-                <div className="rounded-md border border-[hsl(var(--chart-1))] bg-background/90 px-2 py-1 text-[11px] font-semibold text-[hsl(var(--chart-1))]">
+                <div className="max-w-full truncate rounded-md border border-[hsl(var(--chart-1))] bg-background/90 px-2 py-1 text-[11px] font-semibold text-[hsl(var(--chart-1))]">
                   Prix juste {formatCurrency(fairPrice, currency)}
                 </div>
               )}
