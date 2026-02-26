@@ -79,6 +79,7 @@ const COLOR_WARNING = "text-amber-300";
 interface WatchlistTickerMeta {
   custom?: boolean;
   hidden?: boolean;
+  manualEps?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -224,6 +225,7 @@ function parseTickerMeta(notes: string | null): WatchlistTickerMeta {
     return {
       custom: typeof obj.custom === "boolean" ? obj.custom : undefined,
       hidden: typeof obj.hidden === "boolean" ? obj.hidden : undefined,
+      manualEps: typeof obj.manualEps === "boolean" ? obj.manualEps : undefined,
     };
   } catch {
     return {};
@@ -824,7 +826,10 @@ export default function Watchlist() {
           }
 
           const manual = toFiniteNumber(row.eps);
-          if (manual != null) nextManual[row.ticker] = manual;
+          const hasLegacyManualValue = meta.manualEps == null && manual != null && manual !== 0;
+          if ((meta.manualEps === true || hasLegacyManualValue) && manual != null) {
+            nextManual[row.ticker] = manual;
+          }
 
           if (nextTarget == null && row.min_return != null) {
             nextTarget = toPercentFromDb(row.min_return, DEFAULT_TARGET_RETURN);
@@ -891,6 +896,7 @@ export default function Watchlist() {
             notes: serializeTickerMeta({
               custom: customTickerSet.has(ticker),
               hidden: hiddenTickerSet.has(ticker),
+              manualEps: Number.isFinite(manual),
             }),
             updated_at: nowIso,
           };
