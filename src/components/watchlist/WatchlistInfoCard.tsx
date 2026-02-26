@@ -117,8 +117,8 @@ export function WatchlistInfoCard({ detail }: Props) {
             Aucun portefeuille en position ouverte.
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-md border border-border/60">
-            <table className="w-full min-w-[420px]">
+          <div className="max-w-full overflow-x-auto rounded-md border border-border/60">
+            <table className="w-full min-w-[340px] sm:min-w-[420px]">
               <thead className="bg-muted/20 text-xs text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">Portefeuille</th>

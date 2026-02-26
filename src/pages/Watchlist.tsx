@@ -1127,7 +1127,7 @@ export default function Watchlist() {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="flex flex-col min-h-screen w-full overflow-x-hidden">
+      <div className="flex flex-col min-h-screen w-full">
         <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3 md:px-6">
           <SidebarTrigger />
           <Eye className="h-5 w-5 text-primary" />
@@ -1137,7 +1137,7 @@ export default function Watchlist() {
           </span>
         </header>
 
-        <main className="flex-1 p-4 md:p-6 overflow-x-hidden">
+        <main className="flex-1 p-4 md:p-6">
           <div className="space-y-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] lg:gap-4 lg:space-y-0">
             <WatchlistTickerMenu
               rows={viewModel.menuRows}
@@ -1166,25 +1166,29 @@ export default function Watchlist() {
                     operations={selectedDetail.operationMarkers}
                   />
 
-                  <div className="grid gap-4 xl:grid-cols-2">
-                    <WatchlistValuationCard
-                      ticker={selectedRow.ticker}
-                      currency={selectedRow.currency}
-                      valuationModel={selectedRow.valuationModel}
-                      autoMetric={selectedRow.autoMetric}
-                      manualMetric={selectedRow.manualMetric}
-                      params={fvParams[selectedRow.ticker] ?? null}
-                      targetReturn={targetReturn}
-                      fairPrice={selectedRow.fairPrice}
-                      impliedReturn={selectedRow.impliedReturn}
-                      onCreateValuation={() => createValuation(selectedRow.ticker)}
-                      onValuationModelChange={(value) => updateValuationModel(selectedRow.ticker, value)}
-                      onManualMetricChange={(value) => updateManualMetric(selectedRow.ticker, selectedRow.valuationModel, value)}
-                      onUpdateParam={(key, value) => updateFVParam(selectedRow.ticker, key, value)}
-                      onTargetReturnChange={setTargetReturn}
-                    />
+                  <div className="grid gap-4 min-w-0 xl:grid-cols-2">
+                    <div className="min-w-0">
+                      <WatchlistValuationCard
+                        ticker={selectedRow.ticker}
+                        currency={selectedRow.currency}
+                        valuationModel={selectedRow.valuationModel}
+                        autoMetric={selectedRow.autoMetric}
+                        manualMetric={selectedRow.manualMetric}
+                        params={fvParams[selectedRow.ticker] ?? null}
+                        targetReturn={targetReturn}
+                        fairPrice={selectedRow.fairPrice}
+                        impliedReturn={selectedRow.impliedReturn}
+                        onCreateValuation={() => createValuation(selectedRow.ticker)}
+                        onValuationModelChange={(value) => updateValuationModel(selectedRow.ticker, value)}
+                        onManualMetricChange={(value) => updateManualMetric(selectedRow.ticker, selectedRow.valuationModel, value)}
+                        onUpdateParam={(key, value) => updateFVParam(selectedRow.ticker, key, value)}
+                        onTargetReturnChange={setTargetReturn}
+                      />
+                    </div>
 
-                    <WatchlistInfoCard detail={selectedDetail} />
+                    <div className="min-w-0">
+                      <WatchlistInfoCard detail={selectedDetail} />
+                    </div>
                   </div>
                 </>
               )}
