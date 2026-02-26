@@ -4,11 +4,19 @@ import { useTransactions, usePortfolios } from "@/hooks/usePortfolios";
 import { EarningsTable } from "@/components/EarningsTable";
 import { AddEarningsDialog } from "@/components/AddEarningsDialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 
 const CURRENT_QUARTER_KEY = "earnings-current-quarter";
+const STATUS_ORDER = ["hold", "renforcer", "alleger", "sell"] as const;
+const STATUS_LABELS: Record<string, string> = {
+  hold: "Hold",
+  renforcer: "À renforcer",
+  alleger: "Alléger",
+  sell: "Sell",
+};
 
 function generateQuarterOptions(): string[] {
   const year = new Date().getFullYear();
@@ -38,6 +46,8 @@ export default function EarningsTracker() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editData, setEditData] = useState<Earning | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [tickerFilter, setTickerFilter] = useState("");
 
   const quarterOptions = useMemo(() => generateQuarterOptions(), []);
 
@@ -101,7 +111,21 @@ export default function EarningsTracker() {
     return Array.from(best.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [earnings]);
 
-  const filtered = latestEarnings;
+  const statusOptions = useMemo(() => {
+    const statuses = new Set(latestEarnings.map((e) => e.status).filter(Boolean));
+    const orderedKnown = STATUS_ORDER.filter((s) => statuses.has(s));
+    const custom = Array.from(statuses).filter((s) => !STATUS_ORDER.includes(s as typeof STATUS_ORDER[number])).sort();
+    return [...orderedKnown, ...custom];
+  }, [latestEarnings]);
+
+  const filtered = useMemo(() => {
+    const q = tickerFilter.trim().toLowerCase();
+    return latestEarnings.filter((e) => {
+      const statusOk = statusFilter === "all" || e.status === statusFilter;
+      const tickerOk = q === "" || e.ticker.toLowerCase().includes(q);
+      return statusOk && tickerOk;
+    });
+  }, [latestEarnings, statusFilter, tickerFilter]);
 
   const handleSubmit = (data: EarningInsert) => {
     if (editData) {
@@ -138,8 +162,8 @@ export default function EarningsTracker() {
               </p>
             </div>
           </div>
-          <div className="flex w-full sm:w-auto items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5 bg-background/80 border border-border/60 px-2.5 py-1.5 rounded-md">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-2 sm:flex-wrap">
+            <div className="flex w-full sm:w-auto items-center justify-between sm:justify-start gap-1.5 bg-background/80 border border-border/60 px-2.5 py-1.5 rounded-md">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Trimestre :</span>
               <Select value={currentQuarter} onValueChange={setCurrentQuarter}>
                 <SelectTrigger className="w-[102px] h-7 text-xs border-0 shadow-none focus:ring-0">
@@ -151,6 +175,30 @@ export default function EarningsTracker() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex w-full sm:w-auto items-center justify-between sm:justify-start gap-1.5 bg-background/80 border border-border/60 px-2.5 py-1.5 rounded-md">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Statut :</span>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[130px] h-7 text-xs border-0 shadow-none focus:ring-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous</SelectItem>
+                  {statusOptions.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {STATUS_LABELS[status] || status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-full sm:w-[170px]">
+              <Input
+                value={tickerFilter}
+                onChange={(e) => setTickerFilter(e.target.value)}
+                placeholder="Filtrer par titre..."
+                className="h-8 text-xs"
+              />
             </div>
             <Button size="sm" className="w-full sm:w-auto" onClick={() => { setEditData(null); setDialogOpen(true); }}>
               <Plus className="h-4 w-4 mr-1" />

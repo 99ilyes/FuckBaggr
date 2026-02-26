@@ -141,6 +141,26 @@ function trimToWindow(points: ChartPoint[], windowSeconds?: number): ChartPoint[
   return trimmed.length > 1 ? trimmed : points;
 }
 
+function trimToLatestSessionDay(points: ChartPoint[]): ChartPoint[] {
+  if (points.length === 0) return points;
+
+  const sessionPoints = points.filter((p) => p.session !== null);
+  if (sessionPoints.length === 0) return points;
+
+  // A large intraday gap indicates a new market day.
+  const SESSION_BREAK_SECONDS = 3 * 60 * 60;
+  let latestDayStartTime = sessionPoints[0].time;
+
+  for (let i = 1; i < sessionPoints.length; i++) {
+    if (sessionPoints[i].time - sessionPoints[i - 1].time > SESSION_BREAK_SECONDS) {
+      latestDayStartTime = sessionPoints[i].time;
+    }
+  }
+
+  const trimmed = points.filter((p) => p.time >= latestDayStartTime);
+  return trimmed.length > 1 ? trimmed : points;
+}
+
 async function fetchChartData(
   ticker: string,
   range: string,
@@ -173,7 +193,10 @@ async function fetchChartData(
             : null)
             .filter((p): p is ChartPoint => p !== null);
           const prevClose = result?.meta?.chartPreviousClose ?? result?.meta?.previousClose ?? null;
-          return { points: trimToWindow(points, windowSeconds), previousClose: prevClose };
+          const trimmed = includePrePost
+            ? trimToLatestSessionDay(points)
+            : trimToWindow(points, windowSeconds);
+          return { points: trimmed, previousClose: prevClose };
         }
       }
     } catch { /* fall through */ }
@@ -189,7 +212,10 @@ async function fetchChartData(
     const points = (result.history as { time: number; price: number; session?: SessionType }[])
       .map(h => ({ time: h.time, price: h.price, label: makeLabel(h.time, interval), session: h.session ?? null }));
     const prevClose = result.previousClose ?? null;
-    return { points: trimToWindow(points, windowSeconds), previousClose: prevClose };
+    const trimmed = includePrePost
+      ? trimToLatestSessionDay(points)
+      : trimToWindow(points, windowSeconds);
+    return { points: trimmed, previousClose: prevClose };
   } catch {
     return empty;
   }

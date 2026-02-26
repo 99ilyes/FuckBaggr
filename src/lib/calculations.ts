@@ -481,7 +481,7 @@ export function calculateDailyPerformance(
     if (liveChangeMap[pos.ticker] != null) {
       // varied value = currentValue / (1 + changePercent/100) -> this is previous value
       // change = currentValue - previousValue
-      // simplified: change = currentValue - (currentValue / (1 + changePct)) 
+      // simplified: change = currentValue - (currentValue / (1 + changePct))
       // Actually simpler: changeAmount = currentValue * (changePct / (1 + changePct)) if we assume current is the 'post-change' value.
       // Wait, Yahoo gives changePercent = (Price - Prev) / Prev.
       // So Price = Prev * (1 + Pct).
