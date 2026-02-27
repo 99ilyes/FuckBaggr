@@ -131,7 +131,22 @@ function buildFundamentalsSnapshots(series: any[]): FundamentalsSnapshot[] {
     }
   }
 
-  return Array.from(snapshotMap.values()).sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
+  // Carry forward: fill gaps so each snapshot has the latest known value for every metric
+  const sorted = Array.from(snapshotMap.values()).sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
+
+  const keys: (keyof Omit<FundamentalsSnapshot, "asOfDate">)[] = [
+    "trailingPeRatio", "trailingEps", "trailingFreeCashFlow", "trailingTotalRevenue", "trailingShares",
+  ];
+
+  for (let i = 1; i < sorted.length; i++) {
+    for (const key of keys) {
+      if (sorted[i][key] == null && sorted[i - 1][key] != null) {
+        sorted[i][key] = sorted[i - 1][key];
+      }
+    }
+  }
+
+  return sorted;
 }
 
 function getLastCloseInPeriod(
