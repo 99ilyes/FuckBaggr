@@ -252,7 +252,7 @@ async function fetchChartData(
 
 function ChartContent({ tickerInfo }: { tickerInfo: TickerInfo }) {
   const [period, setPeriod] = useState<PeriodConfig>(PERIODS[0]);
-  const [chartResult, setChartResult] = useState<ChartResult>({ points: [], previousClose: null });
+  const [chartResult, setChartResult] = useState<ChartResult>({ points: [], previousClose: null, sessionWindow: null });
   const [loading, setLoading] = useState(true);
   const isMobile = useIsMobile();
 
