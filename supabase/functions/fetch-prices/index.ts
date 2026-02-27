@@ -451,6 +451,7 @@ serve(async (req) => {
             const series = tsJson?.timeseries?.result;
             if (!Array.isArray(series)) return;
 
+
             ratioResults[ticker] = {
               snapshots: buildFundamentalsSnapshots(series),
             };
