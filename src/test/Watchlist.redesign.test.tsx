@@ -1,10 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { ReactNode, useEffect, useMemo, useState } from "react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WatchlistTickerMenu } from "@/components/watchlist/WatchlistTickerMenu";
 import { WatchlistInfoCard } from "@/components/watchlist/WatchlistInfoCard";
+import { WatchlistValuationCard } from "@/components/watchlist/WatchlistValuationCard";
+import { WatchlistValuationRatiosCard } from "@/components/watchlist/WatchlistValuationRatiosCard";
 import { WatchlistSort } from "@/lib/watchlistTypes";
 import { WatchlistComputedRow, WatchlistTickerDetail } from "@/lib/watchlistViewModel";
+
+const invokeMock = vi.fn();
+
+vi.mock("@/integrations/supabase/client", () => ({
+  supabase: {
+    functions: {
+      invoke: (...args: unknown[]) => invokeMock(...args),
+    },
+  },
+}));
 
 const rowsSeed: WatchlistComputedRow[] = [
   {
@@ -153,6 +166,62 @@ const detailsSeed: Record<string, WatchlistTickerDetail> = {
   },
 };
 
+function createRatioResponses(ticker: string) {
+  return {
+    history: {
+      data: {
+        results: {
+          [ticker]: {
+            history: [
+              { time: Math.floor(new Date("2024-01-01").getTime() / 1000), price: 100 },
+              { time: Math.floor(new Date("2024-02-01").getTime() / 1000), price: 105 },
+              { time: Math.floor(new Date("2024-03-01").getTime() / 1000), price: 110 },
+            ],
+          },
+        },
+      },
+      error: null,
+    },
+    fundamentals: {
+      data: {
+        results: {
+          [ticker]: {
+            snapshots: [
+              {
+                asOfDate: "2023-12-31",
+                trailingPeRatio: 20,
+                trailingEps: 5,
+                trailingFreeCashFlow: 2_000_000,
+                trailingTotalRevenue: 8_000_000,
+                trailingShares: 100_000,
+              },
+              {
+                asOfDate: "2024-02-15",
+                trailingPeRatio: 22,
+                trailingEps: 5.1,
+                trailingFreeCashFlow: 2_200_000,
+                trailingTotalRevenue: 8_400_000,
+                trailingShares: 100_000,
+              },
+            ],
+          },
+        },
+      },
+      error: null,
+    },
+  };
+}
+
+function renderWithQuery(ui: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+    },
+  });
+
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
+
 function sortRows(rows: WatchlistComputedRow[], sort: WatchlistSort): WatchlistComputedRow[] {
   return [...rows].sort((a, b) => {
     if (sort === "alpha") return a.ticker.localeCompare(b.ticker);
@@ -206,7 +275,43 @@ function Harness() {
   );
 }
 
+function LayoutHarness() {
+  const row = rowsSeed[1];
+  const detail = detailsSeed.BBB;
+
+  return (
+    <div className="grid gap-4 min-w-0 xl:grid-cols-2 xl:items-start">
+      <div className="space-y-4 min-w-0">
+        <WatchlistValuationCard
+          ticker={row.ticker}
+          currency={row.currency}
+          valuationModel={row.valuationModel}
+          autoMetric={row.autoMetric}
+          manualMetric={row.manualMetric}
+          params={{ growth: 10, terminalPE: 20, years: 5 }}
+          targetReturn={10}
+          fairPrice={row.fairPrice}
+          impliedReturn={row.impliedReturn}
+          onCreateValuation={() => {}}
+          onValuationModelChange={() => {}}
+          onManualMetricChange={() => {}}
+          onUpdateParam={() => {}}
+          onTargetReturnChange={() => {}}
+        />
+        <WatchlistInfoCard detail={detail} />
+      </div>
+      <div className="min-w-0">
+        <WatchlistValuationRatiosCard ticker="BBB" />
+      </div>
+    </div>
+  );
+}
+
 describe("Watchlist redesign UI", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+  });
+
   it("met a jour le volet detail quand on selectionne un ticker", () => {
     render(<Harness />);
 
@@ -236,5 +341,46 @@ describe("Watchlist redesign UI", () => {
 
     const items = screen.getAllByTestId("watchlist-menu-item");
     expect(within(items[0]).getByText("BBB")).toBeInTheDocument();
+  });
+
+  it("affiche Valorisation puis Informations dans la colonne gauche", async () => {
+    const mockData = createRatioResponses("BBB");
+    invokeMock.mockImplementation((fn: string) => {
+      if (fn === "fetch-history") return Promise.resolve(mockData.history);
+      if (fn === "fetch-prices") return Promise.resolve(mockData.fundamentals);
+      return Promise.resolve({ data: {}, error: null });
+    });
+
+    renderWithQuery(<LayoutHarness />);
+
+    const valuationTitle = screen.getByText("Valorisation");
+    const infoTitle = screen.getByText("Informations");
+
+    expect(valuationTitle.compareDocumentPosition(infoTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(screen.getByTestId("valuation-ratios-card")).toBeInTheDocument();
+  });
+
+  it("affiche les 3 graphes ratios et relance le chargement au changement de periode", async () => {
+    const mockData = createRatioResponses("BBB");
+    invokeMock.mockImplementation((fn: string) => {
+      if (fn === "fetch-history") return Promise.resolve(mockData.history);
+      if (fn === "fetch-prices") return Promise.resolve(mockData.fundamentals);
+      return Promise.resolve({ data: {}, error: null });
+    });
+
+    renderWithQuery(<WatchlistValuationRatiosCard ticker="BBB" />);
+
+    expect(await screen.findByTestId("ratio-chart-pe")).toBeInTheDocument();
+    expect(screen.getByTestId("ratio-chart-pfcf")).toBeInTheDocument();
+    expect(screen.getByTestId("ratio-chart-ps")).toBeInTheDocument();
+
+    const highBadges = screen.getAllByText(/High:/);
+    expect(highBadges.length).toBe(3);
+
+    const initialCalls = invokeMock.mock.calls.length;
+    fireEvent.click(screen.getByTestId("ratio-period-1A"));
+    await waitFor(() => expect(invokeMock.mock.calls.length).toBeGreaterThan(initialCalls));
   });
 });

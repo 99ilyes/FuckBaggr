@@ -22,6 +22,118 @@ function toFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+type TimeseriesRow = {
+  asOfDate: string;
+  periodType: string;
+  raw: number;
+};
+
+type FundamentalsSnapshot = {
+  asOfDate: string;
+  trailingPeRatio: number | null;
+  trailingEps: number | null;
+  trailingFreeCashFlow: number | null;
+  trailingTotalRevenue: number | null;
+  trailingShares: number | null;
+};
+
+function emptySnapshot(asOfDate: string): FundamentalsSnapshot {
+  return {
+    asOfDate,
+    trailingPeRatio: null,
+    trailingEps: null,
+    trailingFreeCashFlow: null,
+    trailingTotalRevenue: null,
+    trailingShares: null,
+  };
+}
+
+function parseTimeseriesRows(arr: unknown): TimeseriesRow[] {
+  if (!Array.isArray(arr) || arr.length === 0) return [];
+
+  return arr
+    .map((item) => ({
+      asOfDate: typeof item?.asOfDate === "string" ? item.asOfDate : "",
+      periodType: typeof item?.periodType === "string" ? item.periodType : "",
+      raw: typeof item?.reportedValue?.raw === "number" ? item.reportedValue.raw : NaN,
+    }))
+    .filter((row) => row.asOfDate.length > 0 && Number.isFinite(row.raw));
+}
+
+function preferTTMRows(rows: TimeseriesRow[]): TimeseriesRow[] {
+  const ttmRows = rows.filter((row) => row.periodType.toUpperCase().includes("TTM"));
+  return ttmRows.length > 0 ? ttmRows : rows;
+}
+
+function getLatestTimeseriesRaw(arr: unknown, requireTTM = false): number | null {
+  const baseRows = parseTimeseriesRows(arr);
+  if (baseRows.length === 0) return null;
+
+  const rows = requireTTM ? preferTTMRows(baseRows) : baseRows;
+  if (rows.length === 0) return null;
+
+  rows.sort((a, b) => b.asOfDate.localeCompare(a.asOfDate));
+  return rows[0]?.raw ?? null;
+}
+
+function applyRowsToSnapshots(
+  snapshotMap: Map<string, FundamentalsSnapshot>,
+  rows: TimeseriesRow[],
+  key: keyof Omit<FundamentalsSnapshot, "asOfDate">,
+  fallbackOnly = false,
+) {
+  for (const row of rows) {
+    const existing = snapshotMap.get(row.asOfDate) ?? emptySnapshot(row.asOfDate);
+    if (!fallbackOnly || existing[key] == null) {
+      existing[key] = row.raw;
+    }
+    snapshotMap.set(row.asOfDate, existing);
+  }
+}
+
+function buildFundamentalsSnapshots(series: any[]): FundamentalsSnapshot[] {
+  const snapshotMap = new Map<string, FundamentalsSnapshot>();
+
+  for (const item of series) {
+    const type = item?.meta?.type?.[0];
+
+    if (type === "trailingPeRatio") {
+      applyRowsToSnapshots(snapshotMap, parseTimeseriesRows(item?.trailingPeRatio), "trailingPeRatio");
+    } else if (type === "trailingDilutedEPS") {
+      applyRowsToSnapshots(snapshotMap, preferTTMRows(parseTimeseriesRows(item?.trailingDilutedEPS)), "trailingEps");
+    } else if (type === "trailingBasicEPS") {
+      applyRowsToSnapshots(snapshotMap, preferTTMRows(parseTimeseriesRows(item?.trailingBasicEPS)), "trailingEps", true);
+    } else if (type === "trailingFreeCashFlow") {
+      applyRowsToSnapshots(
+        snapshotMap,
+        preferTTMRows(parseTimeseriesRows(item?.trailingFreeCashFlow)),
+        "trailingFreeCashFlow",
+      );
+    } else if (type === "trailingTotalRevenue") {
+      applyRowsToSnapshots(
+        snapshotMap,
+        preferTTMRows(parseTimeseriesRows(item?.trailingTotalRevenue)),
+        "trailingTotalRevenue",
+      );
+    } else if (type === "trailingDilutedAverageShares") {
+      applyRowsToSnapshots(
+        snapshotMap,
+        preferTTMRows(parseTimeseriesRows(item?.trailingDilutedAverageShares)),
+        "trailingShares",
+      );
+    } else if (type === "trailingBasicAverageShares") {
+      applyRowsToSnapshots(
+        snapshotMap,
+        preferTTMRows(parseTimeseriesRows(item?.trailingBasicAverageShares)),
+        "trailingShares",
+        true,
+      );
+    }
+  }
+
+  return Array.from(snapshotMap.values()).sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
+}
+
 function getLastCloseInPeriod(
   timestamps: number[],
   closes: Array<number | null>,
@@ -197,6 +309,56 @@ serve(async (req) => {
       });
     }
 
+    // ── MODE: fundamentals-history ──────────────────────────────────────
+    if (mode === "fundamentals-history") {
+      if (!Array.isArray(tickers) || tickers.length === 0) {
+        return new Response(JSON.stringify({ results: {} }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const uniqueTickers = [...new Set(tickers)] as string[];
+      const requestedYears = Number(body?.periodYears);
+      const years = Number.isFinite(requestedYears) && requestedYears > 0
+        ? Math.min(Math.floor(requestedYears), 20)
+        : 5;
+
+      const period2 = Math.floor(Date.now() / 1000);
+      const period1 = period2 - 60 * 60 * 24 * 365 * years;
+
+      const ratioResults: Record<string, { snapshots: FundamentalsSnapshot[] }> = Object.fromEntries(
+        uniqueTickers.map((ticker) => [ticker, { snapshots: [] }]),
+      );
+
+      await Promise.all(
+        uniqueTickers.map(async (ticker: string) => {
+          try {
+            const tsUrl = `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=trailingPeRatio,trailingDilutedEPS,trailingBasicEPS,trailingFreeCashFlow,trailingTotalRevenue,trailingDilutedAverageShares,trailingBasicAverageShares&period1=${period1}&period2=${period2}`;
+            const tsResp = await fetch(tsUrl, {
+              headers: YF_HEADERS,
+              signal: AbortSignal.timeout(7000),
+            });
+
+            if (!tsResp.ok) return;
+
+            const tsJson = await tsResp.json();
+            const series = tsJson?.timeseries?.result;
+            if (!Array.isArray(series)) return;
+
+            ratioResults[ticker] = {
+              snapshots: buildFundamentalsSnapshots(series),
+            };
+          } catch (err) {
+            console.warn(`[fetch-prices] fundamentals-history error for ${ticker}:`, err);
+          }
+        }),
+      );
+
+      return new Response(JSON.stringify({ results: ratioResults }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // ── MODE: fundamentals ──────────────────────────────────────────────
     if (mode === "fundamentals") {
       if (!Array.isArray(tickers) || tickers.length === 0) {
@@ -226,25 +388,6 @@ serve(async (req) => {
       const period2 = Math.floor(Date.now() / 1000);
       const period1 = period2 - 60 * 60 * 24 * 365 * 3;
 
-      const getLatestRaw = (arr: any[] | undefined, requireTTM = false): number | null => {
-        if (!Array.isArray(arr) || arr.length === 0) return null;
-
-        const rows = arr
-          .map((item) => ({
-            asOfDate: typeof item?.asOfDate === "string" ? item.asOfDate : "",
-            periodType: typeof item?.periodType === "string" ? item.periodType : "",
-            raw: typeof item?.reportedValue?.raw === "number" ? item.reportedValue.raw : null,
-          }))
-          .filter((row) => typeof row.raw === "number");
-
-        if (rows.length === 0) return null;
-
-        rows.sort((a, b) => b.asOfDate.localeCompare(a.asOfDate));
-        const ttmRow = rows.find((r) => r.periodType.toUpperCase().includes("TTM"));
-        if (requireTTM) return ttmRow?.raw ?? null;
-        return (ttmRow ?? rows[0]).raw;
-      };
-
       await Promise.all(
         uniqueTickers.map(async (ticker: string) => {
           try {
@@ -271,19 +414,19 @@ serve(async (req) => {
               const type = item?.meta?.type?.[0];
 
               if (type === "trailingPeRatio") {
-                trailingPE = getLatestRaw(item?.trailingPeRatio);
+                trailingPE = getLatestTimeseriesRaw(item?.trailingPeRatio);
               } else if (type === "trailingDilutedEPS") {
-                trailingEps = getLatestRaw(item?.trailingDilutedEPS, true);
+                trailingEps = getLatestTimeseriesRaw(item?.trailingDilutedEPS, true);
               } else if (type === "trailingBasicEPS" && trailingEps == null) {
-                trailingEps = getLatestRaw(item?.trailingBasicEPS, true);
+                trailingEps = getLatestTimeseriesRaw(item?.trailingBasicEPS, true);
               } else if (type === "trailingFreeCashFlow") {
-                trailingFreeCashFlow = getLatestRaw(item?.trailingFreeCashFlow, true);
+                trailingFreeCashFlow = getLatestTimeseriesRaw(item?.trailingFreeCashFlow, true);
               } else if (type === "trailingTotalRevenue") {
-                trailingTotalRevenue = getLatestRaw(item?.trailingTotalRevenue, true);
+                trailingTotalRevenue = getLatestTimeseriesRaw(item?.trailingTotalRevenue, true);
               } else if (type === "trailingDilutedAverageShares") {
-                trailingDilutedAverageShares = getLatestRaw(item?.trailingDilutedAverageShares, true);
+                trailingDilutedAverageShares = getLatestTimeseriesRaw(item?.trailingDilutedAverageShares, true);
               } else if (type === "trailingBasicAverageShares") {
-                trailingBasicAverageShares = getLatestRaw(item?.trailingBasicAverageShares, true);
+                trailingBasicAverageShares = getLatestTimeseriesRaw(item?.trailingBasicAverageShares, true);
               }
             }
 

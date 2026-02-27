@@ -9,6 +9,7 @@ export interface FairValueParams {
 export type WatchlistSort = "implied_desc" | "change_desc" | "alpha";
 
 export type ChartPreset = "1M" | "3M" | "YTD" | "1A" | "2Y" | "5A" | "MAX" | "CUSTOM";
+export type RatioPeriod = "1A" | "2Y" | "5A" | "MAX";
 
 export const DEFAULT_GROWTH = 10;
 export const DEFAULT_TERMINAL_PE = 20;

@@ -29,6 +29,7 @@ import { WatchlistTickerHeader } from "@/components/watchlist/WatchlistTickerHea
 import { WatchlistPricePanel } from "@/components/watchlist/WatchlistPricePanel";
 import { WatchlistValuationCard } from "@/components/watchlist/WatchlistValuationCard";
 import { WatchlistInfoCard } from "@/components/watchlist/WatchlistInfoCard";
+import { WatchlistValuationRatiosCard } from "@/components/watchlist/WatchlistValuationRatiosCard";
 
 interface TickerQuote {
   price: number | null;
@@ -1166,8 +1167,8 @@ export default function Watchlist() {
                     operations={selectedDetail.operationMarkers}
                   />
 
-                  <div className="grid gap-4 min-w-0 xl:grid-cols-2">
-                    <div className="min-w-0">
+                  <div className="grid gap-4 min-w-0 xl:grid-cols-2 xl:items-start">
+                    <div className="space-y-4 min-w-0">
                       <WatchlistValuationCard
                         ticker={selectedRow.ticker}
                         currency={selectedRow.currency}
@@ -1184,10 +1185,12 @@ export default function Watchlist() {
                         onUpdateParam={(key, value) => updateFVParam(selectedRow.ticker, key, value)}
                         onTargetReturnChange={setTargetReturn}
                       />
+
+                      <WatchlistInfoCard detail={selectedDetail} />
                     </div>
 
                     <div className="min-w-0">
-                      <WatchlistInfoCard detail={selectedDetail} />
+                      <WatchlistValuationRatiosCard ticker={selectedRow.ticker} />
                     </div>
                   </div>
                 </>
