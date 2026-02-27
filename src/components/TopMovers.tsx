@@ -228,7 +228,7 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
             </CardHeader>
             <CardContent className="py-0 px-0">
                 {variations.length > 0 ? (
-                    <ScrollArea className="h-[500px] pr-2">
+                    <ScrollArea className="h-[530px] pr-2">
                         <div className="space-y-1">
                             {variations.map(v => <MoverRow key={v.ticker} item={v} />)}
                         </div>
