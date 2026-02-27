@@ -524,27 +524,7 @@ export default function Index() {
               </Suspense>
             ) : (
               <div className="space-y-2">
-                {!selectedPortfolioId && (
-                  <div className="flex justify-end">
-                    <ToggleGroup
-                      type="single"
-                      value={allocationMode}
-                      onValueChange={(v) => {
-                        if (v === "account" || v === "asset") setAllocationMode(v);
-                      }}
-                      variant="outline"
-                      size="sm"
-                      className="gap-1"
-                    >
-                      <ToggleGroupItem value="account" aria-label="Par compte">
-                        Par compte
-                      </ToggleGroupItem>
-                      <ToggleGroupItem value="asset" aria-label="Par actif">
-                        Par actif
-                      </ToggleGroupItem>
-                    </ToggleGroup>
-                  </div>
-                )}
+                {/* Toggles moved inside AllocationChart */}
                 {!selectedPortfolioId && allocationMode === "account" ? (
                   <Suspense fallback={<ChartFallback />}>
                     <AllocationChart
@@ -552,11 +532,19 @@ export default function Index() {
                       title="Par compte"
                       showLogos={false}
                       hideAmounts={isDiscreetMode}
+                      allocationMode={!selectedPortfolioId ? allocationMode : undefined}
+                      onAllocationModeChange={setAllocationMode}
                     />
                   </Suspense>
                 ) : (
                   <Suspense fallback={<ChartFallback />}>
-                    <AllocationChart positions={positions} title="Par actif" groupBy="asset" />
+                    <AllocationChart
+                      positions={positions}
+                      title="Par actif"
+                      groupBy="asset"
+                      allocationMode={!selectedPortfolioId ? allocationMode : undefined}
+                      onAllocationModeChange={setAllocationMode}
+                    />
                   </Suspense>
                 )}
               </div>

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { TickerLogo } from "@/components/TickerLogo";
 
 const CURRENT_QUARTER_KEY = "earnings-current-quarter";
 const STATUS_ORDER = ["hold", "renforcer", "alleger", "sell"] as const;
@@ -47,7 +48,7 @@ export default function EarningsTracker() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editData, setEditData] = useState<Earning | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [tickerFilter, setTickerFilter] = useState("");
+  const [tickerFilter, setTickerFilter] = useState("all");
 
   const quarterOptions = useMemo(() => generateQuarterOptions(), []);
 
@@ -119,10 +120,9 @@ export default function EarningsTracker() {
   }, [latestEarnings]);
 
   const filtered = useMemo(() => {
-    const q = tickerFilter.trim().toLowerCase();
     return latestEarnings.filter((e) => {
       const statusOk = statusFilter === "all" || e.status === statusFilter;
-      const tickerOk = q === "" || e.ticker.toLowerCase().includes(q);
+      const tickerOk = tickerFilter === "all" || tickerFilter === "" || e.ticker === tickerFilter;
       return statusOk && tickerOk;
     });
   }, [latestEarnings, statusFilter, tickerFilter]);
@@ -192,13 +192,24 @@ export default function EarningsTracker() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="w-full sm:w-[170px]">
-              <Input
-                value={tickerFilter}
-                onChange={(e) => setTickerFilter(e.target.value)}
-                placeholder="Filtrer par titre..."
-                className="h-8 text-xs"
-              />
+            <div className="flex w-full sm:w-auto items-center justify-between sm:justify-start gap-1.5 bg-background/80 border border-border/60 px-2.5 py-1.5 rounded-md">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Titre :</span>
+              <Select value={tickerFilter} onValueChange={setTickerFilter}>
+                <SelectTrigger className="w-[130px] h-7 text-xs border-0 shadow-none focus:ring-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous</SelectItem>
+                  {latestEarnings.map((e) => (
+                    <SelectItem key={e.ticker} value={e.ticker}>
+                      <div className="flex items-center gap-2">
+                        <TickerLogo ticker={e.ticker} className="w-5 h-5 rounded-sm" />
+                        <span>{e.ticker}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <Button size="sm" className="w-full sm:w-auto" onClick={() => { setEditData(null); setDialogOpen(true); }}>
               <Plus className="h-4 w-4 mr-1" />

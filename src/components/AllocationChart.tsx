@@ -5,6 +5,7 @@ import { getAllocationColor } from "@/lib/allocationColors";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getLogoCandidates } from "./TickerLogo";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 const DESKTOP_CHART_CENTER_Y = 240;
 const DESKTOP_INNER_RADIUS = 95;
@@ -134,6 +135,8 @@ interface Props {
   groupBy?: "asset" | "sector";
   showLogos?: boolean;
   hideAmounts?: boolean;
+  allocationMode?: "account" | "asset";
+  onAllocationModeChange?: (mode: "account" | "asset") => void;
 }
 
 export function AllocationChart({
@@ -143,6 +146,8 @@ export function AllocationChart({
   groupBy = "asset",
   showLogos = true,
   hideAmounts = false,
+  allocationMode,
+  onAllocationModeChange,
 }: Props) {
   const isMobile = useIsMobile();
   const [resolvedLogoUrls, setResolvedLogoUrls] = useState<Record<string, string>>({});
@@ -351,9 +356,30 @@ export function AllocationChart({
 
   if (preparedData.length === 0) {
     return (
-      <Card className="border-border/60">
-        <CardHeader className="pb-2">
+      <Card>
+        <CardHeader className="pb-2 flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
+          {allocationMode && onAllocationModeChange && (
+            <div className="flex justify-end">
+              <ToggleGroup
+                type="single"
+                value={allocationMode}
+                onValueChange={(v) => {
+                  if (v === "account" || v === "asset") onAllocationModeChange(v);
+                }}
+                variant="outline"
+                size="sm"
+                className="gap-1"
+              >
+                <ToggleGroupItem value="account" aria-label="Par compte">
+                  Par compte
+                </ToggleGroupItem>
+                <ToggleGroupItem value="asset" aria-label="Par actif">
+                  Par actif
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="flex h-48 items-center justify-center text-sm text-muted-foreground">
           Aucune donnée
@@ -497,9 +523,30 @@ export function AllocationChart({
 
   if (isMobile) {
     return (
-      <Card className="col-span-1 border-border/60">
-        <CardHeader className="pb-2">
+      <Card className="col-span-1">
+        <CardHeader className="pb-2 flex flex-row items-center justify-between">
           <CardTitle className="text-xl font-bold">{title}</CardTitle>
+          {allocationMode && onAllocationModeChange && (
+            <div className="flex justify-end">
+              <ToggleGroup
+                type="single"
+                value={allocationMode}
+                onValueChange={(v) => {
+                  if (v === "account" || v === "asset") onAllocationModeChange(v);
+                }}
+                variant="outline"
+                size="sm"
+                className="gap-1"
+              >
+                <ToggleGroupItem value="account" aria-label="Par compte">
+                  Par compte
+                </ToggleGroupItem>
+                <ToggleGroupItem value="asset" aria-label="Par actif">
+                  Par actif
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="flex flex-col items-center gap-4">
           <div className="h-[210px] w-full">
@@ -557,41 +604,67 @@ export function AllocationChart({
   }
 
   return (
-    <div className="col-span-1 h-[480px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart margin={{ top: 10, right: 24, bottom: 10, left: 24 }}>
-          <Pie
-            data={preparedData}
-            cx="50%"
-            cy="50%"
-            startAngle={90}
-            endAngle={-270}
-            innerRadius={DESKTOP_INNER_RADIUS}
-            outerRadius={DESKTOP_OUTER_RADIUS}
-            paddingAngle={1.6}
-            cornerRadius={6}
-            dataKey="value"
-            stroke="hsl(var(--background))"
-            strokeWidth={1.4}
-            label={renderCustomizedLabel}
-            labelLine={false}
-            isAnimationActive
-            animationDuration={950}
-            activeIndex={preparedData.map((_, i) => i)}
-            activeShape={renderActiveShape}
-          >
-            {preparedData.map((item, i) => (
-              <Cell
-                key={item.name + i}
-                fill={item.color}
-                stroke={isVeryDarkColor(item.color) ? "rgba(248, 250, 252, 0.55)" : "hsl(var(--background))"}
-                strokeWidth={isVeryDarkColor(item.color) ? 1.8 : 1.4}
-              />
-            ))}
-          </Pie>
-          <Tooltip content={<CustomTooltip />} />
-        </PieChart>
-      </ResponsiveContainer>
-    </div>
+    <Card className="col-span-1 flex flex-col h-[480px]">
+      <CardHeader className="pb-0 flex-none flex flex-row items-center justify-between">
+        <CardTitle className="text-xl font-bold hidden">{title}</CardTitle>
+        {allocationMode && onAllocationModeChange && (
+          <div className="flex justify-end w-full">
+            <ToggleGroup
+              type="single"
+              value={allocationMode}
+              onValueChange={(v) => {
+                if (v === "account" || v === "asset") onAllocationModeChange(v);
+              }}
+              variant="outline"
+              size="sm"
+              className="gap-1"
+            >
+              <ToggleGroupItem value="account" aria-label="Par compte">
+                Par compte
+              </ToggleGroupItem>
+              <ToggleGroupItem value="asset" aria-label="Par actif">
+                Par actif
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+        )}
+      </CardHeader>
+      <div className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart margin={{ top: 10, right: 24, bottom: 10, left: 24 }}>
+            <Pie
+              data={preparedData}
+              cx="50%"
+              cy="50%"
+              startAngle={90}
+              endAngle={-270}
+              innerRadius={DESKTOP_INNER_RADIUS}
+              outerRadius={DESKTOP_OUTER_RADIUS}
+              paddingAngle={1.6}
+              cornerRadius={6}
+              dataKey="value"
+              stroke="hsl(var(--background))"
+              strokeWidth={1.4}
+              label={renderCustomizedLabel}
+              labelLine={false}
+              isAnimationActive
+              animationDuration={950}
+              activeIndex={preparedData.map((_, i) => i)}
+              activeShape={renderActiveShape}
+            >
+              {preparedData.map((item, i) => (
+                <Cell
+                  key={item.name + i}
+                  fill={item.color}
+                  stroke={isVeryDarkColor(item.color) ? "rgba(248, 250, 252, 0.55)" : "hsl(var(--background))"}
+                  strokeWidth={isVeryDarkColor(item.color) ? 1.8 : 1.4}
+                />
+              ))}
+            </Pie>
+            <Tooltip content={<CustomTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    </Card>
   );
 }

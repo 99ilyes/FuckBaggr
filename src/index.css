@@ -10,31 +10,31 @@
     /* Pure Black */
     --foreground: 210 20% 98%;
 
-    --card: 0 0% 3%;
-    /* Very dark gray for cards */
+    --card: 240 5% 12%;
+    /* Light gray for cards */
     --card-foreground: 210 20% 98%;
 
-    --popover: 0 0% 3%;
+    --popover: 240 5% 12%;
     --popover-foreground: 210 20% 98%;
 
     --primary: 210 20% 98%;
     /* White as primary */
     --primary-foreground: 0 0% 0%;
 
-    --secondary: 240 5% 10%;
+    --secondary: 240 5% 15%;
     --secondary-foreground: 0 0% 98%;
 
-    --muted: 240 5% 10%;
-    --muted-foreground: 240 5% 60%;
+    --muted: 240 5% 15%;
+    --muted-foreground: 240 5% 65%;
 
-    --accent: 240 5% 10%;
+    --accent: 240 5% 15%;
     --accent-foreground: 0 0% 98%;
 
     --destructive: 0 62% 30%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 240 5% 15%;
-    --input: 240 5% 15%;
+    --border: 240 5% 20%;
+    --input: 240 5% 20%;
     --ring: 240 5% 80%;
 
     --radius: 0.5rem;
@@ -50,13 +50,13 @@
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
 
-    --sidebar-background: 0 0% 0%;
+    --sidebar-background: 240 5% 12%;
     --sidebar-foreground: 240 5% 90%;
     --sidebar-primary: 0 0% 98%;
     --sidebar-primary-foreground: 0 0% 0%;
-    --sidebar-accent: 240 5% 10%;
+    --sidebar-accent: 240 5% 15%;
     --sidebar-accent-foreground: 0 0% 98%;
-    --sidebar-border: 240 5% 15%;
+    --sidebar-border: 240 5% 20%;
     --sidebar-ring: 240 5% 80%;
   }
 }

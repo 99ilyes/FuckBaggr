@@ -43,6 +43,7 @@ export function AppSidebar() {
                     asChild
                     isActive={location.pathname === item.url}
                     tooltip={item.title}
+                    className="h-12 md:h-8"
                   >
                     <NavLink to={item.url} end>
                       <item.icon className="!size-6 md:!size-4" />

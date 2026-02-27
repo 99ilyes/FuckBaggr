@@ -172,7 +172,7 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
         .sort((a, b) => b.changePercent - a.changePercent);
 
     const MoverRow = ({ item }: { item: AssetVariation }) => (
-        <div className="flex items-center justify-between py-3 hover:bg-zinc-900/50 transition-colors px-2 rounded-md group cursor-pointer" onClick={() => setSelectedTicker(item)}>
+        <div className="flex items-center justify-between py-3 hover:bg-muted/50 transition-colors px-2 rounded-md group cursor-pointer" onClick={() => setSelectedTicker(item)}>
             <div className="flex items-center gap-3">
                 <div className="relative">
                     <TickerLogo ticker={item.ticker} className="w-8 h-8 rounded-full" />
@@ -219,7 +219,7 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
     );
 
     return (
-        <Card className="border-0 bg-transparent shadow-none">
+        <Card>
             <CardHeader className="py-2 px-2 pb-4">
                 <CardTitle className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-[0.2em] flex items-center gap-2">
                     <TrendingUp className="h-3 w-3" />
@@ -234,7 +234,7 @@ export function TopMovers({ positions, assetsCache, liveChangeMap = {}, liveMark
                         </div>
                     </ScrollArea>
                 ) : (
-                    <div className="text-xs text-muted-foreground p-8 text-center bg-zinc-900/20 rounded-xl border border-white/5">
+                    <div className="text-xs text-muted-foreground p-8 text-center bg-muted/50 rounded-xl border border-border/50">
                         Aucune variation disponible
                     </div>
                 )}

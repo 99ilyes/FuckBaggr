@@ -82,8 +82,8 @@ export function KPICards({
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4 lg:gap-6">
-      <Card className="border-0 bg-transparent shadow-none">
-        <CardContent className="p-0 flex flex-col items-center justify-center h-full text-center">
+      <Card>
+        <CardContent className="p-4 flex flex-col items-center justify-center h-full text-center">
           <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
             <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Valeur Totale</span>
           </div>
@@ -98,8 +98,8 @@ export function KPICards({
         </CardContent>
       </Card>
 
-      <Card className="border-0 bg-transparent shadow-none">
-        <CardContent className="p-0 flex flex-col items-center justify-center h-full text-center">
+      <Card>
+        <CardContent className="p-4 flex flex-col items-center justify-center h-full text-center">
           <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
             <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Performance</span>
           </div>
@@ -116,8 +116,8 @@ export function KPICards({
         </CardContent>
       </Card>
 
-      <Card className="border-0 bg-transparent shadow-none">
-        <CardContent className="p-0 flex flex-col items-center justify-center h-full text-center">
+      <Card>
+        <CardContent className="p-4 flex flex-col items-center justify-center h-full text-center">
           <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
             <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Jour</span>
           </div>
@@ -146,8 +146,8 @@ export function KPICards({
         </CardContent>
       </Card>
 
-      <Card className="border-0 bg-transparent shadow-none">
-        <CardContent className="p-0 h-full flex flex-col items-center text-center justify-center">
+      <Card>
+        <CardContent className="p-4 h-full flex flex-col items-center text-center justify-center">
           {portfolioPerformances && portfolioPerformances.length > 0 ? (
             <>
               <div className="flex items-center justify-center gap-2 text-muted-foreground/60 mb-1 w-full">
@@ -157,7 +157,7 @@ export function KPICards({
                 {portfolioPerformances.map((perf) => (
                   <div
                     key={perf.id}
-                    className="flex items-center justify-between w-full min-w-0 gap-3 cursor-pointer hover:bg-zinc-900/50 rounded-md p-1 -mx-1 transition-colors"
+                    className="flex items-center justify-between w-full min-w-0 gap-3 cursor-pointer hover:bg-muted/50 rounded-md p-1 -mx-1 transition-colors"
                     onClick={() => onSelectPortfolio?.(perf.id)}
                   >
                     <div className="flex items-center gap-3 min-w-0">
