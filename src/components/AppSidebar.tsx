@@ -45,7 +45,7 @@ export function AppSidebar() {
                     tooltip={item.title}
                   >
                     <NavLink to={item.url} end>
-                      <item.icon className="h-4 w-4" />
+                      <item.icon className="!size-6 md:!size-4" />
                       <span>{item.title}</span>
                     </NavLink>
                   </SidebarMenuButton>
