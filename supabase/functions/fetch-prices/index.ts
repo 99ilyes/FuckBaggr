@@ -18,39 +18,8 @@ const YF_HEADERS = {
   Referer: "https://finance.yahoo.com/",
 };
 
-const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
-const ALPHA_VANTAGE_API_KEY = Deno.env.get("ALPHA_VANTAGE_API_KEY") ?? "5MSKMS1BEIE5A1GP";
-const ALPHA_VANTAGE_TIMEOUT_MS = 9000;
-
 function toFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function toNumericValue(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "string") return null;
-
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (trimmed.toLowerCase() === "none" || trimmed.toLowerCase() === "null") return null;
-
-  const normalized = trimmed.replace(/,/g, "");
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function parseIsoDate(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const date = value.trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
-}
-
-function pickFirstNumeric(row: Record<string, unknown>, keys: string[]): number | null {
-  for (const key of keys) {
-    const value = toNumericValue(row[key]);
-    if (value != null) return value;
-  }
-  return null;
 }
 
 type TimeseriesRow = {
@@ -67,8 +36,6 @@ type FundamentalsSnapshot = {
   trailingTotalRevenue: number | null;
   trailingShares: number | null;
 };
-
-type FundamentalsSource = "alpha_vantage" | "yahoo" | "none";
 
 type QuarterlyFundamentalsType =
   | "quarterlyDilutedEPS"
@@ -155,10 +122,7 @@ function pickQuarterlyRows(arr: unknown): TimeseriesRow[] {
 }
 
 function parsePeriodMonths(periodType: string): number | null {
-  const match = periodType
-    .trim()
-    .toUpperCase()
-    .match(/^(\d+)M$/);
+  const match = periodType.trim().toUpperCase().match(/^(\d+)M$/);
   if (!match) return null;
   const months = Number(match[1]);
   return Number.isFinite(months) && months > 0 ? months : null;
@@ -238,7 +202,12 @@ function toDateSeconds(asOfDate: string): number | null {
   return Math.floor(ms / 1000);
 }
 
-function buildTimeseriesUrl(ticker: string, types: string[], period1: number, period2: number): string {
+function buildTimeseriesUrl(
+  ticker: string,
+  types: string[],
+  period1: number,
+  period2: number,
+): string {
   const encodedTicker = encodeURIComponent(ticker);
   const encodedTypes = types.join(",");
   return `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodedTicker}?symbol=${encodedTicker}&type=${encodedTypes}&period1=${period1}&period2=${period2}`;
@@ -284,7 +253,9 @@ function mergeQuarterlySeriesRows(
   return { newRows, oldestSec };
 }
 
-function buildQuarterlySeriesFromBucket(bucket: Record<QuarterlyFundamentalsType, TimeseriesRow[]>): unknown[] {
+function buildQuarterlySeriesFromBucket(
+  bucket: Record<QuarterlyFundamentalsType, TimeseriesRow[]>,
+): unknown[] {
   const out: unknown[] = [];
 
   for (const type of QUARTERLY_FUNDAMENTAL_TYPES) {
@@ -349,209 +320,6 @@ async function fetchQuarterlyFundamentalsSeries(
   return buildQuarterlySeriesFromBucket(bucket);
 }
 
-type AlphaVantageFunction = "EARNINGS" | "CASH_FLOW" | "INCOME_STATEMENT";
-
-async function fetchAlphaVantageFunction(
-  ticker: string,
-  fn: AlphaVantageFunction,
-): Promise<Record<string, unknown> | null> {
-  const url = `${ALPHA_VANTAGE_BASE_URL}?function=${fn}&symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(ALPHA_VANTAGE_API_KEY)}`;
-
-  try {
-    const resp = await fetch(url, {
-      signal: AbortSignal.timeout(ALPHA_VANTAGE_TIMEOUT_MS),
-    });
-
-    if (!resp.ok) {
-      console.warn(`[fetch-prices] Alpha Vantage HTTP ${resp.status} for ${ticker} (${fn})`);
-      return null;
-    }
-
-    const json = await resp.json();
-    if (!json || typeof json !== "object") return null;
-
-    const note = typeof json?.Note === "string" ? json.Note : null;
-    const info = typeof json?.Information === "string" ? json.Information : null;
-    const errorMessage = typeof json?.["Error Message"] === "string" ? json["Error Message"] : null;
-
-    if (note || info || errorMessage) {
-      console.warn(
-        `[fetch-prices] Alpha Vantage payload warning for ${ticker} (${fn}): ${note ?? info ?? errorMessage}`,
-      );
-      return null;
-    }
-
-    return json as Record<string, unknown>;
-  } catch (err) {
-    console.warn(`[fetch-prices] Alpha Vantage request failed for ${ticker} (${fn}):`, err);
-    return null;
-  }
-}
-
-function parseAlphaVantageQuarterlyRows(payload: unknown, key: string): Record<string, unknown>[] {
-  const rows = (payload as Record<string, unknown> | null)?.[key];
-  if (!Array.isArray(rows)) return [];
-
-  return rows.filter((entry) => entry && typeof entry === "object").map((entry) => entry as Record<string, unknown>);
-}
-
-function buildQuarterlyRowsFromMap(map: Map<string, number>): TimeseriesRow[] {
-  return Array.from(map.entries())
-    .map(([asOfDate, raw]) => ({
-      asOfDate,
-      periodType: "3M",
-      raw,
-    }))
-    .sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
-}
-
-function buildTtmRowsFromQuarterly(rows: TimeseriesRow[]): TimeseriesRow[] {
-  const sorted = [...rows].sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
-  const out: TimeseriesRow[] = [];
-  const rollingWindow: TimeseriesRow[] = [];
-
-  for (const row of sorted) {
-    if (!Number.isFinite(row.raw)) continue;
-    rollingWindow.push(row);
-    if (rollingWindow.length > 4) rollingWindow.shift();
-    if (rollingWindow.length < 4) continue;
-
-    const ttmRaw = rollingWindow.reduce((sum, current) => sum + current.raw, 0);
-    if (!Number.isFinite(ttmRaw)) continue;
-
-    out.push({
-      asOfDate: row.asOfDate,
-      periodType: "TTM",
-      raw: ttmRaw,
-    });
-  }
-
-  return out;
-}
-
-function carryForwardSnapshots(snapshotMap: Map<string, FundamentalsSnapshot>): FundamentalsSnapshot[] {
-  const sorted = Array.from(snapshotMap.values()).sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
-  const keys: (keyof Omit<FundamentalsSnapshot, "asOfDate">)[] = [
-    "trailingPeRatio",
-    "trailingEps",
-    "trailingFreeCashFlow",
-    "trailingTotalRevenue",
-    "trailingShares",
-  ];
-
-  for (let i = 1; i < sorted.length; i++) {
-    for (const key of keys) {
-      if (sorted[i][key] == null && sorted[i - 1][key] != null) {
-        sorted[i][key] = sorted[i - 1][key];
-      }
-    }
-  }
-
-  return sorted;
-}
-
-function filterSnapshotsFromPeriod(snapshots: FundamentalsSnapshot[], period1: number): FundamentalsSnapshot[] {
-  return snapshots.filter((snapshot) => {
-    const asOfSec = toDateSeconds(snapshot.asOfDate);
-    return asOfSec != null && asOfSec >= period1;
-  });
-}
-
-async function fetchAlphaVantageFundamentalsSnapshots(
-  ticker: string,
-  period1: number,
-): Promise<FundamentalsSnapshot[]> {
-  if (!ALPHA_VANTAGE_API_KEY) return [];
-
-  const [earningsPayload, cashFlowPayload, incomePayload] = await Promise.all([
-    fetchAlphaVantageFunction(ticker, "EARNINGS"),
-    fetchAlphaVantageFunction(ticker, "CASH_FLOW"),
-    fetchAlphaVantageFunction(ticker, "INCOME_STATEMENT"),
-  ]);
-
-  if (!earningsPayload && !cashFlowPayload && !incomePayload) return [];
-
-  const epsByDate = new Map<string, number>();
-  const revenueByDate = new Map<string, number>();
-  const fcfByDate = new Map<string, number>();
-  const sharesByDate = new Map<string, number>();
-
-  for (const row of parseAlphaVantageQuarterlyRows(earningsPayload, "quarterlyEarnings")) {
-    const asOfDate = parseIsoDate(row.fiscalDateEnding);
-    if (!asOfDate) continue;
-
-    const eps = pickFirstNumeric(row, ["reportedEPS"]);
-    if (eps != null) {
-      epsByDate.set(asOfDate, eps);
-    }
-  }
-
-  for (const row of parseAlphaVantageQuarterlyRows(incomePayload, "quarterlyReports")) {
-    const asOfDate = parseIsoDate(row.fiscalDateEnding);
-    if (!asOfDate) continue;
-
-    const revenue = pickFirstNumeric(row, ["totalRevenue"]);
-    if (revenue != null) {
-      revenueByDate.set(asOfDate, revenue);
-    }
-
-    const shares = pickFirstNumeric(row, [
-      "weightedAverageShsOutDil",
-      "weightedAverageShsOut",
-      "commonStockSharesOutstanding",
-    ]);
-
-    if (shares != null && shares > 0) {
-      sharesByDate.set(asOfDate, shares);
-    }
-  }
-
-  for (const row of parseAlphaVantageQuarterlyRows(cashFlowPayload, "quarterlyReports")) {
-    const asOfDate = parseIsoDate(row.fiscalDateEnding);
-    if (!asOfDate) continue;
-
-    let freeCashFlow = pickFirstNumeric(row, ["freeCashFlow", "freeCashflow", "fcf"]);
-
-    if (freeCashFlow == null) {
-      const operatingCashFlow = pickFirstNumeric(row, ["operatingCashflow", "operatingCashFlow"]);
-      const capex = pickFirstNumeric(row, ["capitalExpenditures", "capitalExpenditure"]);
-
-      if (operatingCashFlow != null && capex != null) {
-        freeCashFlow = operatingCashFlow - Math.abs(capex);
-      }
-    }
-
-    if (freeCashFlow != null) {
-      fcfByDate.set(asOfDate, freeCashFlow);
-    }
-  }
-
-  const ttmEpsRows = buildTtmRowsFromQuarterly(buildQuarterlyRowsFromMap(epsByDate));
-  const ttmFcfRows = buildTtmRowsFromQuarterly(buildQuarterlyRowsFromMap(fcfByDate));
-  const ttmRevenueRows = buildTtmRowsFromQuarterly(buildQuarterlyRowsFromMap(revenueByDate));
-  const sharesRows = buildQuarterlyRowsFromMap(sharesByDate);
-
-  if (ttmEpsRows.length === 0 && ttmFcfRows.length === 0 && ttmRevenueRows.length === 0) {
-    return [];
-  }
-
-  const snapshotMap = new Map<string, FundamentalsSnapshot>();
-  applyRowsToSnapshots(snapshotMap, ttmEpsRows, "trailingEps");
-  applyRowsToSnapshots(snapshotMap, ttmFcfRows, "trailingFreeCashFlow");
-  applyRowsToSnapshots(snapshotMap, ttmRevenueRows, "trailingTotalRevenue");
-  applyRowsToSnapshots(snapshotMap, sharesRows, "trailingShares");
-
-  if (snapshotMap.size === 0) return [];
-
-  const allSnapshots = carryForwardSnapshots(snapshotMap);
-  return filterSnapshotsFromPeriod(allSnapshots, period1);
-}
-
-function getLatestSnapshot(snapshots: FundamentalsSnapshot[]): FundamentalsSnapshot | null {
-  if (snapshots.length === 0) return null;
-  return snapshots[snapshots.length - 1] ?? null;
-}
-
 function buildFundamentalsSnapshots(series: any[]): FundamentalsSnapshot[] {
   const snapshotMap = new Map<string, FundamentalsSnapshot>();
 
@@ -561,7 +329,12 @@ function buildFundamentalsSnapshots(series: any[]): FundamentalsSnapshot[] {
     if (type === "quarterlyDilutedEPS") {
       applyRowsToSnapshots(snapshotMap, annualizeRows(pickQuarterlyRows(item?.quarterlyDilutedEPS)), "trailingEps");
     } else if (type === "quarterlyBasicEPS") {
-      applyRowsToSnapshots(snapshotMap, annualizeRows(pickQuarterlyRows(item?.quarterlyBasicEPS)), "trailingEps", true);
+      applyRowsToSnapshots(
+        snapshotMap,
+        annualizeRows(pickQuarterlyRows(item?.quarterlyBasicEPS)),
+        "trailingEps",
+        true,
+      );
     } else if (type === "quarterlyFreeCashFlow") {
       applyRowsToSnapshots(
         snapshotMap,
@@ -575,13 +348,37 @@ function buildFundamentalsSnapshots(series: any[]): FundamentalsSnapshot[] {
         "trailingTotalRevenue",
       );
     } else if (type === "quarterlyDilutedAverageShares") {
-      applyRowsToSnapshots(snapshotMap, pickQuarterlyRows(item?.quarterlyDilutedAverageShares), "trailingShares");
+      applyRowsToSnapshots(
+        snapshotMap,
+        pickQuarterlyRows(item?.quarterlyDilutedAverageShares),
+        "trailingShares",
+      );
     } else if (type === "quarterlyBasicAverageShares") {
-      applyRowsToSnapshots(snapshotMap, pickQuarterlyRows(item?.quarterlyBasicAverageShares), "trailingShares", true);
+      applyRowsToSnapshots(
+        snapshotMap,
+        pickQuarterlyRows(item?.quarterlyBasicAverageShares),
+        "trailingShares",
+        true,
+      );
     }
   }
 
-  return carryForwardSnapshots(snapshotMap);
+  // Carry forward: fill gaps so each snapshot has the latest known value for every metric
+  const sorted = Array.from(snapshotMap.values()).sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
+
+  const keys: (keyof Omit<FundamentalsSnapshot, "asOfDate">)[] = [
+    "trailingPeRatio", "trailingEps", "trailingFreeCashFlow", "trailingTotalRevenue", "trailingShares",
+  ];
+
+  for (let i = 1; i < sorted.length; i++) {
+    for (const key of keys) {
+      if (sorted[i][key] == null && sorted[i - 1][key] != null) {
+        sorted[i][key] = sorted[i - 1][key];
+      }
+    }
+  }
+
+  return sorted;
 }
 
 function getLastCloseInPeriod(
@@ -769,31 +566,26 @@ serve(async (req) => {
 
       const uniqueTickers = [...new Set(tickers)] as string[];
       const requestedYears = Number(body?.periodYears);
-      const years =
-        Number.isFinite(requestedYears) && requestedYears > 0 ? Math.min(Math.floor(requestedYears), 20) : 5;
+      const years = Number.isFinite(requestedYears) && requestedYears > 0
+        ? Math.min(Math.floor(requestedYears), 20)
+        : 5;
 
       const period2 = Math.floor(Date.now() / 1000);
       const period1 = period2 - 60 * 60 * 24 * 365 * years;
       const maxPages = Math.max(2, Math.min(16, years * 4));
 
-      const ratioResults: Record<string, { snapshots: FundamentalsSnapshot[]; source: FundamentalsSource }> =
-        Object.fromEntries(uniqueTickers.map((ticker) => [ticker, { snapshots: [], source: "none" }]));
+      const ratioResults: Record<string, { snapshots: FundamentalsSnapshot[] }> = Object.fromEntries(
+        uniqueTickers.map((ticker) => [ticker, { snapshots: [] }]),
+      );
 
       await Promise.all(
         uniqueTickers.map(async (ticker: string) => {
           try {
-            const alphaSnapshots = await fetchAlphaVantageFundamentalsSnapshots(ticker, period1);
-            if (alphaSnapshots.length > 0) {
-              ratioResults[ticker] = { snapshots: alphaSnapshots, source: "alpha_vantage" };
-              return;
-            }
-
             const series = await fetchQuarterlyFundamentalsSeries(ticker, period1, period2, maxPages);
             if (!Array.isArray(series) || series.length === 0) return;
 
             ratioResults[ticker] = {
               snapshots: buildFundamentalsSnapshots(series),
-              source: "yahoo",
             };
           } catch (err) {
             console.warn(`[fetch-prices] fundamentals-history error for ${ticker}:`, err);
@@ -838,36 +630,6 @@ serve(async (req) => {
       await Promise.all(
         uniqueTickers.map(async (ticker: string) => {
           try {
-            const alphaSnapshots = await fetchAlphaVantageFundamentalsSnapshots(ticker, 0);
-            const latestAlphaSnapshot = getLatestSnapshot(alphaSnapshots);
-
-            if (latestAlphaSnapshot) {
-              const trailingEps = latestAlphaSnapshot.trailingEps;
-              const trailingFreeCashFlow = latestAlphaSnapshot.trailingFreeCashFlow;
-              const trailingTotalRevenue = latestAlphaSnapshot.trailingTotalRevenue;
-              const shares =
-                latestAlphaSnapshot.trailingShares != null && latestAlphaSnapshot.trailingShares > 0
-                  ? latestAlphaSnapshot.trailingShares
-                  : null;
-
-              const trailingFcfPerShare =
-                shares != null && trailingFreeCashFlow != null ? trailingFreeCashFlow / shares : null;
-              const trailingRevenuePerShare =
-                shares != null && trailingTotalRevenue != null ? trailingTotalRevenue / shares : null;
-
-              fundResults[ticker] = {
-                trailingPE: null,
-                forwardPE: null,
-                trailingEps: trailingEps ?? null,
-                forwardEps: null,
-                trailingFcfPerShare,
-                trailingRevenuePerShare,
-                trailingTotalRevenue: trailingTotalRevenue ?? null,
-                trailingRevenueShares: shares,
-              };
-              return;
-            }
-
             const tsUrl = `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=trailingPeRatio,trailingDilutedEPS,trailingBasicEPS,trailingFreeCashFlow,trailingTotalRevenue,trailingDilutedAverageShares,trailingBasicAverageShares&period1=${period1}&period2=${period2}`;
             const tsResp = await fetch(tsUrl, {
               headers: YF_HEADERS,
@@ -1020,7 +782,7 @@ serve(async (req) => {
       supabase
         .from("assets_cache")
         .upsert(toUpsert, { onConflict: "ticker" })
-        .then(() => {});
+        .then(() => { });
     }
 
     return new Response(JSON.stringify({ results }), {
