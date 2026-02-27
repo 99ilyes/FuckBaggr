@@ -133,6 +133,7 @@ interface Props {
   title?: string;
   groupBy?: "asset" | "sector";
   showLogos?: boolean;
+  hideAmounts?: boolean;
 }
 
 export function AllocationChart({
@@ -141,6 +142,7 @@ export function AllocationChart({
   title = "Répartition",
   groupBy = "asset",
   showLogos = true,
+  hideAmounts = false,
 }: Props) {
   const isMobile = useIsMobile();
   const [resolvedLogoUrls, setResolvedLogoUrls] = useState<Record<string, string>>({});
@@ -487,7 +489,7 @@ export function AllocationChart({
           <p className="font-semibold text-foreground">{dataPoint.name}</p>
         </div>
         <p className="text-muted-foreground">
-          {formatCurrency(dataPoint.value)} · {pct.replace(".", ",")}%
+          {hideAmounts ? "••••••" : formatCurrency(dataPoint.value)} · {pct.replace(".", ",")}%
         </p>
       </div>
     );

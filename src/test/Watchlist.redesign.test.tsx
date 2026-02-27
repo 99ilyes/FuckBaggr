@@ -409,5 +409,52 @@ describe("Watchlist redesign UI", () => {
     const initialCalls = invokeMock.mock.calls.length;
     fireEvent.click(screen.getByTestId("ratio-period-1A"));
     await waitFor(() => expect(invokeMock.mock.calls.length).toBeGreaterThan(initialCalls));
+
+    fireEvent.click(screen.getByTestId("ratio-period-5A"));
+    await waitFor(() => {
+      const has5yWeeklyHistoryCall = invokeMock.mock.calls.some(([fn, payload]) => {
+        if (fn !== "fetch-history") return false;
+        const body = (payload as { body?: { range?: string; interval?: string } })?.body;
+        return body?.range === "5y" && body?.interval === "1wk";
+      });
+      expect(has5yWeeklyHistoryCall).toBe(true);
+    });
+  });
+
+  it("ouvre un popup detaille des ratios avec filtres de dates", async () => {
+    const mockData = createRatioResponses("BBB");
+    invokeMock.mockImplementation((fn: string) => {
+      if (fn === "fetch-history") return Promise.resolve(mockData.history);
+      if (fn === "fetch-prices") return Promise.resolve(mockData.fundamentals);
+      return Promise.resolve({ data: {}, error: null });
+    });
+
+    renderWithQuery(<WatchlistValuationRatiosCard ticker="BBB" />);
+
+    expect(await screen.findByTestId("ratio-chart-pe")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("ratio-chart-pe-open-popup"));
+
+    expect(screen.getByTestId("ratio-popup")).toBeInTheDocument();
+    expect(screen.getByTestId("ratio-popup-chart-active")).toBeInTheDocument();
+
+    const fromInput = screen.getByTestId("ratio-popup-from-date") as HTMLInputElement;
+    const toInput = screen.getByTestId("ratio-popup-to-date") as HTMLInputElement;
+
+    fireEvent.change(fromInput, { target: { value: "2024-03-15" } });
+    fireEvent.change(toInput, { target: { value: "2024-01-15" } });
+
+    expect(screen.getByText("La date de début doit être antérieure ou égale à la date de fin.")).toBeInTheDocument();
+
+    const initialCalls = invokeMock.mock.calls.length;
+    fireEvent.click(screen.getByTestId("ratio-popup-period-5A"));
+    await waitFor(() => expect(invokeMock.mock.calls.length).toBeGreaterThan(initialCalls));
+
+    const hasPopup5yWeeklyHistoryCall = invokeMock.mock.calls.some(([fn, payload]) => {
+      if (fn !== "fetch-history") return false;
+      const body = (payload as { body?: { range?: string; interval?: string } })?.body;
+      return body?.range === "5y" && body?.interval === "1wk";
+    });
+    expect(hasPopup5yWeeklyHistoryCall).toBe(true);
   });
 });

@@ -15,12 +15,18 @@ export interface FundamentalsHistorySnapshot {
 export interface RatioSeriesPoint {
   time: number;
   value: number;
+  sourceAsOfDate?: string | null;
+  sourceMetricValue?: number | null;
+  sourceMetricKind?: "eps" | "fcf" | "revenue" | "none";
 }
 
 export interface RatioSeriesBundle {
   peSeries: RatioSeriesPoint[];
   pfcfSeries: RatioSeriesPoint[];
   psSeries: RatioSeriesPoint[];
+  peQuarterlyPoints: RatioSeriesPoint[];
+  pfcfQuarterlyPoints: RatioSeriesPoint[];
+  psQuarterlyPoints: RatioSeriesPoint[];
 }
 
 export interface RatioStats {
@@ -61,9 +67,22 @@ function safeDividePositive(numerator: number | null, denominator: number | null
   return result;
 }
 
-function pushSeriesPoint(series: RatioSeriesPoint[], time: number, value: number | null) {
+function pushSeriesPoint(
+  series: RatioSeriesPoint[],
+  time: number,
+  value: number | null,
+  sourceAsOfDate?: string | null,
+  sourceMetricValue?: number | null,
+  sourceMetricKind: RatioSeriesPoint["sourceMetricKind"] = "none"
+) {
   if (value == null || !Number.isFinite(value) || value <= 0) return;
-  series.push({ time, value });
+  series.push({
+    time,
+    value,
+    sourceAsOfDate: sourceAsOfDate ?? null,
+    sourceMetricValue: sourceMetricValue ?? null,
+    sourceMetricKind,
+  });
 }
 
 function sortSnapshots(snapshots: FundamentalsHistorySnapshot[]): SnapshotWithTime[] {
@@ -86,6 +105,81 @@ function sortPrices(priceHistory: RatioPricePoint[]): RatioPricePoint[] {
     .sort((a, b) => a.time - b.time);
 }
 
+function findPriceForSnapshotTime(snapshotTime: number, sortedPrices: RatioPricePoint[]): number | null {
+  if (sortedPrices.length === 0) return null;
+
+  let left = 0;
+  let right = sortedPrices.length;
+
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2);
+    if (sortedPrices[mid].time < snapshotTime) {
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
+  }
+
+  if (left < sortedPrices.length) {
+    return toFinitePositive(sortedPrices[left].price);
+  }
+
+  return toFinitePositive(sortedPrices[sortedPrices.length - 1].price);
+}
+
+function buildQuarterlyPoints(
+  sortedPrices: RatioPricePoint[],
+  sortedSnapshots: SnapshotWithTime[]
+): Pick<RatioSeriesBundle, "peQuarterlyPoints" | "pfcfQuarterlyPoints" | "psQuarterlyPoints"> {
+  const peQuarterlyPoints: RatioSeriesPoint[] = [];
+  const pfcfQuarterlyPoints: RatioSeriesPoint[] = [];
+  const psQuarterlyPoints: RatioSeriesPoint[] = [];
+
+  for (const snapshot of sortedSnapshots) {
+    const price = findPriceForSnapshotTime(snapshot.timestamp, sortedPrices);
+    if (price == null) continue;
+
+    const eps = toFinitePositive(snapshot.trailingEps);
+    const peFromMetric = safeDividePositive(price, eps);
+    const pe = peFromMetric ?? toFinitePositive(snapshot.trailingPeRatio);
+
+    const shares = toFinitePositive(snapshot.trailingShares);
+    const marketCap = shares != null ? price * shares : null;
+
+    const trailingFcf = toFinitePositive(snapshot.trailingFreeCashFlow);
+    const trailingRevenue = toFinitePositive(snapshot.trailingTotalRevenue);
+    const pfcf = safeDividePositive(marketCap, trailingFcf);
+    const ps = safeDividePositive(marketCap, trailingRevenue);
+
+    pushSeriesPoint(
+      peQuarterlyPoints,
+      snapshot.timestamp,
+      pe,
+      snapshot.asOfDate,
+      peFromMetric != null ? eps : null,
+      peFromMetric != null ? "eps" : "none"
+    );
+    pushSeriesPoint(
+      pfcfQuarterlyPoints,
+      snapshot.timestamp,
+      pfcf,
+      snapshot.asOfDate,
+      trailingFcf,
+      "fcf"
+    );
+    pushSeriesPoint(
+      psQuarterlyPoints,
+      snapshot.timestamp,
+      ps,
+      snapshot.asOfDate,
+      trailingRevenue,
+      "revenue"
+    );
+  }
+
+  return { peQuarterlyPoints, pfcfQuarterlyPoints, psQuarterlyPoints };
+}
+
 export function buildRatioSeries(
   priceHistory: RatioPricePoint[],
   snapshots: FundamentalsHistorySnapshot[]
@@ -93,11 +187,21 @@ export function buildRatioSeries(
   const peSeries: RatioSeriesPoint[] = [];
   const pfcfSeries: RatioSeriesPoint[] = [];
   const psSeries: RatioSeriesPoint[] = [];
+  const peQuarterlyPoints: RatioSeriesPoint[] = [];
+  const pfcfQuarterlyPoints: RatioSeriesPoint[] = [];
+  const psQuarterlyPoints: RatioSeriesPoint[] = [];
 
   const sortedPrices = sortPrices(priceHistory);
   const sortedSnapshots = sortSnapshots(snapshots);
   if (sortedPrices.length === 0 || sortedSnapshots.length === 0) {
-    return { peSeries, pfcfSeries, psSeries };
+    return {
+      peSeries,
+      pfcfSeries,
+      psSeries,
+      peQuarterlyPoints,
+      pfcfQuarterlyPoints,
+      psQuarterlyPoints,
+    };
   }
 
   // Some providers return only the latest fundamentals window.
@@ -117,21 +221,52 @@ export function buildRatioSeries(
     const price = toFinitePositive(pricePoint.price);
     if (price == null) continue;
 
-    const peFromMetric = safeDividePositive(price, snapshot.trailingEps);
+    const eps = toFinitePositive(snapshot.trailingEps);
+    const peFromMetric = safeDividePositive(price, eps);
     const pe = peFromMetric ?? toFinitePositive(snapshot.trailingPeRatio);
 
     const shares = toFinitePositive(snapshot.trailingShares);
     const marketCap = shares != null ? price * shares : null;
 
-    const pfcf = safeDividePositive(marketCap, snapshot.trailingFreeCashFlow);
-    const ps = safeDividePositive(marketCap, snapshot.trailingTotalRevenue);
+    const trailingFcf = toFinitePositive(snapshot.trailingFreeCashFlow);
+    const trailingRevenue = toFinitePositive(snapshot.trailingTotalRevenue);
+    const pfcf = safeDividePositive(marketCap, trailingFcf);
+    const ps = safeDividePositive(marketCap, trailingRevenue);
 
-    pushSeriesPoint(peSeries, pricePoint.time, pe);
-    pushSeriesPoint(pfcfSeries, pricePoint.time, pfcf);
-    pushSeriesPoint(psSeries, pricePoint.time, ps);
+    pushSeriesPoint(
+      peSeries,
+      pricePoint.time,
+      pe,
+      snapshot.asOfDate,
+      peFromMetric != null ? eps : null,
+      peFromMetric != null ? "eps" : "none"
+    );
+    pushSeriesPoint(
+      pfcfSeries,
+      pricePoint.time,
+      pfcf,
+      snapshot.asOfDate,
+      trailingFcf,
+      "fcf"
+    );
+    pushSeriesPoint(
+      psSeries,
+      pricePoint.time,
+      ps,
+      snapshot.asOfDate,
+      trailingRevenue,
+      "revenue"
+    );
   }
 
-  return { peSeries, pfcfSeries, psSeries };
+  const quarterlyPoints = buildQuarterlyPoints(sortedPrices, sortedSnapshots);
+
+  return {
+    peSeries,
+    pfcfSeries,
+    psSeries,
+    ...quarterlyPoints,
+  };
 }
 
 export function computeStats(series: RatioSeriesPoint[]): RatioStats {

@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, RefreshCw, Upload } from "lucide-react";
+import { Eye, EyeOff, Plus, RefreshCw, Upload } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { toast } from "@/hooks/use-toast";
 import { DEFAULT_MAX_BENCHMARKS, loadPerformanceBenchmarkTickers } from "@/lib/performanceBenchmarks";
@@ -38,6 +38,8 @@ const DashboardPerformanceChart = lazy(() =>
   import("@/components/DashboardPerformanceChart").then((m) => ({ default: m.DashboardPerformanceChart }))
 );
 
+const DISCREET_MODE_STORAGE_KEY = "dashboard-discreet-mode";
+
 function ChartFallback() {
   return (
     <Card className="border-border/50">
@@ -47,6 +49,14 @@ function ChartFallback() {
 }
 
 export default function Index() {
+  const [isDiscreetMode, setIsDiscreetMode] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(DISCREET_MODE_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null);
   const [chartView, setChartView] = useState<"performance" | "allocation">("performance");
   const [allocationMode, setAllocationMode] = useState<"account" | "asset">("account");
@@ -336,6 +346,15 @@ export default function Index() {
     };
   }, [handleRefreshPrices, lastRefreshTime]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(DISCREET_MODE_STORAGE_KEY, isDiscreetMode ? "1" : "0");
+    } catch {
+      // Ignore storage errors (private mode, quota, etc.)
+    }
+  }, [isDiscreetMode]);
+
   const portfolioPerformances = useMemo(() => {
     if (selectedPortfolioId) return [];
 
@@ -413,6 +432,14 @@ export default function Index() {
                 <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
                 <span className="hidden sm:inline ml-1">Actualiser</span>
               </Button>
+              <Button
+                variant={isDiscreetMode ? "default" : "outline"}
+                size="sm"
+                onClick={() => setIsDiscreetMode((prev) => !prev)}
+              >
+                {isDiscreetMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                <span className="hidden sm:inline ml-1">Mode discret</span>
+              </Button>
             </div>
             <Button size="sm" onClick={() => setAddTransactionOpen(true)}>
               <Plus className="h-4 w-4" />
@@ -449,6 +476,7 @@ export default function Index() {
           transactions={filteredTransactions}
           portfolioPerformances={portfolioPerformances}
           onSelectPortfolio={setSelectedPortfolioId}
+          hideAmounts={isDiscreetMode}
         />
 
 
@@ -519,7 +547,12 @@ export default function Index() {
                 )}
                 {!selectedPortfolioId && allocationMode === "account" ? (
                   <Suspense fallback={<ChartFallback />}>
-                    <AllocationChart data={portfolioAllocation} title="Par compte" showLogos={false} />
+                    <AllocationChart
+                      data={portfolioAllocation}
+                      title="Par compte"
+                      showLogos={false}
+                      hideAmounts={isDiscreetMode}
+                    />
                   </Suspense>
                 ) : (
                   <Suspense fallback={<ChartFallback />}>

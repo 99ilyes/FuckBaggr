@@ -33,6 +33,7 @@ interface KPICardsProps {
   transactions?: Transaction[];
   portfolioPerformances?: PortfolioPerformance[];
   onSelectPortfolio?: (id: string) => void;
+  hideAmounts?: boolean;
 }
 
 export function KPICards({
@@ -50,6 +51,7 @@ export function KPICards({
   transactions = [],
   portfolioPerformances = [],
   onSelectPortfolio,
+  hideAmounts = false,
 }: KPICardsProps) {
   const isPositive = totalGainLoss >= 0;
   const currencies = Object.entries(cashBalances || {}).filter(
@@ -87,10 +89,10 @@ export function KPICards({
           </div>
           <div className="flex-1 flex flex-col justify-center w-full">
             <p className="text-4xl sm:text-3xl md:text-4xl font-bold tracking-tighter text-foreground">
-              {formatCurrency(totalValue, baseCurrency)}
+              {hideAmounts ? "••••••" : formatCurrency(totalValue, baseCurrency)}
             </p>
             <p className="text-xs text-muted-foreground/50 mt-1 font-medium">
-              Investi: {formatCurrency(totalInvested, baseCurrency)}
+              Investi: {hideAmounts ? "••••••" : formatCurrency(totalInvested, baseCurrency)}
             </p>
           </div>
         </CardContent>
@@ -108,7 +110,7 @@ export function KPICards({
               </p>
             </div>
             <p className={`text-xs mt-1 font-medium ${isPositive ? "text-emerald-500/60" : "text-rose-500/60"}`}>
-              {isPositive ? "+" : ""}{formatCurrency(totalGainLoss, baseCurrency)}
+              {hideAmounts ? "••••••" : `${isPositive ? "+" : ""}${formatCurrency(totalGainLoss, baseCurrency)}`}
             </p>
           </div>
         </CardContent>
@@ -124,7 +126,7 @@ export function KPICards({
               {formatPercent(dailyPerf.changePct)}
             </p>
             <p className={`text-xs mt-1 font-medium ${isDayPositive ? "text-emerald-500/60" : "text-rose-500/60"}`}>
-              {isDayPositive ? "+" : ""}{formatCurrency(dailyPerf.change, baseCurrency)}
+              {hideAmounts ? "••••••" : `${isDayPositive ? "+" : ""}${formatCurrency(dailyPerf.change, baseCurrency)}`}
             </p>
           </div>
           {/* Market Status Indicators */}
@@ -168,7 +170,7 @@ export function KPICards({
 
                     <div className="flex items-center gap-3 ml-auto">
                       <span className="text-lg font-bold text-foreground tabular-nums tracking-tight">
-                        {formatCurrency(perf.totalValue, perf.currency)}
+                        {hideAmounts ? "••••••" : formatCurrency(perf.totalValue, perf.currency)}
                       </span>
                       <span className={`text-xs font-semibold tabular-nums ${perf.dailyChange >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
                         {formatPercent(perf.dailyChangePct)}
