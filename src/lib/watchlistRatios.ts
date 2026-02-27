@@ -100,7 +100,10 @@ export function buildRatioSeries(
     return { peSeries, pfcfSeries, psSeries };
   }
 
-  let snapshotIndex = -1;
+  // Some providers return only the latest fundamentals window.
+  // Use the oldest available snapshot as fallback for earlier prices
+  // so long-range presets (5Y/MAX) remain fully visible.
+  let snapshotIndex = 0;
 
   for (const pricePoint of sortedPrices) {
     while (
@@ -109,8 +112,6 @@ export function buildRatioSeries(
     ) {
       snapshotIndex += 1;
     }
-
-    if (snapshotIndex < 0) continue;
 
     const snapshot = sortedSnapshots[snapshotIndex];
     const price = toFinitePositive(pricePoint.price);

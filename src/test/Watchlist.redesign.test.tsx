@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -239,22 +239,40 @@ function sortRows(rows: WatchlistComputedRow[], sort: WatchlistSort): WatchlistC
   });
 }
 
-function Harness() {
-  const [rows, setRows] = useState(rowsSeed);
+function Harness({ deferRankedData = false }: { deferRankedData?: boolean }) {
+  const [rows, setRows] = useState(() =>
+    deferRankedData ? rowsSeed.map((row) => ({ ...row, impliedReturn: null })) : rowsSeed
+  );
+  const [isLoading, setIsLoading] = useState(deferRankedData);
   const [sort, setSort] = useState<WatchlistSort>("implied_desc");
   const sortedRows = useMemo(() => sortRows(rows, sort), [rows, sort]);
-  const [selectedTicker, setSelectedTicker] = useState<string | null>(sortedRows[0]?.ticker ?? null);
+  const [selectedTicker, setSelectedTicker] = useState<string | null>("AAA");
+  const hasAppliedDefaultSelectionRef = useRef(false);
+
+  useEffect(() => {
+    if (!deferRankedData) return;
+    setRows(rowsSeed);
+    setIsLoading(false);
+  }, [deferRankedData]);
 
   useEffect(() => {
     if (sortedRows.length === 0) {
+      hasAppliedDefaultSelectionRef.current = false;
       setSelectedTicker(null);
+      return;
+    }
+
+    if (!hasAppliedDefaultSelectionRef.current) {
+      if (isLoading) return;
+      hasAppliedDefaultSelectionRef.current = true;
+      setSelectedTicker(sortedRows[0].ticker);
       return;
     }
 
     if (!selectedTicker || !sortedRows.some((row) => row.ticker === selectedTicker)) {
       setSelectedTicker(sortedRows[0].ticker);
     }
-  }, [sortedRows, selectedTicker]);
+  }, [sortedRows, selectedTicker, isLoading]);
 
   const selectedDetail = selectedTicker ? detailsSeed[selectedTicker] : null;
 
@@ -341,6 +359,15 @@ describe("Watchlist redesign UI", () => {
 
     const items = screen.getAllByTestId("watchlist-menu-item");
     expect(within(items[0]).getByText("BBB")).toBeInTheDocument();
+    expect(screen.getByTestId("selected-ticker")).toHaveTextContent("BBB");
+  });
+
+  it("selectionne le premier titre par rendement une fois les donnees chargees", async () => {
+    render(<Harness deferRankedData />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selected-ticker")).toHaveTextContent("BBB");
+    });
   });
 
   it("affiche Valorisation puis Informations dans la colonne gauche", async () => {

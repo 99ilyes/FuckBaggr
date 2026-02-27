@@ -37,6 +37,23 @@ type FundamentalsSnapshot = {
   trailingShares: number | null;
 };
 
+type QuarterlyFundamentalsType =
+  | "quarterlyDilutedEPS"
+  | "quarterlyBasicEPS"
+  | "quarterlyFreeCashFlow"
+  | "quarterlyTotalRevenue"
+  | "quarterlyDilutedAverageShares"
+  | "quarterlyBasicAverageShares";
+
+const QUARTERLY_FUNDAMENTAL_TYPES: QuarterlyFundamentalsType[] = [
+  "quarterlyDilutedEPS",
+  "quarterlyBasicEPS",
+  "quarterlyFreeCashFlow",
+  "quarterlyTotalRevenue",
+  "quarterlyDilutedAverageShares",
+  "quarterlyBasicAverageShares",
+];
+
 function emptySnapshot(asOfDate: string): FundamentalsSnapshot {
   return {
     asOfDate,
@@ -177,6 +194,130 @@ function annualizeRows(rows: TimeseriesRow[]): TimeseriesRow[] {
     ...row,
     raw: row.raw * 4,
   }));
+}
+
+function toDateSeconds(asOfDate: string): number | null {
+  const ms = new Date(`${asOfDate}T00:00:00Z`).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return Math.floor(ms / 1000);
+}
+
+function buildTimeseriesUrl(
+  ticker: string,
+  types: string[],
+  period1: number,
+  period2: number,
+): string {
+  const encodedTicker = encodeURIComponent(ticker);
+  const encodedTypes = types.join(",");
+  return `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodedTicker}?symbol=${encodedTicker}&type=${encodedTypes}&period1=${period1}&period2=${period2}`;
+}
+
+function mergeQuarterlySeriesRows(
+  series: unknown[],
+  bucket: Record<QuarterlyFundamentalsType, TimeseriesRow[]>,
+): { newRows: number; oldestSec: number | null } {
+  const seenByType: Record<QuarterlyFundamentalsType, Set<string>> = {
+    quarterlyDilutedEPS: new Set(bucket.quarterlyDilutedEPS.map((row) => row.asOfDate)),
+    quarterlyBasicEPS: new Set(bucket.quarterlyBasicEPS.map((row) => row.asOfDate)),
+    quarterlyFreeCashFlow: new Set(bucket.quarterlyFreeCashFlow.map((row) => row.asOfDate)),
+    quarterlyTotalRevenue: new Set(bucket.quarterlyTotalRevenue.map((row) => row.asOfDate)),
+    quarterlyDilutedAverageShares: new Set(bucket.quarterlyDilutedAverageShares.map((row) => row.asOfDate)),
+    quarterlyBasicAverageShares: new Set(bucket.quarterlyBasicAverageShares.map((row) => row.asOfDate)),
+  };
+
+  let newRows = 0;
+  let oldestSec: number | null = null;
+
+  for (const item of series) {
+    const rawType = (item as { meta?: { type?: string[] } })?.meta?.type?.[0];
+    if (!rawType || !QUARTERLY_FUNDAMENTAL_TYPES.includes(rawType as QuarterlyFundamentalsType)) continue;
+
+    const type = rawType as QuarterlyFundamentalsType;
+    const rows = parseTimeseriesRows((item as Record<string, unknown>)[type]);
+
+    for (const row of rows) {
+      if (seenByType[type].has(row.asOfDate)) continue;
+
+      bucket[type].push(row);
+      seenByType[type].add(row.asOfDate);
+      newRows += 1;
+
+      const sec = toDateSeconds(row.asOfDate);
+      if (sec != null && (oldestSec == null || sec < oldestSec)) {
+        oldestSec = sec;
+      }
+    }
+  }
+
+  return { newRows, oldestSec };
+}
+
+function buildQuarterlySeriesFromBucket(
+  bucket: Record<QuarterlyFundamentalsType, TimeseriesRow[]>,
+): unknown[] {
+  const out: unknown[] = [];
+
+  for (const type of QUARTERLY_FUNDAMENTAL_TYPES) {
+    const rows = [...bucket[type]].sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
+    if (rows.length === 0) continue;
+
+    const payloadRows = rows.map((row) => ({
+      asOfDate: row.asOfDate,
+      periodType: row.periodType,
+      reportedValue: { raw: row.raw },
+    }));
+
+    out.push({
+      meta: { type: [type] },
+      [type]: payloadRows,
+    });
+  }
+
+  return out;
+}
+
+async function fetchQuarterlyFundamentalsSeries(
+  ticker: string,
+  period1: number,
+  period2: number,
+  maxPages: number,
+): Promise<unknown[]> {
+  const bucket: Record<QuarterlyFundamentalsType, TimeseriesRow[]> = {
+    quarterlyDilutedEPS: [],
+    quarterlyBasicEPS: [],
+    quarterlyFreeCashFlow: [],
+    quarterlyTotalRevenue: [],
+    quarterlyDilutedAverageShares: [],
+    quarterlyBasicAverageShares: [],
+  };
+
+  let cursorPeriod2 = period2;
+
+  for (let page = 0; page < maxPages; page++) {
+    const tsUrl = buildTimeseriesUrl(ticker, QUARTERLY_FUNDAMENTAL_TYPES, period1, cursorPeriod2);
+    const tsResp = await fetch(tsUrl, {
+      headers: YF_HEADERS,
+      signal: AbortSignal.timeout(7000),
+    });
+
+    if (!tsResp.ok) break;
+
+    const tsJson = await tsResp.json();
+    const series = tsJson?.timeseries?.result;
+    if (!Array.isArray(series) || series.length === 0) break;
+
+    const { newRows, oldestSec } = mergeQuarterlySeriesRows(series, bucket);
+    if (oldestSec == null) break;
+    if (oldestSec <= period1 + 86400) break;
+    if (newRows === 0) break;
+
+    const nextCursor = oldestSec - 86400;
+    if (!Number.isFinite(nextCursor) || nextCursor <= period1 || nextCursor >= cursorPeriod2) break;
+    cursorPeriod2 = nextCursor;
+  }
+
+  return buildQuarterlySeriesFromBucket(bucket);
 }
 
 function buildFundamentalsSnapshots(series: any[]): FundamentalsSnapshot[] {
@@ -431,6 +572,7 @@ serve(async (req) => {
 
       const period2 = Math.floor(Date.now() / 1000);
       const period1 = period2 - 60 * 60 * 24 * 365 * years;
+      const maxPages = Math.max(2, Math.min(16, years * 4));
 
       const ratioResults: Record<string, { snapshots: FundamentalsSnapshot[] }> = Object.fromEntries(
         uniqueTickers.map((ticker) => [ticker, { snapshots: [] }]),
@@ -439,18 +581,8 @@ serve(async (req) => {
       await Promise.all(
         uniqueTickers.map(async (ticker: string) => {
           try {
-            const tsUrl = `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=quarterlyDilutedEPS,quarterlyBasicEPS,quarterlyFreeCashFlow,quarterlyTotalRevenue,quarterlyDilutedAverageShares,quarterlyBasicAverageShares&period1=${period1}&period2=${period2}`;
-            const tsResp = await fetch(tsUrl, {
-              headers: YF_HEADERS,
-              signal: AbortSignal.timeout(7000),
-            });
-
-            if (!tsResp.ok) return;
-
-            const tsJson = await tsResp.json();
-            const series = tsJson?.timeseries?.result;
-            if (!Array.isArray(series)) return;
-
+            const series = await fetchQuarterlyFundamentalsSeries(ticker, period1, period2, maxPages);
+            if (!Array.isArray(series) || series.length === 0) return;
 
             ratioResults[ticker] = {
               snapshots: buildFundamentalsSnapshots(series),

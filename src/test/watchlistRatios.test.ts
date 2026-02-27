@@ -112,4 +112,30 @@ describe("watchlistRatios", () => {
     expect(stats.median).toBe(25);
     expect(stats.low).toBe(10);
   });
+
+  it("etend la serie avant le premier snapshot avec la plus ancienne publication", () => {
+    const prices: RatioPricePoint[] = [
+      { time: toSec("2021-01-01"), price: 100 },
+      { time: toSec("2021-01-02"), price: 102 },
+      { time: toSec("2024-01-03"), price: 110 },
+    ];
+
+    const snapshots: FundamentalsHistorySnapshot[] = [
+      {
+        asOfDate: "2024-01-03",
+        trailingPeRatio: null,
+        trailingEps: 5,
+        trailingFreeCashFlow: 200,
+        trailingTotalRevenue: 400,
+        trailingShares: 50,
+      },
+    ];
+
+    const result = buildRatioSeries(prices, snapshots);
+
+    expect(result.peSeries).toHaveLength(3);
+    expect(result.peSeries[0].value).toBeCloseTo(20, 6);
+    expect(result.peSeries[1].value).toBeCloseTo(20.4, 6);
+    expect(result.peSeries[2].value).toBeCloseTo(22, 6);
+  });
 });

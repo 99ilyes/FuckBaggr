@@ -598,6 +598,7 @@ export default function Watchlist() {
   const [valuationModelByTicker, setValuationModelByTicker] = useState<Record<string, ValuationModel>>(loadValuationModels);
   const [watchlistSort, setWatchlistSort] = useState<WatchlistSort>("implied_desc");
   const [selectedTicker, setSelectedTicker] = useState<string | null>(loadSelectedTicker);
+  const hasAppliedDefaultSelectionRef = useRef(false);
   const [cloudLoaded, setCloudLoaded] = useState(false);
   const cloudTickersRef = useRef<Set<string>>(new Set());
 
@@ -852,6 +853,7 @@ export default function Watchlist() {
     staleTime: 1000 * 60 * 5,
     retry: 1,
   });
+  const isWatchlistLoading = txLoading || quotesLoading;
 
   const addTicker = (ticker: string) => {
     if (hiddenSet.has(ticker)) {
@@ -1097,14 +1099,26 @@ export default function Watchlist() {
 
   useEffect(() => {
     if (viewModel.menuRows.length === 0) {
+      hasAppliedDefaultSelectionRef.current = false;
       if (selectedTicker !== null) setSelectedTicker(null);
       return;
     }
 
-    if (!selectedTicker || !viewModel.menuRows.some((row) => row.ticker === selectedTicker)) {
-      setSelectedTicker(viewModel.menuRows[0].ticker);
+    const firstTickerByCurrentSort = viewModel.menuRows[0].ticker;
+
+    if (!hasAppliedDefaultSelectionRef.current) {
+      if (isWatchlistLoading) return;
+      hasAppliedDefaultSelectionRef.current = true;
+      if (selectedTicker !== firstTickerByCurrentSort) {
+        setSelectedTicker(firstTickerByCurrentSort);
+      }
+      return;
     }
-  }, [viewModel.menuRows, selectedTicker]);
+
+    if (!selectedTicker || !viewModel.menuRows.some((row) => row.ticker === selectedTicker)) {
+      setSelectedTicker(firstTickerByCurrentSort);
+    }
+  }, [viewModel.menuRows, selectedTicker, isWatchlistLoading]);
 
   useEffect(() => {
     saveSelectedTicker(selectedTicker);
@@ -1124,7 +1138,7 @@ export default function Watchlist() {
     [allTickers, fvParams]
   );
 
-  const loading = txLoading || quotesLoading;
+  const loading = isWatchlistLoading;
 
   return (
     <TooltipProvider delayDuration={200}>
