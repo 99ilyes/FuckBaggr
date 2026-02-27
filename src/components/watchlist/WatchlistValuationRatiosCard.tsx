@@ -32,15 +32,6 @@ interface RatioChartDataset {
   psSeries: RatioSeriesPoint[];
 }
 
-interface FundamentalsLatest {
-  trailingPE: number | null;
-  trailingEps: number | null;
-  trailingFcfPerShare: number | null;
-  trailingRevenuePerShare: number | null;
-  trailingTotalRevenue: number | null;
-  trailingRevenueShares: number | null;
-}
-
 interface RatioChartBlockProps {
   title: string;
   series: RatioSeriesPoint[];
@@ -114,67 +105,6 @@ function normalizeSnapshots(rawSnapshots: unknown): FundamentalsHistorySnapshot[
     }));
 }
 
-function normalizeLatestFundamentals(raw: unknown): FundamentalsLatest {
-  const value = (raw ?? {}) as Record<string, unknown>;
-
-  return {
-    trailingPE: typeof value.trailingPE === "number" ? value.trailingPE : null,
-    trailingEps: typeof value.trailingEps === "number" ? value.trailingEps : null,
-    trailingFcfPerShare: typeof value.trailingFcfPerShare === "number" ? value.trailingFcfPerShare : null,
-    trailingRevenuePerShare: typeof value.trailingRevenuePerShare === "number" ? value.trailingRevenuePerShare : null,
-    trailingTotalRevenue: typeof value.trailingTotalRevenue === "number" ? value.trailingTotalRevenue : null,
-    trailingRevenueShares: typeof value.trailingRevenueShares === "number" ? value.trailingRevenueShares : null,
-  };
-}
-
-function toIsoDateFromUnix(ts: number): string {
-  return new Date(ts * 1000).toISOString().slice(0, 10);
-}
-
-function buildSyntheticSnapshot(
-  history: RatioPricePoint[],
-  latest: FundamentalsLatest
-): FundamentalsHistorySnapshot | null {
-  if (history.length === 0) return null;
-
-  const anchor = history[0];
-  if (typeof anchor?.time !== "number" || !Number.isFinite(anchor.time)) return null;
-
-  const shares =
-    latest.trailingRevenueShares != null && latest.trailingRevenueShares > 0
-      ? latest.trailingRevenueShares
-      : null;
-
-  const trailingFreeCashFlow =
-    latest.trailingFcfPerShare != null && shares != null
-      ? latest.trailingFcfPerShare * shares
-      : null;
-
-  const trailingTotalRevenue =
-    latest.trailingTotalRevenue != null
-      ? latest.trailingTotalRevenue
-      : latest.trailingRevenuePerShare != null && shares != null
-        ? latest.trailingRevenuePerShare * shares
-        : null;
-
-  const hasAnyRatioInput =
-    latest.trailingPE != null ||
-    latest.trailingEps != null ||
-    (trailingFreeCashFlow != null && shares != null) ||
-    (trailingTotalRevenue != null && shares != null);
-
-  if (!hasAnyRatioInput) return null;
-
-  return {
-    asOfDate: toIsoDateFromUnix(anchor.time),
-    trailingPeRatio: latest.trailingPE,
-    trailingEps: latest.trailingEps,
-    trailingFreeCashFlow,
-    trailingTotalRevenue,
-    trailingShares: shares,
-  };
-}
-
 async function fetchRatioDataset(ticker: string, period: RatioPeriod): Promise<RatioChartDataset> {
   const range = mapRange(period);
   const periodYears = mapPeriodYears(period);
@@ -192,24 +122,7 @@ async function fetchRatioDataset(ticker: string, period: RatioPeriod): Promise<R
   if (fundamentalsResponse.error) throw fundamentalsResponse.error;
 
   const history = normalizePriceHistory(historyResponse.data?.results?.[ticker]?.history);
-  let snapshots = normalizeSnapshots(fundamentalsResponse.data?.results?.[ticker]?.snapshots);
-
-  // Backward-compatible fallback when the deployed Edge Function does not yet expose fundamentals-history.
-  if (snapshots.length === 0 && history.length > 0) {
-    const latestResponse = await supabase.functions.invoke("fetch-prices", {
-      body: { tickers: [ticker], mode: "fundamentals" },
-    });
-
-    if (!latestResponse.error) {
-      const latest = normalizeLatestFundamentals(
-        latestResponse.data?.results?.[ticker] ?? latestResponse.data?.[ticker]
-      );
-      const syntheticSnapshot = buildSyntheticSnapshot(history, latest);
-      if (syntheticSnapshot) {
-        snapshots = [syntheticSnapshot];
-      }
-    }
-  }
+  const snapshots = normalizeSnapshots(fundamentalsResponse.data?.results?.[ticker]?.snapshots);
 
   return buildRatioSeries(history, snapshots);
 }

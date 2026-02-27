@@ -116,8 +116,8 @@ export function buildRatioSeries(
     const price = toFinitePositive(pricePoint.price);
     if (price == null) continue;
 
-    const peFromRatio = toFinitePositive(snapshot.trailingPeRatio);
-    const pe = peFromRatio ?? safeDividePositive(price, snapshot.trailingEps);
+    const peFromMetric = safeDividePositive(price, snapshot.trailingEps);
+    const pe = peFromMetric ?? toFinitePositive(snapshot.trailingPeRatio);
 
     const shares = toFinitePositive(snapshot.trailingShares);
     const marketCap = shares != null ? price * shares : null;

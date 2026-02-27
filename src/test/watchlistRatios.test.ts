@@ -22,7 +22,7 @@ describe("watchlistRatios", () => {
     const snapshots: FundamentalsHistorySnapshot[] = [
       {
         asOfDate: "2024-01-01",
-        trailingPeRatio: 20,
+        trailingPeRatio: null,
         trailingEps: 5,
         trailingFreeCashFlow: 200,
         trailingTotalRevenue: 400,
@@ -30,7 +30,7 @@ describe("watchlistRatios", () => {
       },
       {
         asOfDate: "2024-01-03",
-        trailingPeRatio: 25,
+        trailingPeRatio: null,
         trailingEps: 4.4,
         trailingFreeCashFlow: 220,
         trailingTotalRevenue: 440,
@@ -41,7 +41,10 @@ describe("watchlistRatios", () => {
     const result = buildRatioSeries(prices, snapshots);
 
     expect(result.peSeries).toHaveLength(4);
-    expect(result.peSeries.map((point) => point.value)).toEqual([20, 20, 25, 25]);
+    expect(result.peSeries[0].value).toBeCloseTo(20, 6);
+    expect(result.peSeries[1].value).toBeCloseTo(20.4, 6);
+    expect(result.peSeries[2].value).toBeCloseTo(25, 6);
+    expect(result.peSeries[3].value).toBeCloseTo(25.454545, 6);
 
     expect(result.pfcfSeries[0].value).toBeCloseTo(25, 6);
     expect(result.pfcfSeries[1].value).toBeCloseTo(25.5, 6);

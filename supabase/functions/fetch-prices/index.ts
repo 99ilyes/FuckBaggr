@@ -91,40 +91,131 @@ function applyRowsToSnapshots(
   }
 }
 
+function isQuarterlyPeriodType(periodType: string): boolean {
+  const value = periodType.toUpperCase();
+  return value.includes("3M") || value.includes("QUARTER");
+}
+
+function pickQuarterlyRows(arr: unknown): TimeseriesRow[] {
+  const allRows = parseTimeseriesRows(arr);
+  if (allRows.length === 0) return [];
+
+  const quarterly = allRows.filter((row) => isQuarterlyPeriodType(row.periodType));
+  return quarterly.length > 0 ? quarterly : allRows;
+}
+
+function parsePeriodMonths(periodType: string): number | null {
+  const match = periodType.trim().toUpperCase().match(/^(\d+)M$/);
+  if (!match) return null;
+  const months = Number(match[1]);
+  return Number.isFinite(months) && months > 0 ? months : null;
+}
+
+function deriveQuarterlyStandaloneRows(rows: TimeseriesRow[]): TimeseriesRow[] {
+  const sorted = [...rows].sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
+  const quarterIndexMap = new Map<number, TimeseriesRow>();
+
+  const toQuarterIndex = (asOfDate: string): number | null => {
+    const date = new Date(`${asOfDate}T00:00:00Z`);
+    if (!Number.isFinite(date.getTime())) return null;
+
+    const quarter = Math.floor(date.getUTCMonth() / 3);
+    return date.getUTCFullYear() * 4 + quarter;
+  };
+
+  for (const row of sorted) {
+    const index = toQuarterIndex(row.asOfDate);
+    if (index != null) {
+      quarterIndexMap.set(index, row);
+    }
+  }
+
+  const out: TimeseriesRow[] = [];
+
+  for (const row of sorted) {
+    const months = parsePeriodMonths(row.periodType);
+    if (months == null || months <= 3) {
+      out.push({ ...row });
+      continue;
+    }
+
+    const currentIndex = toQuarterIndex(row.asOfDate);
+    if (currentIndex == null) {
+      out.push({ ...row });
+      continue;
+    }
+
+    const previousRow = quarterIndexMap.get(currentIndex - 1);
+
+    if (previousRow && Number.isFinite(previousRow.raw)) {
+      const quarterRaw = row.raw - previousRow.raw;
+      out.push({
+        ...row,
+        raw: Number.isFinite(quarterRaw) ? quarterRaw : row.raw,
+      });
+      continue;
+    }
+
+    const quarterCount = months / 3;
+    if (Number.isFinite(quarterCount) && quarterCount > 1) {
+      out.push({
+        ...row,
+        raw: row.raw / quarterCount,
+      });
+      continue;
+    }
+
+    out.push({ ...row });
+  }
+
+  return out;
+}
+
+function annualizeRows(rows: TimeseriesRow[]): TimeseriesRow[] {
+  const quarterlyStandaloneRows = deriveQuarterlyStandaloneRows(rows);
+  return quarterlyStandaloneRows.map((row) => ({
+    ...row,
+    raw: row.raw * 4,
+  }));
+}
+
 function buildFundamentalsSnapshots(series: any[]): FundamentalsSnapshot[] {
   const snapshotMap = new Map<string, FundamentalsSnapshot>();
 
   for (const item of series) {
     const type = item?.meta?.type?.[0];
 
-    if (type === "trailingPeRatio") {
-      applyRowsToSnapshots(snapshotMap, parseTimeseriesRows(item?.trailingPeRatio), "trailingPeRatio");
-    } else if (type === "trailingDilutedEPS") {
-      applyRowsToSnapshots(snapshotMap, preferTTMRows(parseTimeseriesRows(item?.trailingDilutedEPS)), "trailingEps");
-    } else if (type === "trailingBasicEPS") {
-      applyRowsToSnapshots(snapshotMap, preferTTMRows(parseTimeseriesRows(item?.trailingBasicEPS)), "trailingEps", true);
-    } else if (type === "trailingFreeCashFlow") {
+    if (type === "quarterlyDilutedEPS") {
+      applyRowsToSnapshots(snapshotMap, annualizeRows(pickQuarterlyRows(item?.quarterlyDilutedEPS)), "trailingEps");
+    } else if (type === "quarterlyBasicEPS") {
       applyRowsToSnapshots(
         snapshotMap,
-        preferTTMRows(parseTimeseriesRows(item?.trailingFreeCashFlow)),
+        annualizeRows(pickQuarterlyRows(item?.quarterlyBasicEPS)),
+        "trailingEps",
+        true,
+      );
+    } else if (type === "quarterlyFreeCashFlow") {
+      applyRowsToSnapshots(
+        snapshotMap,
+        annualizeRows(pickQuarterlyRows(item?.quarterlyFreeCashFlow)),
         "trailingFreeCashFlow",
       );
-    } else if (type === "trailingTotalRevenue") {
+    } else if (type === "quarterlyTotalRevenue") {
       applyRowsToSnapshots(
         snapshotMap,
-        preferTTMRows(parseTimeseriesRows(item?.trailingTotalRevenue)),
+        annualizeRows(pickQuarterlyRows(item?.quarterlyTotalRevenue)),
         "trailingTotalRevenue",
       );
-    } else if (type === "trailingDilutedAverageShares") {
+    } else if (type === "quarterlyDilutedAverageShares") {
       applyRowsToSnapshots(
         snapshotMap,
-        preferTTMRows(parseTimeseriesRows(item?.trailingDilutedAverageShares)),
+        pickQuarterlyRows(item?.quarterlyDilutedAverageShares),
         "trailingShares",
       );
-    } else if (type === "trailingBasicAverageShares") {
+    } else if (type === "quarterlyBasicAverageShares") {
       applyRowsToSnapshots(
         snapshotMap,
-        preferTTMRows(parseTimeseriesRows(item?.trailingBasicAverageShares)),
+        pickQuarterlyRows(item?.quarterlyBasicAverageShares),
         "trailingShares",
         true,
       );
@@ -348,7 +439,7 @@ serve(async (req) => {
       await Promise.all(
         uniqueTickers.map(async (ticker: string) => {
           try {
-            const tsUrl = `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=trailingPeRatio,trailingDilutedEPS,trailingBasicEPS,trailingFreeCashFlow,trailingTotalRevenue,trailingDilutedAverageShares,trailingBasicAverageShares&period1=${period1}&period2=${period2}`;
+            const tsUrl = `https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ticker)}?symbol=${encodeURIComponent(ticker)}&type=quarterlyDilutedEPS,quarterlyBasicEPS,quarterlyFreeCashFlow,quarterlyTotalRevenue,quarterlyDilutedAverageShares,quarterlyBasicAverageShares&period1=${period1}&period2=${period2}`;
             const tsResp = await fetch(tsUrl, {
               headers: YF_HEADERS,
               signal: AbortSignal.timeout(7000),
