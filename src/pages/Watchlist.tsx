@@ -449,20 +449,6 @@ async function fetchAllQuotes(tickers: string[]): Promise<Record<string, TickerQ
 }
 
 async function searchTickers(query: string): Promise<SearchResult[]> {
-  if (import.meta.env.DEV) {
-    try {
-      const resp = await fetch(`/api/yfinance/search?q=${encodeURIComponent(query)}`, {
-        signal: AbortSignal.timeout(5000),
-        headers: { Accept: "application/json" },
-      });
-
-      if (!resp.ok) return [];
-      return await resp.json();
-    } catch {
-      return [];
-    }
-  }
-
   try {
     const { data, error } = await supabase.functions.invoke("search-tickers", {
       body: { query },

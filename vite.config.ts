@@ -12,11 +12,6 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
     proxy: {
-      "/api/yfinance": {
-        target: "http://localhost:5001",
-        changeOrigin: true,
-        rewrite: (path: string) => path.replace(/^\/api\/yfinance/, ""),
-      },
       "/api/yf": {
         target: "https://query1.finance.yahoo.com",
         changeOrigin: true,
