@@ -243,31 +243,42 @@ export function useHistoricalPrices(tickers: string[], range = "5y", interval = 
         }
       }
 
-      // 2) Edge fallback for any missing tickers
+      // 2) Edge fallback for any missing tickers — batched to avoid timeouts
       const missingTickers = isProd
         ? sortedTickers
         : sortedTickers.filter((ticker) => !results[ticker]);
       if (missingTickers.length > 0) {
-        const { data, error } = await supabase.functions.invoke("fetch-history", {
-          body: { tickers: missingTickers, range: safeRangeForEdge, interval },
-        });
-
-        if (error) {
-          console.error("Edge function error:", error);
-          return results;
+        const EDGE_BATCH = 10; // keep each edge call small enough to finish within timeout
+        const batches: string[][] = [];
+        for (let i = 0; i < missingTickers.length; i += EDGE_BATCH) {
+          batches.push(missingTickers.slice(i, i + EDGE_BATCH));
         }
-
-        const raw = (data?.results || {}) as Record<
-          string,
-          { error?: string; history?: HistoricalPrice[]; symbol?: string; currency?: string }
-        >;
-        for (const [ticker, info] of Object.entries(raw)) {
-          if (info.error || !Array.isArray(info.history) || results[ticker]) continue;
-          results[ticker] = {
-            symbol: info.symbol || ticker,
-            currency: info.currency || "USD",
-            history: info.history,
-          };
+        // Run up to 3 batches in parallel to speed things up
+        const PARALLEL = 3;
+        for (let b = 0; b < batches.length; b += PARALLEL) {
+          const chunk = batches.slice(b, b + PARALLEL);
+          const responses = await Promise.allSettled(
+            chunk.map((batch) =>
+              supabase.functions.invoke("fetch-history", {
+                body: { tickers: batch, range: safeRangeForEdge, interval },
+              })
+            )
+          );
+          for (const res of responses) {
+            if (res.status !== "fulfilled" || res.value.error) continue;
+            const raw = (res.value.data?.results || {}) as Record<
+              string,
+              { error?: string; history?: HistoricalPrice[]; symbol?: string; currency?: string }
+            >;
+            for (const [ticker, info] of Object.entries(raw)) {
+              if (info.error || !Array.isArray(info.history) || results[ticker]) continue;
+              results[ticker] = {
+                symbol: info.symbol || ticker,
+                currency: info.currency || "USD",
+                history: info.history,
+              };
+            }
+          }
         }
       }
 
